@@ -55,6 +55,8 @@ public static class ContentTypeExtensions
         };
     }
 
+    public static string MimeType(this ContentType contentType) => contentType.ToMimeType();
+
     public static string ToMimeType(this ContentType contentType) => contentType switch
     {
         ContentType.XHtml => "application/xhtml+xml",

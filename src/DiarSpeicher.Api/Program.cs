@@ -1,3 +1,4 @@
+using DiarSpeicher.Api.Endpoints;
 using DiarSpeicher.Api.Middleware;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Background;
@@ -5,6 +6,7 @@ using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
+using DiarSpeicher.Infrastructure.Opds;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,6 +26,9 @@ builder.Services.AddSingleton<IBookProcessor, EpubBookProcessor>();
 builder.Services.AddSingleton<ICompositeBookProcessor, CompositeBookProcessor>();
 builder.Services.AddSingleton<IThumbnailService, ThumbnailService>();
 
+// OPDS v1.2 & Media Streaming Service
+builder.Services.AddScoped<IOpdsService, OpdsService>();
+
 // Filesystem Scanner & Background Worker
 builder.Services.AddSingleton<IDirectoryScanner, DirectoryScanner>();
 builder.Services.AddScoped<ILibraryScannerService, LibraryScannerService>();
@@ -41,6 +46,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseGatewayIdentity();
+app.UseOpdsAuth();
 
 app.MapGet("/health", () => Results.Ok(new
 {
@@ -60,4 +66,7 @@ app.MapPost("/api/libraries/{id}/scan", async (string id, IScannerQueue queue) =
     });
 });
 
+app.MapOpdsEndpoints();
+
 await app.RunAsync();
+
