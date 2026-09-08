@@ -1,4 +1,4 @@
-using System.Xml.Linq;
+﻿using System.Xml.Linq;
 using DiarSpeicher.Core.Filesystem;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Metadata;
@@ -31,6 +31,7 @@ public static class ComicInfoParser
             metadata.Notes = GetElementValue(root, "Notes");
             metadata.Genre = GetElementValue(root, "Genre");
             metadata.Publisher = GetElementValue(root, "Publisher");
+            metadata.FrontCoverIndex = ParseFrontCoverIndex(root);
 
             if (double.TryParse(GetElementValue(root, "Number"), out var num))
             {
@@ -91,6 +92,36 @@ public static class ComicInfoParser
     private static string? GetElementValue(XElement root, string elementName)
     {
         return root.Element(elementName)?.Value?.Trim();
+    }
+
+    /// <summary>
+    /// Reads the &lt;Pages&gt; block for the entry marked Type="FrontCover". The Image
+    /// attribute is the zero-based position of the page inside the archive, which is what
+    /// the caller indexes with once the entries are sorted.
+    /// </summary>
+    private static int? ParseFrontCoverIndex(XElement root)
+    {
+        var pages = root.Element("Pages");
+        if (pages is null)
+        {
+            return null;
+        }
+
+        foreach (var page in pages.Elements("Page"))
+        {
+            var type = page.Attribute("Type")?.Value;
+            if (!string.Equals(type, "FrontCover", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (int.TryParse(page.Attribute("Image")?.Value, out var index) && index >= 0)
+            {
+                return index;
+            }
+        }
+
+        return null;
     }
 
     public static int? ParseAgeRating(string rating)

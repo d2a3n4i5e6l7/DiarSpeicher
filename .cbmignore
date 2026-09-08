@@ -1,0 +1,23 @@
+# Rust reference implementation: read as documentation, never part of this codebase's graph.
+stump/
+
+# .NET build output. Excluded via .gitignore as well, but stated here so the index does not
+# depend on the ignore file staying that way: the .d.ts-equivalent artefacts under these
+# directories fake references and break dead-code analysis.
+**/bin/
+**/obj/
+
+# Project and solution files: MSBuild plumbing, no call graph.
+*.csproj
+*.slnx
+*.sln
+*.props
+*.targets
+
+# Configuration values indexed as Variable nodes, which crowd out real symbols.
+**/appsettings*.json
+**/Properties/launchSettings.json
+
+# EF Core scaffolding: generated from the model, thousands of lines that drown the entities
+# they mirror. The DbContext is the source of truth.
+**/Migrations/

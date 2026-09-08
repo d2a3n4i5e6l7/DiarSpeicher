@@ -21,6 +21,22 @@ public interface IBookProcessor
     Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Picks which sorted image entry is the cover. ComicInfo.xml can declare it with
+/// Type="FrontCover", and that beats guessing: the cover is not always the first image once
+/// the entries are sorted by name. Falls back to the first page when the file declares
+/// nothing, or when the declared index is outside the archive.
+/// </summary>
+internal static class CoverSelection
+{
+    public static int SelectCoverIndex(ExtractedMetadata? metadata, int pageCount)
+    {
+        var declared = metadata?.FrontCoverIndex;
+
+        return declared is >= 0 && declared < pageCount ? declared.Value : 0;
+    }
+}
+
 public class ZipBookProcessor : IBookProcessor
 {
     public bool CanProcess(string extension)
@@ -71,7 +87,7 @@ public class ZipBookProcessor : IBookProcessor
 
             if (includeCover && imageEntries.Count > 0)
             {
-                cover = await ReadEntryAsync(imageEntries[0], cancellationToken);
+                cover = await ReadEntryAsync(imageEntries[CoverSelection.SelectCoverIndex(metadata, imageEntries.Count)], cancellationToken);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -188,7 +204,7 @@ public class RarBookProcessor : IBookProcessor
 
             if (includeCover && imageEntries.Count > 0)
             {
-                cover = await ReadEntryAsync(imageEntries[0], cancellationToken);
+                cover = await ReadEntryAsync(imageEntries[CoverSelection.SelectCoverIndex(metadata, imageEntries.Count)], cancellationToken);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

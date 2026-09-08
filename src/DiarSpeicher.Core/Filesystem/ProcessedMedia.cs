@@ -24,6 +24,13 @@ public record ExtractedMetadata
     public string? Letterers { get; set; }
     public string? CoverArtists { get; set; }
     public string? Editors { get; set; }
+
+    /// <summary>
+    /// Zero-based index of the page ComicInfo.xml marks as Type="FrontCover". The cover is
+    /// not always the alphabetically first image, so when the file declares one it is used
+    /// instead of guessing from the sort order.
+    /// </summary>
+    public int? FrontCoverIndex { get; set; }
 }
 
 public record ProcessedBook
