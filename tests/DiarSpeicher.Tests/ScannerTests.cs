@@ -3,6 +3,8 @@ using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem;
+using DiarSpeicher.Infrastructure.Filesystem.Processors;
+using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -120,7 +122,12 @@ public class ScannerTests : IDisposable
         Directory.CreateDirectory(seriesDir);
 
         var bookPath = Path.Combine(seriesDir, "vol01.cbz");
-        await File.WriteAllTextAsync(bookPath, "cbz dummy data");
+        using (var zip = System.IO.Compression.ZipFile.Open(bookPath, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            var e = zip.CreateEntry("01.jpg");
+            using var s = e.Open();
+            s.Write([0xFF, 0xD8, 0xFF, 0xE0]);
+        }
 
         var libraryId = Guid.NewGuid().ToString();
         var library = new Library
@@ -139,7 +146,20 @@ public class ScannerTests : IDisposable
         await dbContext.SaveChangesAsync();
 
         var scanner = new DirectoryScanner();
-        var scannerService = new LibraryScannerService(dbContext, scanner, NullLogger<LibraryScannerService>.Instance);
+        var processors = new IBookProcessor[]
+        {
+            new ZipBookProcessor(),
+            new RarBookProcessor(),
+            new EpubBookProcessor()
+        };
+        var compositeProcessor = new CompositeBookProcessor(processors);
+        var thumbnailService = new ThumbnailService(compositeProcessor, NullLogger<ThumbnailService>.Instance);
+        var scannerService = new LibraryScannerService(
+            dbContext,
+            scanner,
+            compositeProcessor,
+            thumbnailService,
+            NullLogger<LibraryScannerService>.Instance);
 
         // Act 1: Initial scan (Discovery)
         var report1 = await scannerService.ScanLibraryAsync(libraryId);
@@ -170,7 +190,12 @@ public class ScannerTests : IDisposable
         Assert.Equal(FileStatus.Missing, missingMedia.Status);
 
         // Act 3: Restore file on disk and rescan (Recovered)
-        await File.WriteAllTextAsync(bookPath, "restored cbz data");
+        using (var zip = System.IO.Compression.ZipFile.Open(bookPath, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            var e = zip.CreateEntry("01.jpg");
+            using var s = e.Open();
+            s.Write([0xFF, 0xD8, 0xFF, 0xE0]);
+        }
         var report3 = await scannerService.ScanLibraryAsync(libraryId);
 
         // Assert 3

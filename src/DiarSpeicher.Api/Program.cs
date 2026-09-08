@@ -3,6 +3,8 @@ using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem;
+using DiarSpeicher.Infrastructure.Filesystem.Processors;
+using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,6 +16,13 @@ builder.Services.AddDbContext<DiarSpeicherDbContext>(options =>
 {
     options.UseSqlite(connectionString);
 });
+
+// Book Processing & Extraction
+builder.Services.AddSingleton<IBookProcessor, ZipBookProcessor>();
+builder.Services.AddSingleton<IBookProcessor, RarBookProcessor>();
+builder.Services.AddSingleton<IBookProcessor, EpubBookProcessor>();
+builder.Services.AddSingleton<ICompositeBookProcessor, CompositeBookProcessor>();
+builder.Services.AddSingleton<IThumbnailService, ThumbnailService>();
 
 // Filesystem Scanner & Background Worker
 builder.Services.AddSingleton<IDirectoryScanner, DirectoryScanner>();

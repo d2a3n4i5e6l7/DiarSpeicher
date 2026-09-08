@@ -23,63 +23,8 @@ public class DirectoryScanner : IDirectoryScanner
         }
 
         var normalizedLibPath = Path.GetFullPath(libraryPath);
-        var validEntries = new List<string>();
-        var ignoredEntries = new List<string>();
-
-        // We include the library directory itself (min_depth: 0 in Stump)
-        // If library has direct media, the library directory itself is treated as a series
-        var dirsToEvaluate = new List<string> { normalizedLibPath };
-
-        if (isCollectionBased)
-        {
-            // Only top-level subdirectories (depth 1)
-            try
-            {
-                dirsToEvaluate.AddRange(Directory.EnumerateDirectories(normalizedLibPath, "*", SearchOption.TopDirectoryOnly));
-            }
-            catch (Exception)
-            {
-                // Inaccessible
-            }
-        }
-        else
-        {
-            // Bottom-up: all subdirectories recursively
-            try
-            {
-                dirsToEvaluate.AddRange(Directory.EnumerateDirectories(normalizedLibPath, "*", SearchOption.AllDirectories));
-            }
-            catch (Exception)
-            {
-                // Inaccessible
-            }
-        }
-
-        foreach (var dir in dirsToEvaluate)
-        {
-            var normalizedDir = Path.GetFullPath(dir);
-            if (PathUtils.IsHiddenFile(normalizedDir))
-            {
-                ignoredEntries.Add(normalizedDir);
-                continue;
-            }
-
-            var isRoot = string.Equals(normalizedDir, normalizedLibPath, StringComparison.OrdinalIgnoreCase);
-            var checkDeep = isCollectionBased && !isRoot;
-
-            bool isValid = checkDeep
-                ? PathUtils.DirHasMediaDeep(normalizedDir)
-                : PathUtils.DirHasMedia(normalizedDir);
-
-            if (isValid)
-            {
-                validEntries.Add(normalizedDir);
-            }
-            else
-            {
-                ignoredEntries.Add(normalizedDir);
-            }
-        }
+        var dirsToEvaluate = DiscoverDirectories(normalizedLibPath, isCollectionBased);
+        var (validEntries, ignoredEntries) = ClassifyDirectories(dirsToEvaluate, normalizedLibPath, isCollectionBased);
 
         var existingMap = existingSeries.ToDictionary(s => Path.GetFullPath(s.Path), s => s, StringComparer.OrdinalIgnoreCase);
 
@@ -95,8 +40,7 @@ public class DirectoryScanner : IDirectoryScanner
 
         // Existing series in ignored entries (e.g. empty directories that previously had books) are still visited
         var existingEmptySeries = ignoredEntries
-            .Where(p => existingMap.ContainsKey(p))
-            .ToList();
+            .Where(p => existingMap.ContainsKey(p));
 
         var candidatesToVisitOrAdd = validEntries
             .Where(p => !missingSeries.Contains(p, StringComparer.OrdinalIgnoreCase))
@@ -240,9 +184,8 @@ public class DirectoryScanner : IDirectoryScanner
         // Process files in this directory
         try
         {
-            foreach (var file in dirInfo.EnumerateFiles())
+            foreach (var fullPath in dirInfo.EnumerateFiles().Select(f => f.FullName))
             {
-                var fullPath = file.FullName;
                 if (PathUtils.IsDefaultIgnored(fullPath))
                 {
                     ignoredFiles++;
@@ -261,15 +204,15 @@ public class DirectoryScanner : IDirectoryScanner
         // Process subdirectories
         try
         {
-            foreach (var subDir in dirInfo.EnumerateDirectories())
+            foreach (var subDirFullName in dirInfo.EnumerateDirectories().Select(d => d.FullName))
             {
-                if (PathUtils.IsHiddenFile(subDir.FullName))
+                if (PathUtils.IsHiddenFile(subDirFullName))
                 {
                     continue;
                 }
 
                 TraverseSeriesDirectories(
-                    subDir.FullName,
+                    subDirFullName,
                     rootDir,
                     cachedMtimes,
                     observedMtimes,
@@ -281,5 +224,59 @@ public class DirectoryScanner : IDirectoryScanner
         {
             // Inaccessible
         }
+    }
+
+    private static List<string> DiscoverDirectories(string normalizedLibPath, bool isCollectionBased)
+    {
+        var dirsToEvaluate = new List<string> { normalizedLibPath };
+        var searchOption = isCollectionBased ? SearchOption.TopDirectoryOnly : SearchOption.AllDirectories;
+
+        try
+        {
+            dirsToEvaluate.AddRange(Directory.EnumerateDirectories(normalizedLibPath, "*", searchOption));
+        }
+        catch (Exception)
+        {
+            // Inaccessible
+        }
+
+        return dirsToEvaluate;
+    }
+
+    private static (List<string> ValidEntries, List<string> IgnoredEntries) ClassifyDirectories(
+        List<string> dirsToEvaluate,
+        string normalizedLibPath,
+        bool isCollectionBased)
+    {
+        var validEntries = new List<string>();
+        var ignoredEntries = new List<string>();
+
+        foreach (var dir in dirsToEvaluate)
+        {
+            var normalizedDir = Path.GetFullPath(dir);
+            if (PathUtils.IsHiddenFile(normalizedDir))
+            {
+                ignoredEntries.Add(normalizedDir);
+                continue;
+            }
+
+            var isRoot = string.Equals(normalizedDir, normalizedLibPath, StringComparison.OrdinalIgnoreCase);
+            var checkDeep = isCollectionBased && !isRoot;
+
+            bool isValid = checkDeep
+                ? PathUtils.DirHasMediaDeep(normalizedDir)
+                : PathUtils.DirHasMedia(normalizedDir);
+
+            if (isValid)
+            {
+                validEntries.Add(normalizedDir);
+            }
+            else
+            {
+                ignoredEntries.Add(normalizedDir);
+            }
+        }
+
+        return (validEntries, ignoredEntries);
     }
 }
