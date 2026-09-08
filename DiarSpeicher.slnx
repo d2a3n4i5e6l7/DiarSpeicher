@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DiarSpeicher.Api/DiarSpeicher.Api.csproj" />
+    <Project Path="src/DiarSpeicher.Core/DiarSpeicher.Core.csproj" />
+    <Project Path="src/DiarSpeicher.Infrastructure/DiarSpeicher.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DiarSpeicher.Tests/DiarSpeicher.Tests.csproj" />
+  </Folder>
+</Solution>

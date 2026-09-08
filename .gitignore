@@ -1,0 +1,55 @@
+# Stump Rust reference directory
+stump/
+
+# .NET Build artifacts
+**/bin/
+**/obj/
+[Bb]in/
+[Oo]bj/
+
+# NuGet Packages ("el npm de .NET")
+*.nupkg
+*.snupkg
+**/packages/
+!**/packages/build/
+project.lock.json
+project.assets.json
+*.nuget.props
+*.nuget.targets
+
+# Visual Studio & IDEs
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+
+# JetBrains Rider / ReSharper
+.idea/
+*.DotSettings.user
+
+# Test Results & Coverage
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.visualstudio.g.props
+*.visualstudio.g.targets
+
+# Databases (SQLite WAL)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Logs & Temporary files
+*.log
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+tvboxHealth_*.txt
