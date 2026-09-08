@@ -1,0 +1,499 @@
+﻿using System.IO.Compression;
+using System.Xml.Linq;
+using DiarSpeicher.Core.Domain.Entities;
+using DiarSpeicher.Core.Domain.Enums;
+using DiarSpeicher.Core.Domain.Models;
+using DiarSpeicher.Core.Domain.StumpV2;
+using DiarSpeicher.Core.Filesystem;
+using DiarSpeicher.Infrastructure.Background;
+using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Data.Extensions;
+using DiarSpeicher.Infrastructure.Filesystem;
+using DiarSpeicher.Infrastructure.Filesystem.Processors;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace DiarSpeicher.Infrastructure.StumpV2;
+
+public sealed class StumpV2Service : IStumpV2Service
+{
+    private readonly DiarSpeicherDbContext _db;
+    private readonly ICompositeBookProcessor _bookProcessor;
+    private readonly IScannerQueue _scannerQueue;
+    private readonly ILogger<StumpV2Service> _logger;
+
+    public StumpV2Service(
+        DiarSpeicherDbContext db,
+        ICompositeBookProcessor bookProcessor,
+        IScannerQueue scannerQueue,
+        ILogger<StumpV2Service> logger)
+    {
+        _db = db;
+        _bookProcessor = bookProcessor;
+        _scannerQueue = scannerQueue;
+        _logger = logger;
+    }
+
+    public async Task<StumpPageResponse<StumpMediaDto>> GetMediaAsync(AuthUser user, int page, int pageSize, CancellationToken ct = default)
+    {
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        page = Math.Max(0, page);
+
+        var query = _db.Media.ForUser(user)
+            .Include(m => m.Metadata)
+            .OrderBy(m => m.Id);
+
+        var total = await query.CountAsync(ct);
+        var mediaList = await query.Skip(page * pageSize).Take(pageSize).ToListAsync(ct);
+
+        var mediaIds = mediaList.Select(m => m.Id).ToList();
+        var sessions = await _db.ReadingSessions
+            .Where(s => s.UserId == user.Id && mediaIds.Contains(s.MediaId))
+            .ToListAsync(ct);
+
+        var sessionMap = sessions
+            .GroupBy(s => s.MediaId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.Id).First());
+
+        var dtos = mediaList.Select(m => ToMediaDto(m, sessionMap.GetValueOrDefault(m.Id))).ToList();
+
+        return new StumpPageResponse<StumpMediaDto>
+        {
+            Data = dtos,
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+            TotalPages = (int)Math.Ceiling(total / (double)pageSize)
+        };
+    }
+
+    public async Task<StumpMediaDto?> GetMediaByIdAsync(AuthUser user, string id, CancellationToken ct = default)
+    {
+        var media = await _db.Media.ForUser(user)
+            .Include(m => m.Metadata)
+            .FirstOrDefaultAsync(m => m.Id == id, ct);
+
+        if (media == null) return null;
+
+        var session = await _db.ReadingSessions
+            .Where(s => s.UserId == user.Id && s.MediaId == id)
+            .OrderByDescending(s => s.Id)
+            .FirstOrDefaultAsync(ct);
+
+        return ToMediaDto(media, session);
+    }
+
+    public async Task<List<StumpMediaDto>> GetKeepReadingAsync(AuthUser user, CancellationToken ct = default)
+    {
+        var rawSessions = await _db.ReadingSessions
+            .Where(s => s.UserId == user.Id && s.Status == ReadingStatus.Reading)
+            .ToListAsync(ct);
+
+        var sessions = rawSessions
+            .OrderByDescending(s => s.UpdatedAt ?? s.CreatedAt)
+            .ToList();
+
+        var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
+
+        var mediaList = await _db.Media.ForUser(user)
+            .Include(m => m.Metadata)
+            .Where(m => mediaIds.Contains(m.Id))
+            .ToListAsync(ct);
+
+        var mediaMap = mediaList.ToDictionary(m => m.Id);
+        var sessionMap = sessions
+            .GroupBy(s => s.MediaId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var result = new List<StumpMediaDto>();
+        foreach (var id in mediaIds)
+        {
+            if (mediaMap.TryGetValue(id, out var media))
+            {
+                result.Add(ToMediaDto(media, sessionMap.GetValueOrDefault(id)));
+            }
+        }
+
+        return result;
+    }
+
+    public async Task<StumpPageResponse<StumpSeriesDto>> GetSeriesAsync(AuthUser user, string? libraryId, int page, int pageSize, CancellationToken ct = default)
+    {
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        page = Math.Max(0, page);
+
+        var query = _db.Series.ForUser(user).Include(s => s.Metadata).Include(s => s.Media).AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(libraryId))
+        {
+            query = query.Where(s => s.LibraryId == libraryId);
+        }
+
+        query = query.OrderBy(s => s.Name);
+
+        var total = await query.CountAsync(ct);
+        var seriesList = await query.Skip(page * pageSize).Take(pageSize).ToListAsync(ct);
+
+        var dtos = seriesList.Select(ToSeriesDto).ToList();
+
+        return new StumpPageResponse<StumpSeriesDto>
+        {
+            Data = dtos,
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+            TotalPages = (int)Math.Ceiling(total / (double)pageSize)
+        };
+    }
+
+    public async Task<StumpSeriesDto?> GetSeriesByIdAsync(AuthUser user, string id, CancellationToken ct = default)
+    {
+        var series = await _db.Series.ForUser(user)
+            .Include(s => s.Metadata)
+            .Include(s => s.Media)
+            .FirstOrDefaultAsync(s => s.Id == id, ct);
+
+        return series == null ? null : ToSeriesDto(series);
+    }
+
+    public async Task<StumpPageResponse<StumpMediaDto>> GetSeriesMediaAsync(AuthUser user, string seriesId, int page, int pageSize, CancellationToken ct = default)
+    {
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        page = Math.Max(0, page);
+
+        var query = _db.Media.ForUser(user)
+            .Include(m => m.Metadata)
+            .Where(m => m.SeriesId == seriesId)
+            .OrderBy(m => m.Name);
+
+        var total = await query.CountAsync(ct);
+        var mediaList = await query.Skip(page * pageSize).Take(pageSize).ToListAsync(ct);
+
+        var mediaIds = mediaList.Select(m => m.Id).ToList();
+        var sessions = await _db.ReadingSessions
+            .Where(s => s.UserId == user.Id && mediaIds.Contains(s.MediaId))
+            .ToListAsync(ct);
+
+        var sessionMap = sessions
+            .GroupBy(s => s.MediaId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.Id).First());
+
+        var dtos = mediaList.Select(m => ToMediaDto(m, sessionMap.GetValueOrDefault(m.Id))).ToList();
+
+        return new StumpPageResponse<StumpMediaDto>
+        {
+            Data = dtos,
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+            TotalPages = (int)Math.Ceiling(total / (double)pageSize)
+        };
+    }
+
+    public async Task<List<StumpLibraryDto>> GetLibrariesAsync(AuthUser user, CancellationToken ct = default)
+    {
+        var libraries = await _db.Libraries.ForUser(user)
+            .Include(l => l.Series)
+            .OrderBy(l => l.Name)
+            .ToListAsync(ct);
+
+        return libraries.Select(l => new StumpLibraryDto
+        {
+            Id = l.Id,
+            Name = l.Name,
+            Path = l.Path,
+            Status = l.Status.ToString(),
+            SeriesCount = l.Series.Count
+        }).ToList();
+    }
+
+    public async Task<StumpLibraryDto?> GetLibraryByIdAsync(AuthUser user, string id, CancellationToken ct = default)
+    {
+        var lib = await _db.Libraries.ForUser(user)
+            .Include(l => l.Series)
+            .FirstOrDefaultAsync(l => l.Id == id, ct);
+
+        if (lib == null) return null;
+
+        return new StumpLibraryDto
+        {
+            Id = lib.Id,
+            Name = lib.Name,
+            Path = lib.Path,
+            Status = lib.Status.ToString(),
+            SeriesCount = lib.Series.Count
+        };
+    }
+
+    public async Task<bool> TriggerLibraryScanAsync(AuthUser user, string libraryId, CancellationToken ct = default)
+    {
+        var lib = await _db.Libraries.ForUser(user)
+            .FirstOrDefaultAsync(l => l.Id == libraryId, ct);
+
+        if (lib == null)
+        {
+            return false;
+        }
+
+        await _scannerQueue.QueueScanAsync(new ScanRequest(libraryId), ct);
+        _logger.LogInformation("Enqueued scan task for library {LibraryId} by user {UserId}", libraryId, user.Id);
+        return true;
+    }
+
+    public async Task<ExtractedPage?> GetMediaPageAsync(AuthUser user, string mediaId, int page, CancellationToken ct = default)
+    {
+        var media = await _db.Media.ForUser(user)
+            .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
+
+        if (media == null || !File.Exists(media.Path)) return null;
+
+        var extracted = await _bookProcessor.ExtractPageAsync(media.Path, page, ct);
+
+        if (extracted != null)
+        {
+            await TrackReadingProgressAsync(user.Id, mediaId, page, media.Pages, ct);
+        }
+
+        return extracted;
+    }
+
+    public async Task<(string Path, string ContentType)?> GetMediaFileAsync(AuthUser user, string mediaId, CancellationToken ct = default)
+    {
+        var media = await _db.Media.ForUser(user)
+            .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
+
+        if (media == null || !File.Exists(media.Path)) return null;
+
+        return (media.Path, ContentTypeExtensions.FromExtension(media.Extension).ToMimeType());
+    }
+
+    public async Task<bool> UpdateProgressAsync(AuthUser user, string mediaId, StumpUpdateProgressInput input, CancellationToken ct = default)
+    {
+        var media = await _db.Media.ForUser(user)
+            .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
+
+        if (media == null) return false;
+
+        var session = await _db.ReadingSessions
+            .Where(s => s.UserId == user.Id && s.MediaId == mediaId)
+            .OrderByDescending(s => s.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (session == null)
+        {
+            session = new ReadingSession
+            {
+                UserId = user.Id,
+                MediaId = mediaId,
+                StartPage = 1,
+                StartPercentage = 0,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            _db.ReadingSessions.Add(session);
+        }
+
+        session.EndPage = input.Page;
+        if (input.Percentage.HasValue)
+        {
+            session.EndPercentage = (decimal)input.Percentage.Value;
+        }
+        else if (media.Pages > 0)
+        {
+            session.EndPercentage = Math.Clamp((decimal)input.Page / media.Pages, 0m, 1m);
+        }
+
+        var isCompleted = input.IsCompleted ?? (session.EndPercentage >= 1.0m || input.Page >= media.Pages);
+        session.Status = isCompleted ? ReadingStatus.Finished : ReadingStatus.Reading;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<StumpEpubTocDto?> GetEpubTocAsync(AuthUser user, string mediaId, CancellationToken ct = default)
+    {
+        var media = await _db.Media.ForUser(user)
+            .Include(m => m.Metadata)
+            .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
+
+        if (media == null || !File.Exists(media.Path)) return null;
+
+        var ext = media.Extension.TrimStart('.').ToLowerInvariant();
+        if (ext != "epub") return null;
+
+        await using var fileStream = new FileStream(media.Path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
+        await using var archive = await ZipArchive.CreateAsync(fileStream, ZipArchiveMode.Read, leaveOpen: false, entryNameEncoding: null, ct);
+        var tocItems = new List<StumpEpubTocItem>();
+
+        var ncxEntry = archive.Entries.FirstOrDefault(e => e.FullName.EndsWith(".ncx", StringComparison.OrdinalIgnoreCase));
+        if (ncxEntry != null)
+        {
+            await using var stream = await ncxEntry.OpenAsync(ct);
+            var doc = await XDocument.LoadAsync(stream, LoadOptions.None, ct);
+            var navPoints = doc.Descendants().Where(e => e.Name.LocalName == "navPoint");
+
+            foreach (var point in navPoints)
+            {
+                var label = point.Descendants().FirstOrDefault(e => e.Name.LocalName == "text")?.Value.Trim();
+                var contentSrc = point.Descendants().FirstOrDefault(e => e.Name.LocalName == "content")?.Attribute("src")?.Value;
+
+                if (!string.IsNullOrEmpty(label) && !string.IsNullOrEmpty(contentSrc))
+                {
+                    tocItems.Add(new StumpEpubTocItem { Title = label, Href = contentSrc });
+                }
+            }
+        }
+
+        if (tocItems.Count == 0)
+        {
+            var htmlEntries = archive.Entries
+                .Where(e => e.FullName.EndsWith(".xhtml", StringComparison.OrdinalIgnoreCase) || e.FullName.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(e => e.FullName, NaturalSortComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            for (int i = 0; i < htmlEntries.Count; i++)
+            {
+                tocItems.Add(new StumpEpubTocItem { Title = $"Section {i + 1}", Href = htmlEntries[i].FullName });
+            }
+        }
+
+        return new StumpEpubTocDto
+        {
+            MediaId = media.Id,
+            Title = media.Metadata?.Title ?? media.Name,
+            Items = tocItems
+        };
+    }
+
+    public async Task<(byte[] Data, string ContentType)?> GetEpubResourceAsync(AuthUser user, string mediaId, string resourcePath, CancellationToken ct = default)
+    {
+        var media = await _db.Media.ForUser(user)
+            .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
+
+        if (media == null || !File.Exists(media.Path)) return null;
+
+        var cleanPath = resourcePath.TrimStart('/').Split('#')[0];
+
+        await using var fileStream = new FileStream(media.Path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
+        await using var archive = await ZipArchive.CreateAsync(fileStream, ZipArchiveMode.Read, leaveOpen: false, entryNameEncoding: null, ct);
+        var entry = archive.Entries.FirstOrDefault(e => e.FullName.Equals(cleanPath, StringComparison.OrdinalIgnoreCase))
+            ?? archive.Entries.FirstOrDefault(e => e.Name.Equals(Path.GetFileName(cleanPath), StringComparison.OrdinalIgnoreCase));
+
+        if (entry == null) return null;
+
+        await using var stream = await entry.OpenAsync(ct);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, ct);
+
+        var ext = Path.GetExtension(entry.FullName).ToLowerInvariant();
+        var contentType = ext switch
+        {
+            ".html" or ".xhtml" => "application/xhtml+xml",
+            ".css" => "text/css",
+            ".js" => "application/javascript",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".svg" => "image/svg+xml",
+            ".woff" => "font/woff",
+            ".woff2" => "font/woff2",
+            ".ttf" => "font/ttf",
+            ".ncx" => "application/x-dtbncx+xml",
+            ".opf" => "application/oebps-package+xml",
+            _ => "application/octet-stream"
+        };
+
+        return (ms.ToArray(), contentType);
+    }
+
+    public async Task<StumpSystemStatusDto> GetSystemStatusAsync(CancellationToken ct = default)
+    {
+        var userCount = await _db.Users.CountAsync(ct);
+        return new StumpSystemStatusDto
+        {
+            Status = "OK",
+            Semver = "0.1.0",
+            IsClaimed = userCount > 0
+        };
+    }
+
+    private async Task TrackReadingProgressAsync(string userId, string mediaId, int page, int totalPages, CancellationToken ct)
+    {
+        try
+        {
+            var session = await _db.ReadingSessions
+                .Where(s => s.UserId == userId && s.MediaId == mediaId)
+                .OrderByDescending(s => s.Id)
+                .FirstOrDefaultAsync(ct);
+
+            if (session == null)
+            {
+                session = new ReadingSession
+                {
+                    UserId = userId,
+                    MediaId = mediaId,
+                    StartPage = page,
+                    StartPercentage = totalPages > 0 ? Math.Clamp((decimal)page / totalPages, 0m, 1m) : 0,
+                    CreatedAt = DateTimeOffset.UtcNow
+                };
+                _db.ReadingSessions.Add(session);
+            }
+
+            session.EndPage = page;
+            session.EndPercentage = totalPages > 0 ? Math.Clamp((decimal)page / totalPages, 0m, 1m) : 0;
+            session.Status = (totalPages > 0 && page >= totalPages) ? ReadingStatus.Finished : ReadingStatus.Reading;
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update reading session for user {UserId}, media {MediaId}", userId, mediaId);
+        }
+    }
+
+    private static StumpMediaDto ToMediaDto(Media m, ReadingSession? session)
+    {
+        return new StumpMediaDto
+        {
+            Id = m.Id,
+            Name = m.Name,
+            Size = m.Size,
+            Extension = m.Extension,
+            Pages = m.Pages,
+            Status = m.Status.ToString(),
+            Hash = m.Hash,
+            KoreaderHash = m.KoreaderHash,
+            Path = m.Path,
+            SeriesId = m.SeriesId,
+            CreatedAt = m.CreatedAt,
+            CurrentPage = session?.EndPage,
+            IsCompleted = session?.Status == ReadingStatus.Finished,
+            Metadata = m.Metadata != null ? new StumpMediaMetadataDto
+            {
+                Title = m.Metadata.Title,
+                Summary = m.Metadata.Summary,
+                Writers = m.Metadata.Writers,
+                Genre = m.Metadata.Genres,
+                Publisher = m.Metadata.Publisher,
+                AgeRating = m.Metadata.AgeRating,
+                Number = (float?)m.Metadata.Number
+            } : null
+        };
+    }
+
+    private static StumpSeriesDto ToSeriesDto(Series s)
+    {
+        return new StumpSeriesDto
+        {
+            Id = s.Id,
+            Name = s.Name,
+            Path = s.Path,
+            Status = s.Status.ToString(),
+            LibraryId = s.LibraryId ?? string.Empty,
+            MediaCount = s.Media.Count,
+            Description = s.Description ?? s.Metadata?.Summary
+        };
+    }
+}

@@ -8,6 +8,8 @@ using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
 using DiarSpeicher.Infrastructure.Komga;
 using DiarSpeicher.Infrastructure.Opds;
+using DiarSpeicher.Infrastructure.StumpV2;
+using DiarSpeicher.Infrastructure.Sync;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -27,10 +29,15 @@ builder.Services.AddSingleton<IBookProcessor, EpubBookProcessor>();
 builder.Services.AddSingleton<ICompositeBookProcessor, CompositeBookProcessor>();
 builder.Services.AddSingleton<IThumbnailService, ThumbnailService>();
 
-// OPDS v1.2 & Media Streaming Service
+// OPDS v1.2, v2.0 & Komga Services
 builder.Services.AddScoped<IOpdsService, OpdsService>();
 builder.Services.AddScoped<IOpdsV2Service, OpdsV2Service>();
 builder.Services.AddScoped<IKomgaService, KomgaService>();
+
+// E-Reader Sync (KOReader & Kobo) and Stump API v2 Services
+builder.Services.AddScoped<IKoReaderService, KoReaderService>();
+builder.Services.AddScoped<IKoboService, KoboService>();
+builder.Services.AddScoped<IStumpV2Service, StumpV2Service>();
 
 // Filesystem Scanner & Background Worker
 builder.Services.AddSingleton<IDirectoryScanner, DirectoryScanner>();
@@ -72,6 +79,9 @@ app.MapPost("/api/libraries/{id}/scan", async (string id, IScannerQueue queue) =
 app.MapOpdsEndpoints();
 app.MapOpdsV2Endpoints();
 app.MapKomgaEndpoints();
+app.MapKoReaderEndpoints();
+app.MapKoboEndpoints();
+app.MapStumpV2Endpoints();
 
 await app.RunAsync();
 

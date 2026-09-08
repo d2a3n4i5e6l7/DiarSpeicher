@@ -22,7 +22,10 @@ public partial class OpdsAuthMiddleware
         var path = context.Request.Path.Value ?? string.Empty;
 
         if (!path.StartsWith("/opds", StringComparison.OrdinalIgnoreCase) &&
-            !path.StartsWith("/api/v1", StringComparison.OrdinalIgnoreCase))
+            !path.StartsWith("/api/v1", StringComparison.OrdinalIgnoreCase) &&
+            !path.StartsWith("/api/v2", StringComparison.OrdinalIgnoreCase) &&
+            !path.StartsWith("/koreader", StringComparison.OrdinalIgnoreCase) &&
+            !path.StartsWith("/kobo", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
             return;
@@ -75,7 +78,13 @@ public partial class OpdsAuthMiddleware
         var match = ApiKeyPathRegex.Match(path);
         if (match.Success)
         {
-            return match.Groups[1].Value;
+            for (int i = 1; i < match.Groups.Count; i++)
+            {
+                if (match.Groups[i].Success)
+                {
+                    return match.Groups[i].Value;
+                }
+            }
         }
 
         if (context.Request.Query.TryGetValue("api_key", out var qKey) && !string.IsNullOrWhiteSpace(qKey))
@@ -160,7 +169,7 @@ public partial class OpdsAuthMiddleware
         return true;
     }
 
-    [GeneratedRegex(@"^/opds/([^/]+)/v1\.2")]
+    [GeneratedRegex(@"^/(?:opds/([^/]+)/(?:v1\.2|v2\.0)|koreader/([^/]+)|kobo/([^/]+))")]
     private static partial Regex MyRegex();
 }
 

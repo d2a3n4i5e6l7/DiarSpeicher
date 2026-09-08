@@ -28,6 +28,10 @@ La documentación se encuentra organizada en dos fases independientes para permi
 6. **[07_catalogo_opds_v2_y_compatibilidad_komga.md](file:///home/diarmund/projects/DiarSpeicher/documentation/fase_1_backend/07_catalogo_opds_v2_y_compatibilidad_komga.md)**
    - Catálogo OPDS v2.0 (Readium JSON-LD / WebPub Manifest) con navegación, facetado y sincronización de progreso.
    - API REST compatible con Komga (`/api/v1/...`) con paginación Spring (`Page<T>`), páginas, miniaturas y tracking de lectura.
+7. **[08_sincronizacion_koreader_kobo_y_api_v2.md](file:///home/diarmund/projects/DiarSpeicher/documentation/fase_1_backend/08_sincronizacion_koreader_kobo_y_api_v2.md)**
+   - Protocolo de sincronización KOReader (`/koreader/{apiKey}/...`) basado en `koreader_hash`.
+   - Servidor de sincronización nativo Kobo (`/kobo/{apiKey}/...`) con inicialización, sincronización incremental y streaming EPUB.
+   - API REST v2 nativa de Stump (`/api/v2/...`) con streaming, encolado de escaneo y motor web de recursos y TOC para EPUBs.
 
 ---
 
