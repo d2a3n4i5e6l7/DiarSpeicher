@@ -204,6 +204,43 @@ public static class StumpV2Endpoints
             return result == null ? Results.NotFound() : Results.Ok(result);
         });
 
+        group.MapPost("/libraries", async (
+            [FromBody] StumpCreateLibraryInput input,
+            HttpContext httpContext,
+            [FromServices] IStumpV2Service service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            var result = await service.CreateLibraryAsync(user, input, ct);
+            return result == null ? Results.BadRequest("Could not create library") : Results.Created($"/api/v2/libraries/{result.Id}", result);
+        });
+
+        group.MapPost("/libraries/{id}/upload", async (
+            string id,
+            HttpContext httpContext,
+            [FromServices] IStumpV2Service service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            if (!httpContext.Request.HasFormContentType)
+                return Results.BadRequest("Expected multipart/form-data");
+
+            var form = await httpContext.Request.ReadFormAsync(ct);
+            var files = form.Files;
+            if (files.Count == 0)
+                return Results.BadRequest("No files provided");
+
+            var subpath = form["subpath"].ToString();
+            var uploadInputs = files.Select(f => new StumpUploadFileInput
+            {
+                FileName = f.FileName,
+                Content = f.OpenReadStream()
+            }).ToList();
+
+            var result = await service.UploadToLibraryAsync(user, id, subpath, uploadInputs, ct);
+            return result == null ? Results.BadRequest("Upload failed or invalid files") : Results.Ok(result);
+        }).DisableAntiforgery();
+
         group.MapPost("/libraries/{id}/scan", async (
             string id,
             HttpContext httpContext,

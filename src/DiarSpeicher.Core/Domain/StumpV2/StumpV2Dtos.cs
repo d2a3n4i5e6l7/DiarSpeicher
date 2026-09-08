@@ -193,3 +193,35 @@ public sealed class StumpSystemStatusDto
     [JsonPropertyName("isClaimed")]
     public bool IsClaimed { get; set; }
 }
+
+public sealed class StumpCreateLibraryInput
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = string.Empty;
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+}
+
+public sealed class StumpUploadResponseDto
+{
+    [JsonPropertyName("uploadedCount")]
+    public int UploadedCount { get; set; }
+
+    [JsonPropertyName("files")]
+    public List<string> Files { get; set; } = new();
+
+    [JsonPropertyName("scanJobTriggered")]
+    public bool ScanJobTriggered { get; set; }
+}
+
+public sealed class StumpUploadFileInput
+{
+    public string FileName { get; set; } = string.Empty;
+    public Stream Content { get; set; } = Stream.Null;
+}
+
+

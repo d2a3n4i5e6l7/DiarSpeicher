@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Xml.Linq;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
@@ -405,6 +405,104 @@ public sealed class StumpV2Service : IStumpV2Service
         };
 
         return (ms.ToArray(), contentType);
+    }
+
+    public async Task<StumpLibraryDto?> CreateLibraryAsync(AuthUser user, StumpCreateLibraryInput input, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Path))
+            return null;
+
+        var fullPath = Path.GetFullPath(input.Path);
+        if (!Directory.Exists(fullPath))
+        {
+            Directory.CreateDirectory(fullPath);
+        }
+
+        var library = new Library
+        {
+            Id = Guid.NewGuid().ToString(),
+            Name = input.Name.Trim(),
+            Path = fullPath,
+            Description = input.Description?.Trim(),
+            Status = FileStatus.Ready,
+            Config = new LibraryConfig
+            {
+                LibraryPattern = LibraryPattern.SeriesBased
+            }
+        };
+
+        _db.Libraries.Add(library);
+        await _db.SaveChangesAsync(ct);
+
+        return new StumpLibraryDto
+        {
+            Id = library.Id,
+            Name = library.Name,
+            Path = library.Path,
+            Status = library.Status.ToString().ToUpperInvariant(),
+            SeriesCount = 0
+        };
+    }
+
+    public async Task<StumpUploadResponseDto?> UploadToLibraryAsync(
+        AuthUser user,
+        string libraryId,
+        string? subpath,
+        IEnumerable<StumpUploadFileInput> files,
+        CancellationToken ct = default)
+    {
+        var library = await _db.Libraries.ForUser(user)
+            .FirstOrDefaultAsync(l => l.Id == libraryId, ct);
+
+        if (library == null || !Directory.Exists(library.Path)) return null;
+
+        var cleanSubpath = (subpath ?? string.Empty).Trim('/', '\\');
+        var targetDir = string.IsNullOrEmpty(cleanSubpath)
+            ? library.Path
+            : Path.Combine(library.Path, cleanSubpath);
+
+        var fullTargetDir = Path.GetFullPath(targetDir);
+        var fullLibraryPath = Path.GetFullPath(library.Path);
+
+        // Path traversal protection
+        if (!fullTargetDir.StartsWith(fullLibraryPath, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Attempted path traversal upload to {TargetDir} outside {LibraryPath}", fullTargetDir, fullLibraryPath);
+            return null;
+        }
+
+        Directory.CreateDirectory(fullTargetDir);
+
+        var savedFiles = new List<string>();
+        foreach (var file in files)
+        {
+            if (string.IsNullOrWhiteSpace(file.FileName) || file.Content == null) continue;
+
+            var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (ext is not (".cbz" or ".cbr" or ".epub" or ".pdf" or ".zip")) continue;
+
+            var safeName = Path.GetFileName(file.FileName);
+            var destPath = Path.Combine(fullTargetDir, safeName);
+
+            await using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
+            {
+                await file.Content.CopyToAsync(fs, ct);
+            }
+
+            savedFiles.Add(safeName);
+        }
+
+        if (savedFiles.Count == 0) return null;
+
+        // Auto-enqueue scan
+        await _scannerQueue.QueueScanAsync(new ScanRequest(library.Id), ct);
+
+        return new StumpUploadResponseDto
+        {
+            UploadedCount = savedFiles.Count,
+            Files = savedFiles,
+            ScanJobTriggered = true
+        };
     }
 
     public async Task<StumpSystemStatusDto> GetSystemStatusAsync(CancellationToken ct = default)

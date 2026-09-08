@@ -21,5 +21,7 @@ public interface IStumpV2Service
     Task<bool> UpdateProgressAsync(AuthUser user, string mediaId, StumpUpdateProgressInput input, CancellationToken ct = default);
     Task<StumpEpubTocDto?> GetEpubTocAsync(AuthUser user, string mediaId, CancellationToken ct = default);
     Task<(byte[] Data, string ContentType)?> GetEpubResourceAsync(AuthUser user, string mediaId, string resourcePath, CancellationToken ct = default);
+    Task<StumpLibraryDto?> CreateLibraryAsync(AuthUser user, StumpCreateLibraryInput input, CancellationToken ct = default);
+    Task<StumpUploadResponseDto?> UploadToLibraryAsync(AuthUser user, string libraryId, string? subpath, IEnumerable<StumpUploadFileInput> files, CancellationToken ct = default);
     Task<StumpSystemStatusDto> GetSystemStatusAsync(CancellationToken ct = default);
 }
