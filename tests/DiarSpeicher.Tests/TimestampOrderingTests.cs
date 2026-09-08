@@ -10,9 +10,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace DiarSpeicher.Tests;
 
 /// <summary>
-/// Timestamps are stored as UTC ticks so SQLite can order by them. Before that, EF refused to
-/// translate ORDER BY over a DateTimeOffset and every "newest first" query had to materialise
-/// the table and sort in memory.
+/// Timestamps stay as ISO-8601 text, which is what SQLite writes for a DateTimeOffset. EF
+/// cannot translate an ORDER BY over that type, so the queries that need "newest first" are
+/// written as raw SQL; these tests pin down both halves of that arrangement.
 /// </summary>
 public sealed class TimestampOrderingTests : IDisposable
 {
@@ -39,7 +39,7 @@ public sealed class TimestampOrderingTests : IDisposable
     }
 
     [Fact]
-    public void TimestampsAreStoredAsIntegerTicks()
+    public void TimestampsAreStoredAsSortableIsoText()
     {
         using var db = new DiarSpeicherDbContext(_options);
         var created = new DateTimeOffset(2026, 9, 8, 14, 56, 59, TimeSpan.Zero);
@@ -48,12 +48,16 @@ public sealed class TimestampOrderingTests : IDisposable
         db.SaveChanges();
 
         using var command = _connection.CreateCommand();
-        command.CommandText = "SELECT typeof(CreatedAt), CreatedAt FROM Users";
+        command.CommandText = """SELECT typeof(CreatedAt), CreatedAt FROM Users""";
         using var reader = command.ExecuteReader();
 
         Assert.True(reader.Read());
-        Assert.Equal("integer", reader.GetString(0));
-        Assert.Equal(created.UtcTicks, reader.GetInt64(1));
+        Assert.Equal("text", reader.GetString(0));
+
+        // Raw SQL orders on this text directly, so the format has to sort lexicographically:
+        // zero-padded, most significant first, and a single UTC offset for every row.
+        Assert.StartsWith("2026-09-08 14:56:59", reader.GetString(1), StringComparison.Ordinal);
+        Assert.EndsWith("+00:00", reader.GetString(1), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -72,32 +76,18 @@ public sealed class TimestampOrderingTests : IDisposable
         Assert.Equal(created, verify.Users.Single().CreatedAt);
     }
 
+    /// <summary>
+    /// The reason the "newest first" queries are hand-written: EF refuses to translate this.
+    /// If a future EF or provider starts supporting it, this test fails and the raw SQL can
+    /// go back to LINQ.
+    /// </summary>
     [Fact]
-    public void ANonUtcOffsetIsNormalisedToTheSameInstant()
-    {
-        var madrid = new DateTimeOffset(2026, 9, 8, 16, 56, 59, TimeSpan.FromHours(2));
-
-        using (var db = new DiarSpeicherDbContext(_options))
-        {
-            db.Users.Add(new User { Username = "diar", CreatedAt = madrid });
-            db.SaveChanges();
-        }
-
-        using var verify = new DiarSpeicherDbContext(_options);
-        var stored = verify.Users.Single().CreatedAt;
-
-        Assert.Equal(madrid.UtcDateTime, stored.UtcDateTime);
-        Assert.Equal(TimeSpan.Zero, stored.Offset);
-    }
-
-    [Fact]
-    public void OrderingByTimestampIsTranslatedToSql()
+    public void EfStillCannotOrderByATimestamp()
     {
         using var db = new DiarSpeicherDbContext(_options);
 
-        var sql = db.Media.OrderByDescending(m => m.CreatedAt).ToQueryString();
-
-        Assert.Contains("ORDER BY", sql, StringComparison.Ordinal);
+        Assert.Throws<NotSupportedException>(
+            () => db.Media.OrderByDescending(m => m.CreatedAt).ToQueryString());
     }
 
     [Fact]

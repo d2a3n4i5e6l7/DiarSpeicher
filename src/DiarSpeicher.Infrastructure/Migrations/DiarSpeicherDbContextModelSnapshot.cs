@@ -47,18 +47,18 @@ namespace DiarSpeicher.Infrastructure.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
 
-                    b.Property<long?>("ExpiresAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("KeyHash")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<long?>("LastUsedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset?>("LastUsedAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -89,8 +89,8 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     b.Property<int>("ConfigId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Description")
                         .HasColumnType("TEXT");
@@ -98,8 +98,8 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     b.Property<string>("Emoji")
                         .HasColumnType("TEXT");
 
-                    b.Property<long?>("LastScannedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset?>("LastScannedAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -120,8 +120,8 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     b.Property<string>("ThumbnailPath")
                         .HasColumnType("TEXT");
 
-                    b.Property<long?>("UpdatedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
@@ -224,11 +224,11 @@ namespace DiarSpeicher.Infrastructure.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
 
-                    b.Property<long?>("DeletedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Extension")
                         .IsRequired()
@@ -241,8 +241,8 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     b.Property<string>("KoreaderHash")
                         .HasColumnType("TEXT");
 
-                    b.Property<long?>("ModifiedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset?>("ModifiedAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -272,8 +272,8 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     b.Property<string>("ThumbnailPath")
                         .HasColumnType("TEXT");
 
-                    b.Property<long?>("UpdatedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
@@ -436,8 +436,8 @@ namespace DiarSpeicher.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<long?>("ElapsedSeconds")
                         .HasColumnType("INTEGER");
@@ -474,8 +474,8 @@ namespace DiarSpeicher.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<long?>("UpdatedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("UserId")
                         .IsRequired()
@@ -509,11 +509,11 @@ namespace DiarSpeicher.Infrastructure.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
 
-                    b.Property<long?>("DeletedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Description")
                         .HasColumnType("TEXT");
@@ -540,8 +540,8 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     b.Property<string>("ThumbnailPath")
                         .HasColumnType("TEXT");
 
-                    b.Property<long?>("UpdatedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
@@ -641,11 +641,11 @@ namespace DiarSpeicher.Infrastructure.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
 
-                    b.Property<long>("ExpiresAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("UserId")
                         .IsRequired()
@@ -692,14 +692,14 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     b.Property<string>("AvatarPath")
                         .HasColumnType("TEXT");
 
-                    b.Property<long?>("AvatarUpdatedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset?>("AvatarUpdatedAt")
+                        .HasColumnType("TEXT");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
 
-                    b.Property<long?>("DeletedAt")
-                        .HasColumnType("INTEGER");
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("HashedPassword")
                         .HasColumnType("TEXT");

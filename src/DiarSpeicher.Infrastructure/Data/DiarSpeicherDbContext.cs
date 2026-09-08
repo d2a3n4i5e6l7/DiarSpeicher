@@ -1,5 +1,4 @@
 using DiarSpeicher.Core.Domain.Entities;
-using DiarSpeicher.Infrastructure.Data.Conversions;
 using Microsoft.EntityFrameworkCore;
 
 namespace DiarSpeicher.Infrastructure.Data;
@@ -28,18 +27,6 @@ public class DiarSpeicherDbContext : DbContext
     public DbSet<AgeRestriction> AgeRestrictions => Set<AgeRestriction>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<Session> Sessions => Set<Session>();
-
-    /// <summary>
-    /// Applied model-wide rather than per property so that no timestamp added later silently
-    /// reverts to the unsortable representation.
-    /// </summary>
-    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
-    {
-        base.ConfigureConventions(configurationBuilder);
-
-        configurationBuilder.Properties<DateTimeOffset>().HaveConversion<DateTimeOffsetToTicksConverter>();
-        configurationBuilder.Properties<DateTimeOffset?>().HaveConversion<NullableDateTimeOffsetToTicksConverter>();
-    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

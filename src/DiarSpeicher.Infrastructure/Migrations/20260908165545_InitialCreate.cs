@@ -76,11 +76,11 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     MaxSessionsAllowed = table.Column<int>(type: "INTEGER", nullable: false),
                     AvatarPath = table.Column<string>(type: "TEXT", nullable: true),
                     AvatarMeta = table.Column<string>(type: "TEXT", nullable: true),
-                    AvatarUpdatedAt = table.Column<long>(type: "INTEGER", nullable: true),
+                    AvatarUpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
                     OidcIssuerId = table.Column<string>(type: "TEXT", nullable: true),
                     OidcEmail = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<long>(type: "INTEGER", nullable: false),
-                    DeletedAt = table.Column<long>(type: "INTEGER", nullable: true),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    DeletedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
                     Permissions = table.Column<string>(type: "TEXT", nullable: true)
                 },
                 constraints: table =>
@@ -100,9 +100,9 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     Emoji = table.Column<string>(type: "TEXT", nullable: true),
                     ThumbnailPath = table.Column<string>(type: "TEXT", nullable: true),
                     ThumbnailMeta = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<long>(type: "INTEGER", nullable: false),
-                    UpdatedAt = table.Column<long>(type: "INTEGER", nullable: true),
-                    LastScannedAt = table.Column<long>(type: "INTEGER", nullable: true),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
+                    LastScannedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
                     ConfigId = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
@@ -145,9 +145,9 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     UserId = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
                     KeyHash = table.Column<string>(type: "TEXT", nullable: false),
                     Name = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
-                    ExpiresAt = table.Column<long>(type: "INTEGER", nullable: true),
-                    CreatedAt = table.Column<long>(type: "INTEGER", nullable: false),
-                    LastUsedAt = table.Column<long>(type: "INTEGER", nullable: true)
+                    ExpiresAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    LastUsedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -166,8 +166,8 @@ namespace DiarSpeicher.Infrastructure.Migrations
                 {
                     Id = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
                     UserId = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    ExpiresAt = table.Column<long>(type: "INTEGER", nullable: false),
-                    CreatedAt = table.Column<long>(type: "INTEGER", nullable: false)
+                    ExpiresAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -240,9 +240,9 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     Status = table.Column<string>(type: "TEXT", nullable: false),
                     ThumbnailPath = table.Column<string>(type: "TEXT", nullable: true),
                     ThumbnailMeta = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<long>(type: "INTEGER", nullable: false),
-                    UpdatedAt = table.Column<long>(type: "INTEGER", nullable: true),
-                    DeletedAt = table.Column<long>(type: "INTEGER", nullable: true),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
+                    DeletedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
                     LibraryId = table.Column<string>(type: "TEXT", nullable: true)
                 },
                 constraints: table =>
@@ -271,10 +271,10 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     KoreaderHash = table.Column<string>(type: "TEXT", nullable: true),
                     ThumbnailPath = table.Column<string>(type: "TEXT", nullable: true),
                     ThumbnailMeta = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<long>(type: "INTEGER", nullable: false),
-                    UpdatedAt = table.Column<long>(type: "INTEGER", nullable: true),
-                    ModifiedAt = table.Column<long>(type: "INTEGER", nullable: true),
-                    DeletedAt = table.Column<long>(type: "INTEGER", nullable: true),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
+                    ModifiedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
+                    DeletedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
                     SeriesId = table.Column<string>(type: "TEXT", nullable: true)
                 },
                 constraints: table =>
@@ -444,8 +444,8 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     Notes = table.Column<string>(type: "TEXT", nullable: true),
                     MediaId = table.Column<string>(type: "TEXT", nullable: false),
                     UserId = table.Column<string>(type: "TEXT", nullable: false),
-                    CreatedAt = table.Column<long>(type: "INTEGER", nullable: false),
-                    UpdatedAt = table.Column<long>(type: "INTEGER", nullable: true)
+                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
                 },
                 constraints: table =>
                 {

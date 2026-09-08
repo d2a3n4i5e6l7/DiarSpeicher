@@ -1,7 +1,8 @@
-using DiarSpeicher.Core.Domain.Entities;
+﻿using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Identity;
 using DiarSpeicher.Core.Security;
 using DiarSpeicher.Infrastructure.Data;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace DiarSpeicher.Infrastructure.Identity;
@@ -139,13 +140,23 @@ public class IdentityService : IIdentityService
         return IdentityResult<bool>.Ok(true);
     }
 
-    public async Task<IReadOnlyList<ApiKeyDto>> GetApiKeysAsync(string userId, CancellationToken ct = default) =>
-        await _db.ApiKeys
+    /// <summary>
+    /// Raw SQL for the same reason as the reading feeds: EF will not translate an ORDER BY
+    /// over a DateTimeOffset on SQLite.
+    /// </summary>
+    public async Task<IReadOnlyList<ApiKeyDto>> GetApiKeysAsync(string userId, CancellationToken ct = default)
+    {
+        var keys = await _db.ApiKeys
+            .FromSqlRaw(
+                """
+                SELECT * FROM "ApiKeys" WHERE "UserId" = @userId ORDER BY "CreatedAt" DESC
+                """,
+                new SqliteParameter("@userId", userId))
             .AsNoTracking()
-            .Where(k => k.UserId == userId)
-            .OrderByDescending(k => k.CreatedAt)
-            .Select(k => new ApiKeyDto(k.Id, k.Name, k.CreatedAt, k.ExpiresAt, k.LastUsedAt))
             .ToListAsync(ct);
+
+        return [.. keys.Select(k => new ApiKeyDto(k.Id, k.Name, k.CreatedAt, k.ExpiresAt, k.LastUsedAt))];
+    }
 
     public async Task<IdentityResult<CreatedApiKeyDto>> CreateApiKeyAsync(string userId, CreateApiKeyRequest request, CancellationToken ct = default)
     {

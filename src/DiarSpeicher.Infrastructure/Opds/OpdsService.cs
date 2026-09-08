@@ -6,6 +6,7 @@ using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Data.Extensions;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -327,9 +328,18 @@ public class OpdsService : IOpdsService
 
     public async Task<string> GetKeepReadingFeedXmlAsync(AuthUser user, string? apiKey, CancellationToken ct = default)
     {
+        // Raw SQL: SQLite stores these timestamps as text and EF will not translate an
+        // ORDER BY over a DateTimeOffset. COALESCE keeps the "last touched" ordering.
         var sessions = await _db.ReadingSessions
-            .Where(s => s.UserId == user.Id && s.Status == ReadingStatus.Reading)
-            .OrderByDescending(s => s.UpdatedAt ?? s.CreatedAt)
+            .FromSqlRaw(
+                """
+                SELECT * FROM "ReadingSessions"
+                WHERE "UserId" = @userId AND "Status" = @status
+                ORDER BY COALESCE("UpdatedAt", "CreatedAt") DESC
+                """,
+                new SqliteParameter("@userId", user.Id),
+                new SqliteParameter("@status", nameof(ReadingStatus.Reading)))
+            .AsNoTracking()
             .ToListAsync(ct);
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
 

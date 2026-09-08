@@ -5,6 +5,7 @@ using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Data.Extensions;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -123,16 +124,33 @@ public class KomgaService : IKomgaService
         int size,
         CancellationToken ct = default)
     {
-        var query = _db.Media.ForUser(user)
-            .Include(m => m.Metadata)
-            .Include(m => m.Series);
+        // Written as raw SQL because EF cannot translate ORDER BY over a DateTimeOffset on
+        // SQLite; the visibility filter mirrors ForUser exactly.
+        var (where, parameters) = MediaSqlFilters.BuildVisibilityFilter(user);
 
-        var totalElements = await query.CountAsync(ct);
-        var books = await query
-            .OrderByDescending(m => m.CreatedAt)
-            .ThenByDescending(m => m.Id)
-            .Skip(page * size)
-            .Take(size)
+        var totalElements = await _db.Database
+            .SqlQueryRaw<int>(
+                $"""
+                 SELECT COUNT(*) AS "Value"
+                 {MediaSqlFilters.Joins}
+                 WHERE {where}
+                 """,
+                parameters.ToParameters())
+            .SingleAsync(ct);
+
+        var books = await _db.Media
+            .FromSqlRaw(
+                $"""
+                 SELECT m.*
+                 {MediaSqlFilters.Joins}
+                 WHERE {where}
+                 ORDER BY m."CreatedAt" DESC, m."Id" DESC
+                 LIMIT @take OFFSET @skip
+                 """,
+                parameters.ToParameters(("@take", size), ("@skip", page * size)))
+            .Include(m => m.Metadata)
+            .Include(m => m.Series)
+            .AsNoTracking()
             .ToListAsync(ct);
 
         var sessions = await GetReadingSessionsForUserAsync(user.Id, books.Select(b => b.Id).ToList(), ct);

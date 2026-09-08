@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Xml.Linq;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
@@ -11,6 +11,7 @@ using DiarSpeicher.Infrastructure.Data.Extensions;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Storage;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -90,9 +91,18 @@ public sealed class StumpV2Service : IStumpV2Service
 
     public async Task<List<StumpMediaDto>> GetKeepReadingAsync(AuthUser user, CancellationToken ct = default)
     {
+        // Raw SQL: SQLite stores these timestamps as text and EF will not translate an
+        // ORDER BY over a DateTimeOffset. COALESCE keeps the "last touched" ordering.
         var sessions = await _db.ReadingSessions
-            .Where(s => s.UserId == user.Id && s.Status == ReadingStatus.Reading)
-            .OrderByDescending(s => s.UpdatedAt ?? s.CreatedAt)
+            .FromSqlRaw(
+                """
+                SELECT * FROM "ReadingSessions"
+                WHERE "UserId" = @userId AND "Status" = @status
+                ORDER BY COALESCE("UpdatedAt", "CreatedAt") DESC
+                """,
+                new SqliteParameter("@userId", user.Id),
+                new SqliteParameter("@status", nameof(ReadingStatus.Reading)))
+            .AsNoTracking()
             .ToListAsync(ct);
 
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
