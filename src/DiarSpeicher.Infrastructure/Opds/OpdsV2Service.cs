@@ -343,19 +343,7 @@ public class OpdsV2Service : IOpdsV2Service
 
     public async Task<OpdsV2Feed> GetKeepReadingFeedAsync(AuthUser user, string? apiKey, CancellationToken ct = default)
     {
-        // Raw SQL: SQLite stores these timestamps as text and EF will not translate an
-        // ORDER BY over a DateTimeOffset. COALESCE keeps the "last touched" ordering.
-        var sessions = await _db.ReadingSessions
-            .FromSqlRaw(
-                """
-                SELECT * FROM "ReadingSessions"
-                WHERE "UserId" = @userId AND "Status" = @status
-                ORDER BY COALESCE("UpdatedAt", "CreatedAt") DESC
-                """,
-                new SqliteParameter("@userId", user.Id),
-                new SqliteParameter("@status", nameof(ReadingStatus.Reading)))
-            .AsNoTracking()
-            .ToListAsync(ct);
+        var sessions = await _db.GetKeepReadingSessionsAsync(user.Id, ct);
 
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
 

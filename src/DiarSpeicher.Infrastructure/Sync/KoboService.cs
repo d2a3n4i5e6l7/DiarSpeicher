@@ -72,13 +72,7 @@ public sealed class KoboService : IKoboService
         }
 
         var mediaIds = mediaList.Select(m => m.Id).ToList();
-        var sessions = await _db.ReadingSessions
-            .Where(s => s.UserId == user.Id && mediaIds.Contains(s.MediaId))
-            .ToListAsync(ct);
-
-        var sessionMap = sessions
-            .GroupBy(s => s.MediaId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.Id).First());
+        var sessionMap = await _db.GetLatestSessionsPerMediaAsync(user.Id, mediaIds, ct);
 
         var items = mediaList.Select(m => ToKoboEntitlementContainer(m, baseUrl, apiKey, sessionMap.GetValueOrDefault(m.Id))).ToList();
 

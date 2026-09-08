@@ -246,7 +246,7 @@ public class OpdsService : IOpdsService
             .Take(PageSize)
             .ToListAsync(ct);
 
-        var sessions = await GetReadingSessionsForUserAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var entries = books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey)).ToList();
 
         var title = series.Metadata?.Title ?? series.Name;
@@ -283,7 +283,7 @@ public class OpdsService : IOpdsService
             .Take(PageSize)
             .ToListAsync(ct);
 
-        var sessions = await GetReadingSessionsForUserAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var entries = books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey)).ToList();
 
         var feed = CreatePaginatedFeed(new PaginatedFeedParams(
@@ -310,7 +310,7 @@ public class OpdsService : IOpdsService
             .Take(PageSize)
             .ToListAsync(ct);
 
-        var sessions = await GetReadingSessionsForUserAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var entries = books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey)).ToList();
 
         var feed = CreatePaginatedFeed(new PaginatedFeedParams(
@@ -328,19 +328,7 @@ public class OpdsService : IOpdsService
 
     public async Task<string> GetKeepReadingFeedXmlAsync(AuthUser user, string? apiKey, CancellationToken ct = default)
     {
-        // Raw SQL: SQLite stores these timestamps as text and EF will not translate an
-        // ORDER BY over a DateTimeOffset. COALESCE keeps the "last touched" ordering.
-        var sessions = await _db.ReadingSessions
-            .FromSqlRaw(
-                """
-                SELECT * FROM "ReadingSessions"
-                WHERE "UserId" = @userId AND "Status" = @status
-                ORDER BY COALESCE("UpdatedAt", "CreatedAt") DESC
-                """,
-                new SqliteParameter("@userId", user.Id),
-                new SqliteParameter("@status", nameof(ReadingStatus.Reading)))
-            .AsNoTracking()
-            .ToListAsync(ct);
+        var sessions = await _db.GetKeepReadingSessionsAsync(user.Id, ct);
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
 
         var books = await _db.Media.ForUser(user)
@@ -412,7 +400,7 @@ public class OpdsService : IOpdsService
             .OrderBy(m => m.Name)
             .ToListAsync(ct);
 
-        var sessions = await GetReadingSessionsForUserAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         entries.AddRange(books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey)));
 
         var feed = new OpdsFeed("searchFeed", "Search Results", links, entries);
@@ -620,20 +608,6 @@ public class OpdsService : IOpdsService
         }
 
         return new OpdsFeed(p.Id, p.Title, links, p.Entries);
-    }
-
-    private async Task<Dictionary<string, ReadingSession>> GetReadingSessionsForUserAsync(string? userId, List<string> mediaIds, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(userId) || mediaIds.Count == 0)
-        {
-            return new Dictionary<string, ReadingSession>();
-        }
-
-        var sessions = await _db.ReadingSessions
-            .Where(s => s.UserId == userId && mediaIds.Contains(s.MediaId))
-            .ToListAsync(ct);
-
-        return sessions.ToDictionary(s => s.MediaId);
     }
 
     private sealed record PaginatedFeedParams(

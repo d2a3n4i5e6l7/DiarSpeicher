@@ -112,7 +112,7 @@ public class KomgaService : IKomgaService
             .Take(size)
             .ToListAsync(ct);
 
-        var sessions = await GetReadingSessionsForUserAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id))).ToList();
 
         return KomgaPageResponse<KomgaBookDto>.Create(bookDtos, page, size, totalElements);
@@ -153,7 +153,7 @@ public class KomgaService : IKomgaService
             .AsNoTracking()
             .ToListAsync(ct);
 
-        var sessions = await GetReadingSessionsForUserAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id))).ToList();
 
         return KomgaPageResponse<KomgaBookDto>.Create(bookDtos, page, size, totalElements);
@@ -178,7 +178,7 @@ public class KomgaService : IKomgaService
             .Take(size)
             .ToListAsync(ct);
 
-        var sessions = await GetReadingSessionsForUserAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id))).ToList();
 
         return KomgaPageResponse<KomgaBookDto>.Create(bookDtos, page, size, totalElements);
@@ -371,20 +371,4 @@ public class KomgaService : IKomgaService
         };
     }
 
-    private async Task<Dictionary<string, ReadingSession>> GetReadingSessionsForUserAsync(
-        string? userId,
-        List<string> mediaIds,
-        CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(userId) || mediaIds.Count == 0)
-        {
-            return new Dictionary<string, ReadingSession>();
-        }
-
-        var sessions = await _db.ReadingSessions
-            .Where(s => s.UserId == userId && mediaIds.Contains(s.MediaId))
-            .ToListAsync(ct);
-
-        return sessions.ToDictionary(s => s.MediaId);
-    }
 }

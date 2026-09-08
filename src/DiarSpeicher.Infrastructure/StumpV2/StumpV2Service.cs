@@ -53,13 +53,7 @@ public sealed class StumpV2Service : IStumpV2Service
         var mediaList = await query.Skip(page * pageSize).Take(pageSize).ToListAsync(ct);
 
         var mediaIds = mediaList.Select(m => m.Id).ToList();
-        var sessions = await _db.ReadingSessions
-            .Where(s => s.UserId == user.Id && mediaIds.Contains(s.MediaId))
-            .ToListAsync(ct);
-
-        var sessionMap = sessions
-            .GroupBy(s => s.MediaId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.Id).First());
+        var sessionMap = await _db.GetLatestSessionsPerMediaAsync(user.Id, mediaIds, ct);
 
         var dtos = mediaList.Select(m => ToMediaDto(m, sessionMap.GetValueOrDefault(m.Id))).ToList();
 
@@ -91,19 +85,7 @@ public sealed class StumpV2Service : IStumpV2Service
 
     public async Task<List<StumpMediaDto>> GetKeepReadingAsync(AuthUser user, CancellationToken ct = default)
     {
-        // Raw SQL: SQLite stores these timestamps as text and EF will not translate an
-        // ORDER BY over a DateTimeOffset. COALESCE keeps the "last touched" ordering.
-        var sessions = await _db.ReadingSessions
-            .FromSqlRaw(
-                """
-                SELECT * FROM "ReadingSessions"
-                WHERE "UserId" = @userId AND "Status" = @status
-                ORDER BY COALESCE("UpdatedAt", "CreatedAt") DESC
-                """,
-                new SqliteParameter("@userId", user.Id),
-                new SqliteParameter("@status", nameof(ReadingStatus.Reading)))
-            .AsNoTracking()
-            .ToListAsync(ct);
+        var sessions = await _db.GetKeepReadingSessionsAsync(user.Id, ct);
 
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
 
@@ -113,9 +95,7 @@ public sealed class StumpV2Service : IStumpV2Service
             .ToListAsync(ct);
 
         var mediaMap = mediaList.ToDictionary(m => m.Id);
-        var sessionMap = sessions
-            .GroupBy(s => s.MediaId)
-            .ToDictionary(g => g.Key, g => g.First());
+        var sessionMap = sessions.ToDictionary(s => s.MediaId);
 
         var result = new List<StumpMediaDto>();
         foreach (var id in mediaIds)
@@ -182,13 +162,7 @@ public sealed class StumpV2Service : IStumpV2Service
         var mediaList = await query.Skip(page * pageSize).Take(pageSize).ToListAsync(ct);
 
         var mediaIds = mediaList.Select(m => m.Id).ToList();
-        var sessions = await _db.ReadingSessions
-            .Where(s => s.UserId == user.Id && mediaIds.Contains(s.MediaId))
-            .ToListAsync(ct);
-
-        var sessionMap = sessions
-            .GroupBy(s => s.MediaId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.Id).First());
+        var sessionMap = await _db.GetLatestSessionsPerMediaAsync(user.Id, mediaIds, ct);
 
         var dtos = mediaList.Select(m => ToMediaDto(m, sessionMap.GetValueOrDefault(m.Id))).ToList();
 
