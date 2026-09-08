@@ -1,4 +1,4 @@
-using DiarSpeicher.Core.Domain.Entities;
+﻿using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Sync;
@@ -70,6 +70,15 @@ public sealed class KoReaderService : IKoReaderService
         if (media == null)
         {
             throw new KeyNotFoundException($"Media with KOReader hash '{input.Document}' not found");
+        }
+
+        // The auth middleware synthesises a "default-owner" identity while the server has
+        // no users yet. That id has no row in Users, so writing a reading session would
+        // violate the foreign key.
+        var userExists = await _db.Users.AnyAsync(u => u.Id == user.Id, ct);
+        if (!userExists)
+        {
+            throw new UnauthorizedAccessException("Reading progress requires a registered user");
         }
 
         var session = await _db.ReadingSessions

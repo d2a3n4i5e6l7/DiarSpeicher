@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Xml.Linq;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
@@ -274,6 +274,12 @@ public sealed class StumpV2Service : IStumpV2Service
 
         if (media == null) return false;
 
+        // The auth middleware synthesises a "default-owner" identity while the server has
+        // no users yet. That id has no row in Users, so writing a reading session would
+        // violate the foreign key.
+        var userExists = await _db.Users.AnyAsync(u => u.Id == user.Id, ct);
+        if (!userExists) return false;
+
         var session = await _db.ReadingSessions
             .Where(s => s.UserId == user.Id && s.MediaId == mediaId)
             .OrderByDescending(s => s.Id)
@@ -464,8 +470,18 @@ public sealed class StumpV2Service : IStumpV2Service
         var fullTargetDir = Path.GetFullPath(targetDir);
         var fullLibraryPath = Path.GetFullPath(library.Path);
 
-        // Path traversal protection
-        if (!fullTargetDir.StartsWith(fullLibraryPath, StringComparison.OrdinalIgnoreCase))
+        // Path traversal protection. The library prefix is compared with a trailing
+        // separator, otherwise a subpath of "../libFoo" escapes into any sibling
+        // directory whose name merely starts with the library's name.
+        var libraryPrefix = fullLibraryPath.EndsWith(Path.DirectorySeparatorChar)
+            ? fullLibraryPath
+            : fullLibraryPath + Path.DirectorySeparatorChar;
+
+        var isInsideLibrary =
+            fullTargetDir.Equals(fullLibraryPath, StringComparison.OrdinalIgnoreCase) ||
+            fullTargetDir.StartsWith(libraryPrefix, StringComparison.OrdinalIgnoreCase);
+
+        if (!isInsideLibrary)
         {
             _logger.LogWarning("Attempted path traversal upload to {TargetDir} outside {LibraryPath}", fullTargetDir, fullLibraryPath);
             return null;
@@ -484,7 +500,9 @@ public sealed class StumpV2Service : IStumpV2Service
             var safeName = Path.GetFileName(file.FileName);
             var destPath = Path.Combine(fullTargetDir, safeName);
 
-            await using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
+            await using (var fs = new FileStream(
+                destPath, FileMode.Create, FileAccess.Write, FileShare.None,
+                bufferSize: 81920, useAsync: true))
             {
                 await file.Content.CopyToAsync(fs, ct);
             }
@@ -520,6 +538,12 @@ public sealed class StumpV2Service : IStumpV2Service
     {
         try
         {
+        // The auth middleware synthesises a "default-owner" identity while the server has
+        // no users yet. That id has no row in Users, so writing a reading session would
+        // violate the foreign key.
+            var userExists = await _db.Users.AnyAsync(u => u.Id == userId, ct);
+            if (!userExists) return;
+
             var session = await _db.ReadingSessions
                 .Where(s => s.UserId == userId && s.MediaId == mediaId)
                 .OrderByDescending(s => s.Id)

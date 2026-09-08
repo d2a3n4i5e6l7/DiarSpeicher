@@ -1,8 +1,11 @@
-using DiarSpeicher.Core.Domain.Models;
+﻿using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.StumpV2;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.StumpV2;
+using DiarSpeicher.Infrastructure.Storage;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace DiarSpeicher.Api.Endpoints;
 
@@ -219,11 +222,26 @@ public static class StumpV2Endpoints
             string id,
             HttpContext httpContext,
             [FromServices] IStumpV2Service service,
+            [FromServices] IOptions<StorageOptions> storageOptions,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
             if (!httpContext.Request.HasFormContentType)
                 return Results.BadRequest("Expected multipart/form-data");
+
+            var maxUploadBytes = storageOptions.Value.Upload.MaxRequestBytes;
+
+            var sizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+            if (sizeFeature is not null && !sizeFeature.IsReadOnly)
+            {
+                sizeFeature.MaxRequestBodySize = maxUploadBytes;
+            }
+
+            httpContext.Features.Set<IFormFeature>(new FormFeature(httpContext.Request, new FormOptions
+            {
+                MultipartBodyLengthLimit = maxUploadBytes,
+                ValueLengthLimit = int.MaxValue
+            }));
 
             var form = await httpContext.Request.ReadFormAsync(ct);
             var files = form.Files;

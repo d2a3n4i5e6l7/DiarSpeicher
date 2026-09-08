@@ -19,6 +19,8 @@ public class StorageOptions
 
     public PageCacheOptions PageCache { get; set; } = new();
 
+    public UploadOptions Upload { get; set; } = new();
+
     /// <summary>
     /// Always absolute: thumbnail paths are persisted in the database, so a path relative
     /// to the process working directory would break whenever the process is started
@@ -61,4 +63,19 @@ public class PageCacheOptions
     /// the limit, so a full cache does not evict on every single write. Default 0.9.
     /// </summary>
     public double EvictionTargetRatio { get; set; } = 0.9;
+}
+
+/// <summary>
+/// Limits for library file uploads. Book volumes routinely exceed the ASP.NET Core
+/// defaults (Kestrel caps request bodies at 30 MB and multipart form bodies at 128 MB),
+/// so the upload endpoint raises both to <see cref="MaxRequestBytes"/>.
+/// </summary>
+public class UploadOptions
+{
+    /// <summary>
+    /// Largest accepted upload request, covering all files in one multipart batch.
+    /// Default 1 GiB: comfortably fits comic and book volumes without letting a single
+    /// request fill the disk by default.
+    /// </summary>
+    public long MaxRequestBytes { get; set; } = 1024L * 1024 * 1024;
 }
