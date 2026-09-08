@@ -4,6 +4,14 @@ La documentación se encuentra organizada en dos fases independientes para permi
 
 ---
 
+## 📌 Plan de Cierre
+
+- **[PLAN_CIERRE_FASE_1.md](file:///home/diarmund/projects/DiarSpeicher/documentation/PLAN_CIERRE_FASE_1.md)**
+  - Auditoría del estado real de la Fase 1 trazada contra el código.
+  - Bloques de trabajo ordenados por dependencia, criterios de aceptación y decisiones abiertas.
+
+---
+
 ## 📁 Fase 1: Backend DiarSpeicher (.NET 10 / C# 13)
 *Objetivo: Motor de medios de alto rendimiento, escáner con caché de mtimes, streaming de cómics/EPUB y catálogo OPDS v1.2 sobre SQLite (WAL).*
 
