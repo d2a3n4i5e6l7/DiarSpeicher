@@ -71,17 +71,10 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     Id = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
                     Username = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
                     IsServerOwner = table.Column<bool>(type: "INTEGER", nullable: false),
-                    IsLocked = table.Column<bool>(type: "INTEGER", nullable: false),
-                    HashedPassword = table.Column<string>(type: "TEXT", nullable: true),
-                    MaxSessionsAllowed = table.Column<int>(type: "INTEGER", nullable: false),
                     AvatarPath = table.Column<string>(type: "TEXT", nullable: true),
                     AvatarMeta = table.Column<string>(type: "TEXT", nullable: true),
                     AvatarUpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
-                    OidcIssuerId = table.Column<string>(type: "TEXT", nullable: true),
-                    OidcEmail = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    DeletedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
-                    Permissions = table.Column<string>(type: "TEXT", nullable: true)
+                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -131,49 +124,6 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     table.PrimaryKey("PK_AgeRestrictions", x => x.Id);
                     table.ForeignKey(
                         name: "FK_AgeRestrictions_Users_UserId",
-                        column: x => x.UserId,
-                        principalTable: "Users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "ApiKeys",
-                columns: table => new
-                {
-                    Id = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    UserId = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    KeyHash = table.Column<string>(type: "TEXT", nullable: false),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
-                    ExpiresAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    LastUsedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ApiKeys", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_ApiKeys_Users_UserId",
-                        column: x => x.UserId,
-                        principalTable: "Users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "Sessions",
-                columns: table => new
-                {
-                    Id = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    UserId = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    ExpiresAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Sessions", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_Sessions_Users_UserId",
                         column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "Id",
@@ -471,17 +421,6 @@ namespace DiarSpeicher.Infrastructure.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_ApiKeys_KeyHash",
-                table: "ApiKeys",
-                column: "KeyHash",
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_ApiKeys_UserId",
-                table: "ApiKeys",
-                column: "UserId");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_Libraries_ConfigId",
                 table: "Libraries",
                 column: "ConfigId",
@@ -564,16 +503,6 @@ namespace DiarSpeicher.Infrastructure.Migrations
                 column: "TagId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Sessions_ExpiresAt",
-                table: "Sessions",
-                column: "ExpiresAt");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Sessions_UserId",
-                table: "Sessions",
-                column: "UserId");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_Tags_Name",
                 table: "Tags",
                 column: "Name",
@@ -599,9 +528,6 @@ namespace DiarSpeicher.Infrastructure.Migrations
                 name: "AgeRestrictions");
 
             migrationBuilder.DropTable(
-                name: "ApiKeys");
-
-            migrationBuilder.DropTable(
                 name: "LibraryExclusions");
 
             migrationBuilder.DropTable(
@@ -621,9 +547,6 @@ namespace DiarSpeicher.Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "SeriesTags");
-
-            migrationBuilder.DropTable(
-                name: "Sessions");
 
             migrationBuilder.DropTable(
                 name: "UserPreferences");

@@ -25,8 +25,6 @@ public class DiarSpeicherDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
     public DbSet<AgeRestriction> AgeRestrictions => Set<AgeRestriction>();
-    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
-    public DbSet<Session> Sessions => Set<Session>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -204,36 +202,6 @@ public class DiarSpeicherDbContext : DbContext
                 .WithOne(a => a.User)
                 .HasForeignKey<AgeRestriction>(a => a.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasMany(e => e.ApiKeys)
-                .WithOne(k => k.User)
-                .HasForeignKey(k => k.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasMany(e => e.Sessions)
-                .WithOne(s => s.User)
-                .HasForeignKey(s => s.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<ApiKey>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasMaxLength(32);
-            entity.Property(e => e.UserId).HasMaxLength(32);
-            entity.Property(e => e.KeyHash).IsRequired();
-            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
-            entity.HasIndex(e => e.KeyHash).IsUnique();
-            entity.HasIndex(e => e.UserId);
-        });
-
-        modelBuilder.Entity<Session>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasMaxLength(32);
-            entity.Property(e => e.UserId).HasMaxLength(32);
-            entity.HasIndex(e => e.UserId);
-            entity.HasIndex(e => e.ExpiresAt);
         });
     }
 

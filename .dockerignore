@@ -1,0 +1,13 @@
+**/bin
+**/obj
+stump/
+storage/
+libraries/
+documentation/
+tests/
+dist/
+*.db
+*.db-wal
+*.db-shm
+.git
+.vscode

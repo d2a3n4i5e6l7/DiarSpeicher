@@ -46,8 +46,10 @@ La idea es que los lectores que ya usas funcionen sin adaptadores:
 | Kobo Sync | `/kobo/{apiKey}/...` | Dispositivos Kobo nativos |
 | API v2 | `/api/v2/...` | API nativa del proyecto |
 
-Formatos: `.cbz`, `.cbr`, `.zip`, `.rar` y `.epub`.
-El soporte de `.pdf` está pendiente — hoy se acepta pero no se procesa.
+Formatos: `.cbz`, `.cbr`, `.zip`, `.rar`, `.epub` y `.pdf`.
+
+De los PDF se cuentan las páginas y se extraen las imágenes embebidas. Un PDF de texto y
+fuentes no genera portada: el procesador no rasteriza.
 
 ## Stack
 
@@ -55,12 +57,39 @@ El soporte de `.pdf` está pendiente — hoy se acepta pero no se procesa.
 - **EF Core 10** sobre SQLite (WAL)
 - **SharpCompress** para RAR/CBR
 - `System.IO.Compression` para ZIP/CBZ y EPUB
+- **SkiaSharp** para miniaturas, **PdfPig** para PDF; EPUB con `System.Xml.Linq` sobre el `.opf`
+- **HotChocolate** para GraphQL
 - Minimal APIs, sin MVC
 
 Tres proyectos: `Core` (dominio y utilidades sin dependencias de infraestructura),
 `Infrastructure` (persistencia, escáner, procesadores) y `Api` (endpoints y middleware).
 
-## Arrancar
+## Desplegar
+
+```sh
+docker compose up -d --build
+```
+
+El contenedor **no publica su puerto**: se une a la red externa del Gateway y solo es
+alcanzable desde ella. Esa es la barrera que sostiene la confianza en las cabeceras de
+identidad, así que no la abras.
+
+`.env` en la raíz:
+
+| Variable           | Uso                                                              |
+| ------------------ | ---------------------------------------------------------------- |
+| `PATH_BASE`        | Prefijo bajo el que el Gateway lo monta, sin barras. Vacío = raíz |
+| `NETWORK_NAME`     | Red Docker externa compartida con el Gateway                      |
+| `STORAGE_PATH`     | Ruta del host para base de datos, miniaturas y caché              |
+| `LIBRARIES_PATH`   | Ruta del host con los cómics. Se monta en solo lectura            |
+| `PAGE_CACHE_BYTES` | Techo de la caché de páginas en disco                             |
+| `ENABLE_UPLOAD`    | Subida de ficheros desde la API                                   |
+
+La imagen usa Debian slim en lugar de distroless porque `libSkiaSharp.so` enlaza contra
+fontconfig y freetype, y .NET exige `libicu`: el orden natural de páginas usa
+`CompareOptions.NumericOrdering`, que depende de ICU y se rompería con el modo invariante.
+
+## Arrancar en local
 
 ```bash
 git clone <repo> && cd DiarSpeicher
@@ -101,17 +130,22 @@ En `appsettings.json`:
 
 ## Estado
 
-En desarrollo activo. La **Fase 1** (el núcleo: base de datos, escáner, extracción y
-compatibilidad con clientes) está en su mayor parte funcionando, con huecos identificados
-y planificados.
+El núcleo está cerrado: base de datos, escáner, extracción, catálogos OPDS y
+compatibilidad con clientes. 118 pruebas en verde.
+
+El backend **no autentica**: se sirve tras el Gateway
+[tvboxHealth](../Gateway/README.md), que resuelve la identidad y se la pasa en cabeceras.
+Aquí solo quedan los medios.
 
 - [Índice de documentación](documentation/INDEX.md)
-- [Plan de cierre de la Fase 1](documentation/PLAN_CIERRE_FASE_1.md) — auditoría del
-  estado real y trabajo pendiente
+- [Documentación del backend](documentation/backend/README.md)
+- [Pendiente](documentation/PENDIENTE.md)
 
-> ⚠️ **Todavía no lo expongas fuera de tu red.** La autenticación está sin terminar:
-> hoy las contraseñas no se validan. Está identificado y planificado, pero conviene
-> saberlo antes de abrir un puerto.
+Limitaciones conocidas:
+
+- Las miniaturas de **JXL** no se generan: SkiaSharp no decodifica el formato y se sirve
+  el original sin redimensionar.
+- Un **PDF de solo texto** cuenta páginas pero no produce portada.
 
 ## Créditos
 

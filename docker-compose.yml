@@ -1,0 +1,27 @@
+services:
+    diarspeicher:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        image: diarspeicher:latest
+        container_name: diarspeicher
+        environment:
+            - Gateway__PathBase=${PATH_BASE:-}
+            - Storage__PageCache__MaxBytes=${PAGE_CACHE_BYTES:-2147483648}
+            - Storage__Upload__EnableUpload=${ENABLE_UPLOAD:-true}
+        volumes:
+            - ${STORAGE_PATH:-./storage}:/data
+            - ${LIBRARIES_PATH:-./libraries}:/libraries:ro
+        restart: unless-stopped
+        logging:
+            driver: json-file
+            options:
+                max-size: "50m"
+                max-file: "3"
+        networks:
+            - default
+
+networks:
+    default:
+        external: true
+        name: ${NETWORK_NAME:-gateway_net}

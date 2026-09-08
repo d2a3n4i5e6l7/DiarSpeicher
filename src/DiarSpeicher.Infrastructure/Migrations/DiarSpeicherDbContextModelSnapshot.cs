@@ -41,45 +41,6 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     b.ToTable("AgeRestrictions");
                 });
 
-            modelBuilder.Entity("DiarSpeicher.Core.Domain.Entities.ApiKey", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("ExpiresAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("KeyHash")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("LastUsedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("KeyHash")
-                        .IsUnique();
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("ApiKeys");
-                });
-
             modelBuilder.Entity("DiarSpeicher.Core.Domain.Entities.Library", b =>
                 {
                     b.Property<string>("Id")
@@ -635,32 +596,6 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     b.ToTable("SeriesTags");
                 });
 
-            modelBuilder.Entity("DiarSpeicher.Core.Domain.Entities.Session", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("ExpiresAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ExpiresAt");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("Sessions");
-                });
-
             modelBuilder.Entity("DiarSpeicher.Core.Domain.Entities.Tag", b =>
                 {
                     b.Property<int>("Id")
@@ -698,29 +633,8 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("DeletedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("HashedPassword")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsLocked")
-                        .HasColumnType("INTEGER");
-
                     b.Property<bool>("IsServerOwner")
                         .HasColumnType("INTEGER");
-
-                    b.Property<int>("MaxSessionsAllowed")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("OidcEmail")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OidcIssuerId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Permissions")
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("Username")
                         .IsRequired()
@@ -773,17 +687,6 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     b.HasOne("DiarSpeicher.Core.Domain.Entities.User", "User")
                         .WithOne("AgeRestriction")
                         .HasForeignKey("DiarSpeicher.Core.Domain.Entities.AgeRestriction", "UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("DiarSpeicher.Core.Domain.Entities.ApiKey", b =>
-                {
-                    b.HasOne("DiarSpeicher.Core.Domain.Entities.User", "User")
-                        .WithMany("ApiKeys")
-                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -916,17 +819,6 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     b.Navigation("Tag");
                 });
 
-            modelBuilder.Entity("DiarSpeicher.Core.Domain.Entities.Session", b =>
-                {
-                    b.HasOne("DiarSpeicher.Core.Domain.Entities.User", "User")
-                        .WithMany("Sessions")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("DiarSpeicher.Core.Domain.Entities.UserPreferences", b =>
                 {
                     b.HasOne("DiarSpeicher.Core.Domain.Entities.User", "User")
@@ -979,15 +871,11 @@ namespace DiarSpeicher.Infrastructure.Migrations
                 {
                     b.Navigation("AgeRestriction");
 
-                    b.Navigation("ApiKeys");
-
                     b.Navigation("ExcludedLibraries");
 
                     b.Navigation("Preferences");
 
                     b.Navigation("ReadingSessions");
-
-                    b.Navigation("Sessions");
                 });
 #pragma warning restore 612, 618
         }

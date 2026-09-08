@@ -2,14 +2,12 @@
 using DiarSpeicher.Api.GraphQL;
 using DiarSpeicher.Api.Middleware;
 using DiarSpeicher.Core.Filesystem;
-using DiarSpeicher.Core.Security;
 using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Storage;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
-using DiarSpeicher.Infrastructure.Identity;
 using DiarSpeicher.Infrastructure.Komga;
 using DiarSpeicher.Infrastructure.Opds;
 using DiarSpeicher.Infrastructure.StumpV2;
@@ -35,7 +33,6 @@ builder.Services.AddDbContextFactory<DiarSpeicherDbContext>(options =>
 
 builder.Services.AddHttpContextAccessor();
 
-builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
 
 // Storage locations & page cache
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
@@ -57,7 +54,6 @@ builder.Services.AddSingleton<ICompositeBookProcessor>(sp => new CachingBookProc
 
 builder.Services.AddSingleton<IThumbnailService, ThumbnailService>();
 
-builder.Services.AddScoped<IIdentityService, IdentityService>();
 
 // OPDS v1.2, v2.0 & Komga Services
 builder.Services.AddScoped<IOpdsService, OpdsService>();
@@ -108,6 +104,12 @@ using (var scope = app.Services.CreateScope())
     await db.InitializeSqliteWalAsync();
 }
 
+var pathBase = builder.Configuration["Gateway:PathBase"];
+if (!string.IsNullOrWhiteSpace(pathBase))
+{
+    app.UsePathBase("/" + pathBase.Trim('/'));
+}
+
 app.UseGatewayIdentity();
 app.UseOpdsAuth();
 
@@ -119,20 +121,9 @@ app.MapGet("/health", () => Results.Ok(new
     database = "SQLite (WAL)"
 }));
 
-app.MapPost("/api/libraries/{id}/scan", async (string id, IScannerQueue queue) =>
-{
-    await queue.QueueScanAsync(new ScanRequest(id));
-    return Results.Accepted($"/api/libraries/{id}/scan", new
-    {
-        message = "Library scan queued successfully",
-        libraryId = id
-    });
-});
-
 app.UseWebSockets();
 
 app.MapGraphQL();
-app.MapIdentityEndpoints();
 app.MapOpdsEndpoints();
 app.MapOpdsV2Endpoints();
 app.MapKomgaEndpoints();
