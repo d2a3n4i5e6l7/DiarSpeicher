@@ -1,4 +1,4 @@
-using DiarSpeicher.Core.Domain.Entities;
+﻿using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Komga;
 using DiarSpeicher.Core.Domain.Models;
@@ -107,6 +107,30 @@ public class KomgaService : IKomgaService
         var totalElements = await query.CountAsync(ct);
         var books = await query
             .OrderBy(m => m.Name)
+            .Skip(page * size)
+            .Take(size)
+            .ToListAsync(ct);
+
+        var sessions = await GetReadingSessionsForUserAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id))).ToList();
+
+        return KomgaPageResponse<KomgaBookDto>.Create(bookDtos, page, size, totalElements);
+    }
+
+    public async Task<KomgaPageResponse<KomgaBookDto>> GetLatestBooksAsync(
+        AuthUser user,
+        int page,
+        int size,
+        CancellationToken ct = default)
+    {
+        var query = _db.Media.ForUser(user)
+            .Include(m => m.Metadata)
+            .Include(m => m.Series);
+
+        var totalElements = await query.CountAsync(ct);
+        var books = await query
+            .OrderByDescending(m => m.CreatedAt)
+            .ThenByDescending(m => m.Id)
             .Skip(page * size)
             .Take(size)
             .ToListAsync(ct);

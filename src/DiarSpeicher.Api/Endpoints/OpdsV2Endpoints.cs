@@ -17,6 +17,12 @@ public static class OpdsV2Endpoints
 
     private static void MapGroup(RouteGroupBuilder group)
     {
+        MapFeedEndpoints(group);
+        MapBookEndpoints(group);
+    }
+
+    private static void MapFeedEndpoints(RouteGroupBuilder group)
+    {
         group.MapGet("/auth", (HttpContext context, IOpdsV2Service opdsV2) =>
         {
             var apiKey = GetApiKey(context);
@@ -48,6 +54,22 @@ public static class OpdsV2Endpoints
             return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
         });
 
+        group.MapGet("/libraries/{id}", async (string id, int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
+        {
+            var feed = await opdsV2.GetLibrarySeriesFeedAsync(GetAuthUser(context), id, Math.Max(0, page ?? 0), GetApiKey(context), ct);
+            return feed == null
+                ? Results.NotFound()
+                : Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
+        });
+
+        group.MapGet("/series/{id}", async (string id, int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
+        {
+            var feed = await opdsV2.GetSeriesBooksFeedAsync(GetAuthUser(context), id, Math.Max(0, page ?? 0), GetApiKey(context), ct);
+            return feed == null
+                ? Results.NotFound()
+                : Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
+        });
+
         group.MapGet("/series", async (int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {
             var user = GetAuthUser(context);
@@ -55,7 +77,10 @@ public static class OpdsV2Endpoints
             var feed = await opdsV2.GetSeriesFeedAsync(user, Math.Max(0, page ?? 0), apiKey, ct);
             return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
         });
+    }
 
+    private static void MapBookEndpoints(RouteGroupBuilder group)
+    {
         group.MapGet("/books/browse", async (int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {
             var user = GetAuthUser(context);

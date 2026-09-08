@@ -7,8 +7,15 @@ public class User
     public bool IsServerOwner { get; set; }
     public bool IsLocked { get; set; }
 
+    public string? HashedPassword { get; set; }
+    public int MaxSessionsAllowed { get; set; }
+
     public string? AvatarPath { get; set; }
     public string? AvatarMeta { get; set; }
+    public DateTimeOffset? AvatarUpdatedAt { get; set; }
+
+    public string? OidcIssuerId { get; set; }
+    public string? OidcEmail { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? DeletedAt { get; set; }
@@ -19,6 +26,8 @@ public class User
     public AgeRestriction? AgeRestriction { get; set; }
     public ICollection<LibraryExclusion> ExcludedLibraries { get; set; } = new List<LibraryExclusion>();
     public ICollection<ReadingSession> ReadingSessions { get; set; } = new List<ReadingSession>();
+    public ICollection<ApiKey> ApiKeys { get; set; } = new List<ApiKey>();
+    public ICollection<Session> Sessions { get; set; } = new List<Session>();
 }
 
 public class UserPreferences

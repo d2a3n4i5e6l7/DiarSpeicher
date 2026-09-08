@@ -1,4 +1,5 @@
 using DiarSpeicher.Core.Domain.Entities;
+using DiarSpeicher.Infrastructure.Data.Conversions;
 using Microsoft.EntityFrameworkCore;
 
 namespace DiarSpeicher.Infrastructure.Data;
@@ -25,6 +26,20 @@ public class DiarSpeicherDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
     public DbSet<AgeRestriction> AgeRestrictions => Set<AgeRestriction>();
+    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
+    public DbSet<Session> Sessions => Set<Session>();
+
+    /// <summary>
+    /// Applied model-wide rather than per property so that no timestamp added later silently
+    /// reverts to the unsortable representation.
+    /// </summary>
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        base.ConfigureConventions(configurationBuilder);
+
+        configurationBuilder.Properties<DateTimeOffset>().HaveConversion<DateTimeOffsetToTicksConverter>();
+        configurationBuilder.Properties<DateTimeOffset?>().HaveConversion<NullableDateTimeOffsetToTicksConverter>();
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -108,6 +123,10 @@ public class DiarSpeicherDbContext : DbContext
             entity.HasIndex(e => e.Hash);
             entity.HasIndex(e => e.KoreaderHash);
             entity.HasIndex(e => e.DeletedAt);
+
+            // "Latest books" orders by creation date on every call; without this the query
+            // scans the table and sorts it into a temporary B-tree.
+            entity.HasIndex(e => e.CreatedAt);
 
             entity.HasOne(e => e.Metadata)
                 .WithOne(m => m.Media)
@@ -198,6 +217,36 @@ public class DiarSpeicherDbContext : DbContext
                 .WithOne(a => a.User)
                 .HasForeignKey<AgeRestriction>(a => a.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.ApiKeys)
+                .WithOne(k => k.User)
+                .HasForeignKey(k => k.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.Sessions)
+                .WithOne(s => s.User)
+                .HasForeignKey(s => s.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ApiKey>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(32);
+            entity.Property(e => e.UserId).HasMaxLength(32);
+            entity.Property(e => e.KeyHash).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.HasIndex(e => e.KeyHash).IsUnique();
+            entity.HasIndex(e => e.UserId);
+        });
+
+        modelBuilder.Entity<Session>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(32);
+            entity.Property(e => e.UserId).HasMaxLength(32);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.ExpiresAt);
         });
     }
 

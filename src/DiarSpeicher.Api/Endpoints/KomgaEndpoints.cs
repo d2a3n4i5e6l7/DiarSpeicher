@@ -1,4 +1,4 @@
-using DiarSpeicher.Core.Domain.Komga;
+﻿using DiarSpeicher.Core.Domain.Komga;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Komga;
@@ -108,6 +108,18 @@ public static class KomgaEndpoints
         {
             var user = GetAuthUser(context);
             var result = await komga.GetBooksAsync(user, search, Math.Max(0, page ?? 0), Math.Clamp(size ?? 20, 1, 100), ct);
+            return Results.Ok(result);
+        });
+
+        group.MapGet("/books/latest", async (
+            int? page,
+            int? size,
+            HttpContext context,
+            IKomgaService komga,
+            CancellationToken ct) =>
+        {
+            var user = GetAuthUser(context);
+            var result = await komga.GetLatestBooksAsync(user, Math.Max(0, page ?? 0), Math.Clamp(size ?? 20, 1, 100), ct);
             return Results.Ok(result);
         });
 

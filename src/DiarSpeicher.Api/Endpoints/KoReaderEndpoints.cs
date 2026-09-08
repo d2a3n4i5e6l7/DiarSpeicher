@@ -19,6 +19,14 @@ public static class KoReaderEndpoints
             return Results.Ok(auth);
         });
 
+        group.MapGet("/users/create", async (
+            [FromServices] IKoReaderService service,
+            CancellationToken ct) =>
+        {
+            var auth = await service.CheckAuthorizedAsync(ct);
+            return Results.Ok(auth);
+        });
+
         group.MapGet("/syncs/progress/{document}", async (
             string apiKey,
             string document,

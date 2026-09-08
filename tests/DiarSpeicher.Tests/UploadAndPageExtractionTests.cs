@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
@@ -89,7 +89,7 @@ public sealed class UploadAndPageExtractionTests : IDisposable
         using var db = CreateInMemoryDbContext();
         var processor = new CompositeBookProcessor(new IBookProcessor[] { new ZipBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new StumpV2Service(db, processor, queue, NullLogger<StumpV2Service>.Instance);
+        var service = new StumpV2Service(db, processor, queue, NullLogger<StumpV2Service>.Instance, TestStorageOptions.Default());
 
         var owner = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var libPath = Path.Combine(_tempDir, "NewLib");
@@ -116,7 +116,7 @@ public sealed class UploadAndPageExtractionTests : IDisposable
         using var db = CreateInMemoryDbContext();
         var processor = new CompositeBookProcessor(new IBookProcessor[] { new ZipBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new StumpV2Service(db, processor, queue, NullLogger<StumpV2Service>.Instance);
+        var service = new StumpV2Service(db, processor, queue, NullLogger<StumpV2Service>.Instance, TestStorageOptions.Default());
 
         var owner = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var libDir = Path.Combine(_tempDir, "SafeLib");
@@ -142,7 +142,8 @@ public sealed class UploadAndPageExtractionTests : IDisposable
         };
 
         var result = await service.UploadToLibraryAsync(owner, library.Id, "../../../evil", uploadInput);
-        Assert.Null(result);
+        Assert.Equal(UploadOutcome.LibraryNotFound, result.Outcome);
+        Assert.Null(result.Response);
     }
 
     [Fact]
@@ -172,7 +173,7 @@ public sealed class UploadAndPageExtractionTests : IDisposable
             new EpubBookProcessor()
         });
         var queue = new ScannerQueue();
-        var v2Service = new StumpV2Service(db, compositeProcessor, queue, NullLogger<StumpV2Service>.Instance);
+        var v2Service = new StumpV2Service(db, compositeProcessor, queue, NullLogger<StumpV2Service>.Instance, TestStorageOptions.Default());
 
         var scannerService = new LibraryScannerService(
             db,
@@ -196,9 +197,10 @@ public sealed class UploadAndPageExtractionTests : IDisposable
                 new StumpUploadFileInput { FileName = "Batman_01.cbz", Content = cbzStream }
             });
 
-        Assert.NotNull(uploadResult);
-        Assert.Equal(1, uploadResult.UploadedCount);
-        Assert.True(uploadResult.ScanJobTriggered);
+        Assert.Equal(UploadOutcome.Success, uploadResult.Outcome);
+        Assert.NotNull(uploadResult.Response);
+        Assert.Equal(1, uploadResult.Response!.UploadedCount);
+        Assert.True(uploadResult.Response.ScanJobTriggered);
 
         var expectedFile = Path.Combine(libDir, "Batman", "Batman_01.cbz");
         Assert.True(File.Exists(expectedFile));

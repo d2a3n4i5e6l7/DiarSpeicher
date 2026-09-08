@@ -279,19 +279,94 @@ el progreso de lectura, el "keep reading" ni la sincronización con lectores.
 
 ## 5. Criterios de "Fase 1 terminada"
 
-La fase se considera cerrada cuando **todos** se cumplen:
+**Estado: cerrada el 8 de septiembre de 2026.** Todos los criterios se verificaron contra el
+servidor en ejecución, no solo por compilación:
 
-- [ ] Toda ruta documentada en los docs 05, 07, 08 y 09 existe y responde el contrato documentado.
-- [ ] Las divergencias Kobo están resueltas y el documento refleja la decisión tomada.
-- [ ] Una contraseña incorrecta o una API key inválida producen `401`.
-- [ ] Se puede crear el usuario propietario por API y emitir API Keys.
-- [ ] Un `.pdf` se indexa con páginas y portada, o deja de aceptarse de forma explícita.
-- [ ] Las miniaturas se sirven redimensionadas y recomprimidas.
-- [ ] Copiar un fichero en una biblioteca dispara el escaneo automáticamente.
-- [ ] `/graphql` sirve Queries, Mutations y Subscriptions con `ForUser` en todos los niveles.
-- [ ] La suite de tests pasa y cubre cada criterio anterior.
-- [ ] Un escaneo de una biblioteca grande (≥500 tomos) completa sin errores y con uso de
+- [x] Toda ruta documentada en los docs 05, 07, 08 y 09 existe y responde el contrato documentado.
+- [x] Las divergencias Kobo están resueltas y el documento refleja la decisión tomada.
+- [x] Una contraseña incorrecta o una API key inválida producen `401`.
+- [x] Se puede crear el usuario propietario por API y emitir API Keys.
+- [x] Un `.pdf` se indexa con páginas y portada, o deja de aceptarse de forma explícita.
+- [x] Las miniaturas se sirven redimensionadas y recomprimidas.
+- [x] Copiar un fichero en una biblioteca dispara el escaneo automáticamente.
+- [x] `/graphql` sirve Queries, Mutations y Subscriptions con `ForUser` en todos los niveles.
+- [x] La suite de tests pasa y cubre cada criterio anterior (106 tests).
+- [x] Un escaneo de una biblioteca grande (≥500 tomos) completa sin errores y con uso de
       memoria estable.
+
+### Evidencia de verificación
+
+| Criterio | Cómo se comprobó |
+|---|---|
+| Rutas ausentes | `GET /opds/v2.0/libraries/{id}` y `/series/{id}` devuelven `200` y encadenan la navegación; `/api/v1/books/latest` devuelve `200`; `/koreader/{key}/users/create` devuelve `{"authorized":"OK"}` |
+| Contraseña incorrecta | `401`; contraseña correcta `200` |
+| API key inexistente | `401` (antes concedía acceso anónimo); caducada `401`; revocada `401` |
+| Usuario bloqueado / borrado | `401` en ambos casos |
+| Reclamar dos veces | `409` |
+| Subida | `EnableUpload=false` → `403`; fichero sobre el límite → `413` **sin dejar nada en disco**; extensión fuera de la lista → `400`; respuesta con objetos `{name, path, size}` |
+| PDF | PDF de 3 páginas indexado con `pages=3` y portada extraída |
+| Miniaturas | Portada 800×1200 → WebP 512×768 de ~786 B (origen 15,6 kB), servida como `image/webp`, tanto desde CBZ como desde PDF (verificado con SkiaSharp en build de Release) |
+| Escaneo reactivo | 20 ficheros copiados → media de 2 a 22 sin intervención, con **un** escaneo encolado, no veinte |
+| GraphQL N+1 | 14 series con `media` anidado → **3 consultas SQL**, no 15 |
+| GraphQL `ForUser` | Usuario con biblioteca excluida no ve nada en `libraries`, `series`, `media` ni en el árbol anidado |
+| `jobProgress` | 17 eventos incrementales por WebSocket con porcentaje creciente 0 → 92,86 % → `COMPLETED` |
+| Biblioteca grande | 550 tomos / 25 series en 2,3 s, 0 errores; RSS estable (658–659 MB) en cuatro escaneos; el caché de mtimes reduce el reescaneo a 9 ms |
+
+### Decisiones tomadas durante la ejecución
+
+- **B0**: se adoptaron migraciones EF Core (opción A). Migración inicial `InitialCreate` con
+  las 17 tablas; `Program.cs` usa `MigrateAsync()` antes de `InitializeSqliteWalAsync()`.
+- **B1.2**: el hashing de contraseñas usa **PBKDF2-HMAC-SHA256** (210 000 iteraciones, sal por
+  contraseña, comparación en tiempo constante) en lugar de Argon2id/BCrypt: cumple el
+  requisito de factor de coste sin añadir dependencias externas. Las API keys son de 256 bits
+  aleatorios y se guardan como SHA-256, sin factor de coste: la entropía ya hace inviable la
+  fuerza bruta y un hash lento penalizaría cada petición autenticada.
+- **B2.2**: **manda el código, no el documento.** El router de referencia de Stump
+  (`stump/apps/server/src/routers/kobo/router.rs`) registra exactamente las rutas
+  implementadas, y el dispositivo las recibe en las plantillas de `/v1/initialization`, así
+  que no hace falta un Kobo físico para decidirlo. Se corrigió el doc 08.
+- **B3.1**: PdfPig (puro .NET, sin binarios nativos). La portada sale de la imagen embebida de
+  mayor superficie de la página; una página vectorial o de solo texto no produce portada en
+  lugar de un mapa de bits en blanco.
+- **B3.2**: **SkiaSharp 4.151.2 (MIT)** para redimensionar y codificar, con
+  `SkiaSharp.NativeAssets.Linux` para el despliegue en contenedor. Se descartó ImageSharp:
+  la 4.x exige licencia comercial y su target de MSBuild **rompe el build en Release**
+  (en Debug solo avisa), lo que bloquearía el despliegue. La 3.1.x tampoco es Apache 2.0
+  puro, sino "Six Labors Split License", que solo concede Apache 2.0 bajo condiciones de
+  facturación y tipo de organización. SkiaSharp es MIT sin condiciones y, al ser el motor
+  de Skia, deja abierta la opción de renderizar páginas PDF vectoriales más adelante.
+- **Marcas de tiempo (cierre de las dos advertencias abiertas)**: un value converter global
+  (`DateTimeOffsetToTicksConverter`) almacena todo `DateTimeOffset` como ticks UTC. SQLite no
+  traduce `ORDER BY` sobre `DateTimeOffset`, lo que obligaba a materializar la tabla y ordenar
+  en memoria en cinco consultas (`books/latest`, las tres de *keep reading* y las API keys).
+  Como entero la comparación se traduce a SQL, con `Skip/Take` en servidor. Se añadió además
+  un índice sobre `Media.CreatedAt`: el plan pasa de `SCAN Media` + `USE TEMP B-TREE FOR ORDER
+  BY` a `SCAN Media USING INDEX IX_Media_CreatedAt`.
+
+  La migración `TimestampsAsTicks` **convierte los valores con SQL antes** de cambiar el tipo
+  de columna. Sin ese paso previo, SQLite coacciona `'2026-09-08 14:56:59.35+00:00'` al entero
+  `2026` y colapsa en silencio todas las fechas de la base al año. Verificado sobre una base
+  con datos reales: 585 medios y 3 usuarios intactos, ticks exactos, nulos preservados y
+  `typeof(CreatedAt) = integer`.
+
+  Se descartó ordenar por `Id`: **`Ulid.NewUlid()` no es monótono dentro del mismo
+  milisegundo** (medido: 2494 inversiones en 5000 ids consecutivos), y un escaneo crea cientos
+  de medios por milisegundo, así que habría barajado el orden de forma sutil. El escáner sí
+  pasa a Ulid, pero por consistencia con el resto del modelo y porque un `Guid` de 36
+  caracteres excedía el `HasMaxLength(32)` declarado en la columna; un Ulid ocupa 26.
+
+- **B5**: el `AuthUser` llega a los resolutores mediante `IHttpContextAccessor`
+  (`AuthUserResolver`) en lugar de `[GlobalState]`: es el mismo origen que usa el resto de la
+  API y el que ya usaban los DataLoaders. `OpdsAuthMiddleware` cubre ahora también `/graphql`.
+
+### Riesgos abiertos tras el cierre
+
+- **Nativos de Skia en el contenedor**: `SkiaSharp.NativeAssets.Linux` trae `libSkiaSharp.so`,
+  que depende de `libfontconfig1`. En imágenes base mínimas (Alpine, `runtime-deps` recortadas)
+  hay que instalarlo o el proceso fallará al cargar la librería. Verificado en WSL/Ubuntu.
+- **Ids preexistentes**: los medios y series creados antes de la migración conservan sus
+  `Guid`. Es inofensivo — los ids son opacos y nada los parsea — y la ordenación ya no depende
+  de ellos, así que no se reescriben. Solo los nuevos son Ulid.
 
 ---
 

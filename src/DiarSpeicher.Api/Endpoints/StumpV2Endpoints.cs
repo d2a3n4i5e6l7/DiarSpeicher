@@ -1,4 +1,4 @@
-﻿using DiarSpeicher.Core.Domain.Models;
+using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.StumpV2;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.StumpV2;
@@ -218,46 +218,7 @@ public static class StumpV2Endpoints
             return result == null ? Results.BadRequest("Could not create library") : Results.Created($"/api/v2/libraries/{result.Id}", result);
         });
 
-        group.MapPost("/libraries/{id}/upload", async (
-            string id,
-            HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
-            [FromServices] IOptions<StorageOptions> storageOptions,
-            CancellationToken ct) =>
-        {
-            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            if (!httpContext.Request.HasFormContentType)
-                return Results.BadRequest("Expected multipart/form-data");
-
-            var maxUploadBytes = storageOptions.Value.Upload.MaxRequestBytes;
-
-            var sizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
-            if (sizeFeature is not null && !sizeFeature.IsReadOnly)
-            {
-                sizeFeature.MaxRequestBodySize = maxUploadBytes;
-            }
-
-            httpContext.Features.Set<IFormFeature>(new FormFeature(httpContext.Request, new FormOptions
-            {
-                MultipartBodyLengthLimit = maxUploadBytes,
-                ValueLengthLimit = int.MaxValue
-            }));
-
-            var form = await httpContext.Request.ReadFormAsync(ct);
-            var files = form.Files;
-            if (files.Count == 0)
-                return Results.BadRequest("No files provided");
-
-            var subpath = form["subpath"].ToString();
-            var uploadInputs = files.Select(f => new StumpUploadFileInput
-            {
-                FileName = f.FileName,
-                Content = f.OpenReadStream()
-            }).ToList();
-
-            var result = await service.UploadToLibraryAsync(user, id, subpath, uploadInputs, ct);
-            return result == null ? Results.BadRequest("Upload failed or invalid files") : Results.Ok(result);
-        }).DisableAntiforgery();
+        group.MapPost("/libraries/{id}/upload", HandleLibraryUpload).DisableAntiforgery();
 
         group.MapPost("/libraries/{id}/scan", async (
             string id,
@@ -269,6 +230,61 @@ public static class StumpV2Endpoints
             var success = await service.TriggerLibraryScanAsync(user, id, ct);
             return success ? Results.Accepted($"/api/v2/libraries/{id}") : Results.NotFound();
         });
+    }
+
+    private static async Task<IResult> HandleLibraryUpload(
+        string id,
+        HttpContext httpContext,
+        [FromServices] IStumpV2Service service,
+        [FromServices] IOptions<StorageOptions> storageOptions,
+        CancellationToken ct)
+    {
+        var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+        if (!httpContext.Request.HasFormContentType)
+            return Results.BadRequest("Expected multipart/form-data");
+
+        var uploadOptions = storageOptions.Value.Upload;
+        if (!uploadOptions.EnableUpload)
+        {
+            return Results.Json(new { error = "Uploads are disabled on this server." }, statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        var maxUploadBytes = uploadOptions.MaxRequestBytes;
+
+        var sizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (sizeFeature is not null && !sizeFeature.IsReadOnly)
+        {
+            sizeFeature.MaxRequestBodySize = maxUploadBytes;
+        }
+
+        httpContext.Features.Set<IFormFeature>(new FormFeature(httpContext.Request, new FormOptions
+        {
+            MultipartBodyLengthLimit = maxUploadBytes,
+            ValueLengthLimit = int.MaxValue
+        }));
+
+        var form = await httpContext.Request.ReadFormAsync(ct);
+        var files = form.Files;
+        if (files.Count == 0)
+            return Results.BadRequest("No files provided");
+
+        var subpath = form["subpath"].ToString();
+        var uploadInputs = files.Select(f => new StumpUploadFileInput
+        {
+            FileName = f.FileName,
+            Content = f.OpenReadStream()
+        }).ToList();
+
+        var result = await service.UploadToLibraryAsync(user, id, subpath, uploadInputs, ct);
+
+        return result.Outcome switch
+        {
+            UploadOutcome.Success => Results.Ok(result.Response),
+            UploadOutcome.UploadDisabled => Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status403Forbidden),
+            UploadOutcome.LibraryNotFound => Results.NotFound(new { error = result.Message }),
+            UploadOutcome.FileTooLarge => Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status413PayloadTooLarge),
+            _ => Results.BadRequest(new { error = result.Message })
+        };
     }
 
     private static void MapEpubRoutes(RouteGroupBuilder group)

@@ -51,10 +51,21 @@ El protocolo de sincronización de Kobo permite sincronizar la biblioteca de lib
    - **Restricción parental**: Aplica estrictamente `ForUser(user)`.
 3. **Metadatos (`GET /kobo/{apiKey}/v1/library/{bookId}/metadata`)**:
    - Devuelve la ficha completa del libro (`KoboBookMetadata`), autor, serie, número de secuencia y fecha de publicación.
-4. **Descarga de EPUB (`GET /kobo/{apiKey}/v1/library/{bookId}/file/{revisionId}`)**:
+4. **Descarga de EPUB (`GET /kobo/{apiKey}/v1/books/{bookId}/file/epub`)**:
    - Descarga directa del archivo binario del libro para su lectura en el dispositivo.
-5. **Miniaturas (`GET /kobo/{apiKey}/v1/images/{bookId}/cover.jpg`)**:
-   - Streaming de la portada generada en caché.
+5. **Miniaturas (`GET /kobo/{apiKey}/v1/books/{bookId}/thumbnail/{width}/{height}/{isGreyscale}/image.jpg`)**:
+   - Variante con calidad: `.../thumbnail/{width}/{height}/{quality}/{isGreyscale}/image.jpg`.
+   - Streaming de la portada generada en caché, siempre en JPEG: el dispositivo Kobo no
+     admite otros formatos.
+   - El dispositivo no construye estas URLs por su cuenta: las recibe en `image_url_template`
+     e `image_url_quality_template` dentro de la respuesta de `/v1/initialization`.
+
+> **Decisión (bloque B2.2 del plan de cierre, 8 de septiembre de 2026).** Versiones
+> anteriores de este documento describían `/v1/library/{bookId}/file/{revisionId}` y
+> `/v1/images/{bookId}/cover.jpg`. Son incorrectas: el router de referencia de Stump
+> (`stump/apps/server/src/routers/kobo/router.rs`) registra exactamente las rutas que
+> implementa DiarSpeicher, y son las que el dispositivo recibe a través de las plantillas de
+> `/v1/initialization`. Se corrigió el documento y **no** el código.
 
 ---
 

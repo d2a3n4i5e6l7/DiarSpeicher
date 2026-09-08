@@ -1,4 +1,4 @@
-using DiarSpeicher.Core.Domain.Entities;
+﻿using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Opds;
@@ -151,7 +151,7 @@ public class OpdsV2Service : IOpdsV2Service
                 new(FormatUrl("libraries", apiKey), OpdsV2MimeTypes.OpdsJson, "self"),
                 new(FormatUrl(CatalogEndpoint, apiKey), OpdsV2MimeTypes.OpdsJson, StartRel)
             ],
-            Navigation = libraries.Select(l => new OpdsV2Link(FormatUrl($"libraries/{l.Id}/books", apiKey), OpdsV2MimeTypes.OpdsJson)
+            Navigation = libraries.Select(l => new OpdsV2Link(FormatUrl($"libraries/{l.Id}", apiKey), OpdsV2MimeTypes.OpdsJson)
             {
                 Properties = new() { [TitleKey] = l.Name }
             }).ToList()
@@ -202,6 +202,101 @@ public class OpdsV2Service : IOpdsV2Service
         };
     }
 
+    public async Task<OpdsV2Feed?> GetLibrarySeriesFeedAsync(AuthUser user, string libraryId, int page, string? apiKey, CancellationToken ct = default)
+    {
+        var library = await _db.Libraries.ForUser(user).FirstOrDefaultAsync(l => l.Id == libraryId, ct);
+        if (library == null)
+        {
+            return null;
+        }
+
+        var query = _db.Series.ForUser(user)
+            .Where(s => s.LibraryId == libraryId)
+            .Include(s => s.Metadata);
+
+        var totalCount = await query.CountAsync(ct);
+        var seriesList = await query
+            .OrderBy(s => s.Name)
+            .Skip(page * PageSize)
+            .Take(PageSize)
+            .ToListAsync(ct);
+
+        return new OpdsV2Feed
+        {
+            Metadata = new OpdsV2Metadata
+            {
+                Title = library.Name,
+                NumberOfItems = totalCount,
+                ItemsPerPage = PageSize,
+                CurrentPage = page
+            },
+            Links = BuildPagingLinks($"libraries/{libraryId}", page, totalCount, apiKey),
+            Navigation = seriesList.Select(s => new OpdsV2Link(FormatUrl($"series/{s.Id}", apiKey), OpdsV2MimeTypes.OpdsJson)
+            {
+                Properties = new() { [TitleKey] = s.Metadata?.Title ?? s.Name }
+            }).ToList()
+        };
+    }
+
+    public async Task<OpdsV2Feed?> GetSeriesBooksFeedAsync(AuthUser user, string seriesId, int page, string? apiKey, CancellationToken ct = default)
+    {
+        var series = await _db.Series.ForUser(user)
+            .Include(s => s.Metadata)
+            .FirstOrDefaultAsync(s => s.Id == seriesId, ct);
+
+        if (series == null)
+        {
+            return null;
+        }
+
+        var query = _db.Media.ForUser(user)
+            .Where(m => m.SeriesId == seriesId)
+            .Include(m => m.Metadata)
+            .Include(m => m.Series);
+
+        var totalCount = await query.CountAsync(ct);
+        var books = await query
+            .OrderBy(m => m.Name)
+            .Skip(page * PageSize)
+            .Take(PageSize)
+            .ToListAsync(ct);
+
+        return new OpdsV2Feed
+        {
+            Metadata = new OpdsV2Metadata
+            {
+                Title = series.Metadata?.Title ?? series.Name,
+                NumberOfItems = totalCount,
+                ItemsPerPage = PageSize,
+                CurrentPage = page
+            },
+            Links = BuildPagingLinks($"series/{seriesId}", page, totalCount, apiKey),
+            Publications = books.Select(b => ToPublication(b, apiKey)).ToList()
+        };
+    }
+
+    private List<OpdsV2Link> BuildPagingLinks(string endpoint, int page, int totalCount, string? apiKey)
+    {
+        var totalPages = (int)Math.Ceiling(totalCount / (double)PageSize);
+        var links = new List<OpdsV2Link>
+        {
+            new(FormatUrl($"{endpoint}?page={page}", apiKey), OpdsV2MimeTypes.OpdsJson, "self"),
+            new(FormatUrl(CatalogEndpoint, apiKey), OpdsV2MimeTypes.OpdsJson, StartRel)
+        };
+
+        if (page > 0)
+        {
+            links.Add(new(FormatUrl($"{endpoint}?page={page - 1}", apiKey), OpdsV2MimeTypes.OpdsJson, "previous"));
+        }
+
+        if (page < totalPages - 1)
+        {
+            links.Add(new(FormatUrl($"{endpoint}?page={page + 1}", apiKey), OpdsV2MimeTypes.OpdsJson, "next"));
+        }
+
+        return links;
+    }
+
     public async Task<OpdsV2Feed> GetBooksFeedAsync(AuthUser user, int page, string? apiKey, CancellationToken ct = default)
     {
         var query = _db.Media.ForUser(user)
@@ -247,13 +342,10 @@ public class OpdsV2Service : IOpdsV2Service
 
     public async Task<OpdsV2Feed> GetKeepReadingFeedAsync(AuthUser user, string? apiKey, CancellationToken ct = default)
     {
-        var rawSessions = await _db.ReadingSessions
+        var sessions = await _db.ReadingSessions
             .Where(s => s.UserId == user.Id && s.Status == ReadingStatus.Reading)
-            .ToListAsync(ct);
-
-        var sessions = rawSessions
             .OrderByDescending(s => s.UpdatedAt ?? s.CreatedAt)
-            .ToList();
+            .ToListAsync(ct);
 
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
 

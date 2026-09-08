@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace DiarSpeicher.Core.Domain.StumpV2;
 
@@ -212,10 +212,45 @@ public sealed class StumpUploadResponseDto
     public int UploadedCount { get; set; }
 
     [JsonPropertyName("files")]
-    public List<string> Files { get; set; } = new();
+    public List<UploadedFileDto> Files { get; set; } = new();
 
     [JsonPropertyName("scanJobTriggered")]
     public bool ScanJobTriggered { get; set; }
+}
+
+public sealed class UploadedFileDto
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = string.Empty;
+
+    [JsonPropertyName("size")]
+    public long Size { get; set; }
+}
+
+public enum UploadOutcome
+{
+    Success,
+    UploadDisabled,
+    LibraryNotFound,
+    NoAcceptedFiles,
+    FileTooLarge,
+    ExtensionNotAllowed
+}
+
+public sealed class UploadResult
+{
+    public UploadOutcome Outcome { get; init; }
+    public StumpUploadResponseDto? Response { get; init; }
+    public string? Message { get; init; }
+
+    public static UploadResult Ok(StumpUploadResponseDto response) =>
+        new() { Outcome = UploadOutcome.Success, Response = response };
+
+    public static UploadResult Fail(UploadOutcome outcome, string message) =>
+        new() { Outcome = outcome, Message = message };
 }
 
 public sealed class StumpUploadFileInput

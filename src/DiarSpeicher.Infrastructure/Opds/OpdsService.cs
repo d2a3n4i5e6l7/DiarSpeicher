@@ -1,4 +1,4 @@
-using DiarSpeicher.Core.Domain.Entities;
+﻿using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Opds;
@@ -327,13 +327,10 @@ public class OpdsService : IOpdsService
 
     public async Task<string> GetKeepReadingFeedXmlAsync(AuthUser user, string? apiKey, CancellationToken ct = default)
     {
-        var rawSessions = await _db.ReadingSessions
+        var sessions = await _db.ReadingSessions
             .Where(s => s.UserId == user.Id && s.Status == ReadingStatus.Reading)
-            .ToListAsync(ct);
-
-        var sessions = rawSessions
             .OrderByDescending(s => s.UpdatedAt ?? s.CreatedAt)
-            .ToList();
+            .ToListAsync(ct);
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
 
         var books = await _db.Media.ForUser(user)

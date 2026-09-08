@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Xml.Linq;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
@@ -10,8 +10,10 @@ using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Data.Extensions;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
+using DiarSpeicher.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace DiarSpeicher.Infrastructure.StumpV2;
 
@@ -21,17 +23,20 @@ public sealed class StumpV2Service : IStumpV2Service
     private readonly ICompositeBookProcessor _bookProcessor;
     private readonly IScannerQueue _scannerQueue;
     private readonly ILogger<StumpV2Service> _logger;
+    private readonly UploadOptions _uploadOptions;
 
     public StumpV2Service(
         DiarSpeicherDbContext db,
         ICompositeBookProcessor bookProcessor,
         IScannerQueue scannerQueue,
-        ILogger<StumpV2Service> logger)
+        ILogger<StumpV2Service> logger,
+        IOptions<StorageOptions> storageOptions)
     {
         _db = db;
         _bookProcessor = bookProcessor;
         _scannerQueue = scannerQueue;
         _logger = logger;
+        _uploadOptions = storageOptions.Value.Upload;
     }
 
     public async Task<StumpPageResponse<StumpMediaDto>> GetMediaAsync(AuthUser user, int page, int pageSize, CancellationToken ct = default)
@@ -85,13 +90,10 @@ public sealed class StumpV2Service : IStumpV2Service
 
     public async Task<List<StumpMediaDto>> GetKeepReadingAsync(AuthUser user, CancellationToken ct = default)
     {
-        var rawSessions = await _db.ReadingSessions
+        var sessions = await _db.ReadingSessions
             .Where(s => s.UserId == user.Id && s.Status == ReadingStatus.Reading)
-            .ToListAsync(ct);
-
-        var sessions = rawSessions
             .OrderByDescending(s => s.UpdatedAt ?? s.CreatedAt)
-            .ToList();
+            .ToListAsync(ct);
 
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
 
@@ -450,25 +452,97 @@ public sealed class StumpV2Service : IStumpV2Service
         };
     }
 
-    public async Task<StumpUploadResponseDto?> UploadToLibraryAsync(
+    public async Task<UploadResult> UploadToLibraryAsync(
         AuthUser user,
         string libraryId,
         string? subpath,
         IEnumerable<StumpUploadFileInput> files,
         CancellationToken ct = default)
     {
+        if (!_uploadOptions.EnableUpload)
+        {
+            return UploadResult.Fail(UploadOutcome.UploadDisabled, "Uploads are disabled on this server.");
+        }
+
         var library = await _db.Libraries.ForUser(user)
             .FirstOrDefaultAsync(l => l.Id == libraryId, ct);
 
-        if (library == null || !Directory.Exists(library.Path)) return null;
+        if (library == null || !Directory.Exists(library.Path))
+        {
+            return UploadResult.Fail(UploadOutcome.LibraryNotFound, "Library not found.");
+        }
 
+        if (!TryResolveTargetDirectory(library.Path, subpath, out var fullTargetDir))
+        {
+            return UploadResult.Fail(UploadOutcome.LibraryNotFound, "Library not found.");
+        }
+
+        Directory.CreateDirectory(fullTargetDir);
+
+        var savedFiles = new List<UploadedFileDto>();
+        foreach (var file in files)
+        {
+            if (string.IsNullOrWhiteSpace(file.FileName) || file.Content == null) continue;
+
+            if (!_uploadOptions.IsExtensionAllowed(file.FileName))
+            {
+                return UploadResult.Fail(
+                    UploadOutcome.ExtensionNotAllowed,
+                    $"The extension of '{Path.GetFileName(file.FileName)}' is not accepted.");
+            }
+
+            var safeName = Path.GetFileName(file.FileName);
+            var destPath = Path.Combine(fullTargetDir, safeName);
+
+            long written;
+            try
+            {
+                written = await WriteWithLimitAsync(file.Content, destPath, _uploadOptions.MaxFileUploadSize, ct);
+            }
+            catch (UploadTooLargeException)
+            {
+                DeleteQuietly(destPath);
+                return UploadResult.Fail(
+                    UploadOutcome.FileTooLarge,
+                    $"'{safeName}' exceeds the maximum size of {_uploadOptions.MaxFileUploadSize} bytes.");
+            }
+
+            savedFiles.Add(new UploadedFileDto
+            {
+                Name = safeName,
+                Path = destPath,
+                Size = written
+            });
+        }
+
+        if (savedFiles.Count == 0)
+        {
+            return UploadResult.Fail(UploadOutcome.NoAcceptedFiles, "No valid files were provided.");
+        }
+
+        // Auto-enqueue scan
+        await _scannerQueue.QueueScanAsync(new ScanRequest(library.Id), ct);
+
+        return UploadResult.Ok(new StumpUploadResponseDto
+        {
+            UploadedCount = savedFiles.Count,
+            Files = savedFiles,
+            ScanJobTriggered = true
+        });
+    }
+
+    private bool TryResolveTargetDirectory(
+        string libraryPath,
+        string? subpath,
+        out string fullTargetDir)
+    {
         var cleanSubpath = (subpath ?? string.Empty).Trim('/', '\\');
         var targetDir = string.IsNullOrEmpty(cleanSubpath)
-            ? library.Path
-            : Path.Combine(library.Path, cleanSubpath);
+            ? libraryPath
+            : Path.Combine(libraryPath, cleanSubpath);
 
-        var fullTargetDir = Path.GetFullPath(targetDir);
-        var fullLibraryPath = Path.GetFullPath(library.Path);
+        fullTargetDir = Path.GetFullPath(targetDir);
+        var fullLibraryPath = Path.GetFullPath(libraryPath);
 
         // Path traversal protection. The library prefix is compared with a trailing
         // separator, otherwise a subpath of "../libFoo" escapes into any sibling
@@ -484,43 +558,51 @@ public sealed class StumpV2Service : IStumpV2Service
         if (!isInsideLibrary)
         {
             _logger.LogWarning("Attempted path traversal upload to {TargetDir} outside {LibraryPath}", fullTargetDir, fullLibraryPath);
-            return null;
+            return false;
         }
 
-        Directory.CreateDirectory(fullTargetDir);
+        return true;
+    }
 
-        var savedFiles = new List<string>();
-        foreach (var file in files)
+    /// <summary>
+    /// Copies the stream while enforcing <paramref name="maxBytes"/> as it goes, so an
+    /// oversized upload is aborted mid-stream instead of after the whole file has landed
+    /// on disk. The caller removes the partial file.
+    /// </summary>
+    private static async Task<long> WriteWithLimitAsync(Stream source, string destPath, long maxBytes, CancellationToken ct)
+    {
+        var buffer = new byte[81920];
+        long total = 0;
+
+        await using var fs = new FileStream(
+            destPath, FileMode.Create, FileAccess.Write, FileShare.None,
+            bufferSize: 81920, useAsync: true);
+
+        int read;
+        while ((read = await source.ReadAsync(buffer, ct)) > 0)
         {
-            if (string.IsNullOrWhiteSpace(file.FileName) || file.Content == null) continue;
-
-            var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-            if (ext is not (".cbz" or ".cbr" or ".epub" or ".pdf" or ".zip")) continue;
-
-            var safeName = Path.GetFileName(file.FileName);
-            var destPath = Path.Combine(fullTargetDir, safeName);
-
-            await using (var fs = new FileStream(
-                destPath, FileMode.Create, FileAccess.Write, FileShare.None,
-                bufferSize: 81920, useAsync: true))
+            total += read;
+            if (total > maxBytes)
             {
-                await file.Content.CopyToAsync(fs, ct);
+                throw new UploadTooLargeException();
             }
 
-            savedFiles.Add(safeName);
+            await fs.WriteAsync(buffer.AsMemory(0, read), ct);
         }
 
-        if (savedFiles.Count == 0) return null;
+        return total;
+    }
 
-        // Auto-enqueue scan
-        await _scannerQueue.QueueScanAsync(new ScanRequest(library.Id), ct);
-
-        return new StumpUploadResponseDto
+    private static void DeleteQuietly(string path)
+    {
+        try
         {
-            UploadedCount = savedFiles.Count,
-            Files = savedFiles,
-            ScanJobTriggered = true
-        };
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Best-effort cleanup: ignore failures if the file is locked or permissions prevent deletion
+        }
     }
 
     public async Task<StumpSystemStatusDto> GetSystemStatusAsync(CancellationToken ct = default)
@@ -619,3 +701,5 @@ public sealed class StumpV2Service : IStumpV2Service
         };
     }
 }
+
+public sealed class UploadTooLargeException : Exception;

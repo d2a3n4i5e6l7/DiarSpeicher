@@ -26,6 +26,7 @@ public class LibraryScannerService : ILibraryScannerService
     private readonly IThumbnailService _thumbnailService;
     private readonly StorageOptions _storage;
     private readonly ILogger<LibraryScannerService> _logger;
+    private readonly IScanProgressPublisher? _progressPublisher;
 
     /// <summary>
     /// Archive decompression and hashing are CPU-bound, so the analysis phase is spread
@@ -41,7 +42,8 @@ public class LibraryScannerService : ILibraryScannerService
         ICompositeBookProcessor bookProcessor,
         IThumbnailService thumbnailService,
         ILogger<LibraryScannerService> logger,
-        IOptions<StorageOptions>? storageOptions = null)
+        IOptions<StorageOptions>? storageOptions = null,
+        IScanProgressPublisher? progressPublisher = null)
     {
         _dbContext = dbContext;
         _directoryScanner = directoryScanner;
@@ -49,6 +51,33 @@ public class LibraryScannerService : ILibraryScannerService
         _thumbnailService = thumbnailService;
         _storage = storageOptions?.Value ?? new StorageOptions();
         _logger = logger;
+        _progressPublisher = progressPublisher;
+    }
+
+    private ValueTask PublishProgressAsync(
+        string libraryId,
+        ScanPhase phase,
+        CancellationToken cancellationToken,
+        int completedSeries = 0,
+        int totalSeries = 0,
+        string? currentSeries = null,
+        string? message = null)
+    {
+        if (_progressPublisher is null)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        return _progressPublisher.PublishAsync(new ScanProgressEvent
+        {
+            JobId = libraryId,
+            LibraryId = libraryId,
+            Phase = phase,
+            CompletedSeries = completedSeries,
+            TotalSeries = totalSeries,
+            CurrentSeries = currentSeries,
+            Message = message
+        }, cancellationToken);
     }
 
     public async Task<LibraryScanReport> ScanLibraryAsync(string libraryId, CancellationToken cancellationToken = default)
@@ -57,6 +86,7 @@ public class LibraryScannerService : ILibraryScannerService
         var report = new LibraryScanReport { LibraryId = libraryId };
 
         _logger.LogInformation("Starting scan for library {LibraryId}", libraryId);
+        await PublishProgressAsync(libraryId, ScanPhase.Started, cancellationToken);
 
         var library = await _dbContext.Libraries
             .Include(l => l.Config)
@@ -68,6 +98,7 @@ public class LibraryScannerService : ILibraryScannerService
             report.Success = false;
             report.ErrorMessage = $"Library {libraryId} not found";
             report.Duration = sw.Elapsed;
+            await PublishProgressAsync(libraryId, ScanPhase.Failed, cancellationToken, message: report.ErrorMessage);
             return report;
         }
 
@@ -81,6 +112,7 @@ public class LibraryScannerService : ILibraryScannerService
             report.Success = false;
             report.ErrorMessage = $"Library directory {libraryPath} does not exist";
             report.Duration = sw.Elapsed;
+            await PublishProgressAsync(libraryId, ScanPhase.Failed, cancellationToken, message: report.ErrorMessage);
             return report;
         }
 
@@ -105,6 +137,7 @@ public class LibraryScannerService : ILibraryScannerService
             .ToListAsync(cancellationToken);
 
         // 2. Walk library
+        await PublishProgressAsync(libraryId, ScanPhase.WalkingLibrary, cancellationToken);
         var walkedLibrary = _directoryScanner.WalkLibrary(libraryPath, isCollectionBased, existingSeries);
         report.TotalDirectories = walkedLibrary.SeenDirectories;
         report.IgnoredDirectories = walkedLibrary.IgnoredDirectories;
@@ -128,6 +161,8 @@ public class LibraryScannerService : ILibraryScannerService
 
         report.Duration = sw.Elapsed;
         report.Success = true;
+
+        await PublishProgressAsync(libraryId, ScanPhase.Completed, cancellationToken, message: "Scan complete");
 
         _logger.LogInformation(
             "Scan complete for library {LibraryId} in {ElapsedMs}ms. Created {CreatedSeries} series, {CreatedMedia} media. Updated {UpdatedSeries} series, {UpdatedMedia} media. Skipped {SkippedFiles} files.",
@@ -204,7 +239,6 @@ public class LibraryScannerService : ILibraryScannerService
 
             var newSeries = new Series
             {
-                Id = Guid.NewGuid().ToString(),
                 Name = dirName,
                 Path = newSeriesPath,
                 LibraryId = libraryId,
@@ -240,10 +274,20 @@ public class LibraryScannerService : ILibraryScannerService
             .ToListAsync(cancellationToken);
 
         var allObservedDirMtimes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var completed = 0;
 
         foreach (var series in seriesEntities)
         {
+            await PublishProgressAsync(
+                libraryId,
+                ScanPhase.ProcessingSeries,
+                cancellationToken,
+                completedSeries: completed,
+                totalSeries: seriesEntities.Count,
+                currentSeries: series.Name);
+
             await ProcessSingleSeriesAsync(series, storedMtimes, thumbnailsDir, allObservedDirMtimes, report, cancellationToken);
+            completed++;
         }
 
         return allObservedDirMtimes;
@@ -360,7 +404,7 @@ public class LibraryScannerService : ILibraryScannerService
         if (mediaToCreate.Count == 0) return;
 
         var prepared = await PrepareMediaAsync(
-            mediaToCreate.Select(path => (Guid.NewGuid().ToString(), path)).ToList(),
+            mediaToCreate.Select(path => (Ulid.NewUlid().ToString(), path)).ToList(),
             thumbnailsDir,
             cancellationToken);
 
