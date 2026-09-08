@@ -32,6 +32,12 @@ La documentación se encuentra organizada en dos fases independientes para permi
    - Protocolo de sincronización KOReader (`/koreader/{apiKey}/...`) basado en `koreader_hash`.
    - Servidor de sincronización nativo Kobo (`/kobo/{apiKey}/...`) con inicialización, sincronización incremental y streaming EPUB.
    - API REST v2 nativa de Stump (`/api/v2/...`) con streaming, encolado de escaneo y motor web de recursos y TOC para EPUBs.
+8. **[09_subida_de_archivos_y_gestion_de_cargas.md](file:///home/diarmund/projects/DiarSpeicher/documentation/fase_1_backend/09_subida_de_archivos_y_gestion_de_cargas.md)**
+   - Sistema de subida multipart (`POST /api/v2/libraries/{id}/upload`) para libros (`.cbz`, `.cbr`, `.epub`) y series (`.zip`).
+   - Sanitización de rutas contra Path Traversal, límites de tamaño y disparo automático de escaneo (`IScannerQueue`).
+9. **[10_api_graphql_hotchocolate.md](file:///home/diarmund/projects/DiarSpeicher/documentation/fase_1_backend/10_api_graphql_hotchocolate.md)**
+   - Servidor GraphQL con HotChocolate 14+ para paridad total con Stump Web SPA.
+   - Queries, Mutations y Subscriptions reactivas con DataLoaders y seguridad `ForUser`.
 
 ---
 

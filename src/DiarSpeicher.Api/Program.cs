@@ -1,10 +1,11 @@
-using DiarSpeicher.Api.Endpoints;
+﻿using DiarSpeicher.Api.Endpoints;
 using DiarSpeicher.Api.Middleware;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
+using DiarSpeicher.Infrastructure.Storage;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
 using DiarSpeicher.Infrastructure.Komga;
 using DiarSpeicher.Infrastructure.Opds;
@@ -15,18 +16,29 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? "Data Source=diarspeicher.db;Cache=Shared;Mode=RWC;";
+    ?? "Data Source=diarspeicher.db;Cache=Shared;Mode=ReadWriteCreate;";
 
 builder.Services.AddDbContext<DiarSpeicherDbContext>(options =>
 {
     options.UseSqlite(connectionString);
 });
 
+// Storage locations & page cache
+builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
+builder.Services.AddSingleton<IPageCache, DiskPageCache>();
+
 // Book Processing & Extraction
 builder.Services.AddSingleton<IBookProcessor, ZipBookProcessor>();
 builder.Services.AddSingleton<IBookProcessor, RarBookProcessor>();
 builder.Services.AddSingleton<IBookProcessor, EpubBookProcessor>();
-builder.Services.AddSingleton<ICompositeBookProcessor, CompositeBookProcessor>();
+builder.Services.AddSingleton<CompositeBookProcessor>();
+
+// Page extraction is served through the disk cache, so every consumer (OPDS, Stump v2,
+// thumbnails) skips repeated decompression of the same page.
+builder.Services.AddSingleton<ICompositeBookProcessor>(sp => new CachingBookProcessor(
+    sp.GetRequiredService<CompositeBookProcessor>(),
+    sp.GetRequiredService<IPageCache>()));
+
 builder.Services.AddSingleton<IThumbnailService, ThumbnailService>();
 
 // OPDS v1.2, v2.0 & Komga Services

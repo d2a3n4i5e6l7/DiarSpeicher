@@ -1,3 +1,4 @@
+﻿using System.IO.Compression;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Filesystem;
@@ -203,5 +204,113 @@ public class ScannerTests : IDisposable
         var restoredMedia = await dbContext.Media.FirstOrDefaultAsync(m => m.Path == bookPath);
         Assert.NotNull(restoredMedia);
         Assert.Equal(FileStatus.Ready, restoredMedia.Status);
+    }
+
+    /// <summary>
+    /// Exercises the parallel analysis phase with enough books to cause real contention.
+    /// Every book carries a distinct page count and title, so a race between the parallel
+    /// workers would surface as results attributed to the wrong media row.
+    /// </summary>
+    [Fact]
+    public async Task LibraryScannerService_ParallelScan_AttributesResultsToTheCorrectMedia()
+    {
+        // Arrange
+        using var dbContext = CreateInMemoryDbContext();
+
+        var libDir = Path.Combine(_tempRootDir, "ParallelLib");
+        Directory.CreateDirectory(libDir);
+
+        const int seriesCount = 3;
+        const int booksPerSeries = 8;
+        var expectedPages = new Dictionary<string, int>(StringComparer.Ordinal);
+        var expectedTitles = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        for (int s = 1; s <= seriesCount; s++)
+        {
+            var seriesDir = Path.Combine(libDir, $"Series{s}");
+            Directory.CreateDirectory(seriesDir);
+
+            for (int b = 1; b <= booksPerSeries; b++)
+            {
+                var bookPath = Path.Combine(seriesDir, $"vol{b:D2}.cbz");
+                var title = $"S{s}-B{b}";
+                var pages = b; // distinct page count per book
+
+                CreateCbz(bookPath, title, pages);
+                expectedPages[bookPath] = pages;
+                expectedTitles[bookPath] = title;
+            }
+        }
+
+        var libraryId = Guid.NewGuid().ToString();
+        dbContext.Libraries.Add(new Library
+        {
+            Id = libraryId,
+            Name = "Parallel",
+            Path = libDir,
+            Status = FileStatus.Ready,
+            Config = new LibraryConfig { LibraryPattern = LibraryPattern.SeriesBased }
+        });
+        await dbContext.SaveChangesAsync();
+
+        var compositeProcessor = new CompositeBookProcessor(new IBookProcessor[]
+        {
+            new ZipBookProcessor(),
+            new RarBookProcessor(),
+            new EpubBookProcessor()
+        });
+        var scannerService = new LibraryScannerService(
+            dbContext,
+            new DirectoryScanner(),
+            compositeProcessor,
+            new ThumbnailService(compositeProcessor, NullLogger<ThumbnailService>.Instance),
+            NullLogger<LibraryScannerService>.Instance);
+
+        // Act
+        var report = await scannerService.ScanLibraryAsync(libraryId);
+
+        // Assert
+        Assert.True(report.Success);
+        Assert.Equal((ulong)seriesCount, report.CreatedSeries);
+        Assert.Equal((ulong)(seriesCount * booksPerSeries), report.CreatedMedia);
+
+        var allMedia = await dbContext.Media.ToListAsync();
+        Assert.Equal(seriesCount * booksPerSeries, allMedia.Count);
+
+        foreach (var media in allMedia)
+        {
+            Assert.Equal(expectedPages[media.Path], media.Pages);
+            Assert.Equal(expectedTitles[media.Path], media.Name);
+            Assert.Equal(FileStatus.Ready, media.Status);
+            Assert.False(string.IsNullOrEmpty(media.Hash));
+
+            Assert.NotNull(media.ThumbnailPath);
+            Assert.True(File.Exists(media.ThumbnailPath), $"Missing thumbnail for {media.Path}");
+        }
+
+        // Hashes must be distinct per book: identical hashes would mean the parallel
+        // workers read each other's files.
+        Assert.Equal(allMedia.Count, allMedia.Select(m => m.Hash).Distinct().Count());
+    }
+
+    private static void CreateCbz(string path, string title, int pageCount)
+    {
+        using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
+
+        var info = zip.CreateEntry("ComicInfo.xml");
+        using (var stream = info.Open())
+        {
+            var xml = $"<ComicInfo><Title>{title}</Title></ComicInfo>";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(xml);
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        for (int i = 1; i <= pageCount; i++)
+        {
+            var page = zip.CreateEntry($"{i:D3}.jpg");
+            using var s = page.Open();
+            // Vary the bytes so each book produces a different hash.
+            s.Write([0xFF, 0xD8, 0xFF, 0xE0, (byte)i, (byte)title.Length, (byte)pageCount]);
+        }
     }
 }

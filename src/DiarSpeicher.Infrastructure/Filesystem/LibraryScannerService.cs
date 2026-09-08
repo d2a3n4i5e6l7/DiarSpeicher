@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
@@ -7,7 +7,9 @@ using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
 using Microsoft.EntityFrameworkCore;
+using DiarSpeicher.Infrastructure.Storage;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace DiarSpeicher.Infrastructure.Filesystem;
 
@@ -22,19 +24,30 @@ public class LibraryScannerService : ILibraryScannerService
     private readonly IDirectoryScanner _directoryScanner;
     private readonly ICompositeBookProcessor _bookProcessor;
     private readonly IThumbnailService _thumbnailService;
+    private readonly StorageOptions _storage;
     private readonly ILogger<LibraryScannerService> _logger;
+
+    /// <summary>
+    /// Archive decompression and hashing are CPU-bound, so the analysis phase is spread
+    /// across cores. The database phase stays single-threaded: DbContext is not thread-safe.
+    /// </summary>
+    private static readonly int AnalysisParallelism = Environment.ProcessorCount;
+
+    private sealed record PreparedMedia(string MediaId, string Path, ProcessedBook Analysis, string? ThumbnailPath);
 
     public LibraryScannerService(
         DiarSpeicherDbContext dbContext,
         IDirectoryScanner directoryScanner,
         ICompositeBookProcessor bookProcessor,
         IThumbnailService thumbnailService,
-        ILogger<LibraryScannerService> logger)
+        ILogger<LibraryScannerService> logger,
+        IOptions<StorageOptions>? storageOptions = null)
     {
         _dbContext = dbContext;
         _directoryScanner = directoryScanner;
         _bookProcessor = bookProcessor;
         _thumbnailService = thumbnailService;
+        _storage = storageOptions?.Value ?? new StorageOptions();
         _logger = logger;
     }
 
@@ -77,7 +90,8 @@ public class LibraryScannerService : ILibraryScannerService
         }
 
         var isCollectionBased = library.Config?.LibraryPattern == LibraryPattern.CollectionBased;
-        var thumbnailsDir = Path.Combine(Directory.GetCurrentDirectory(), "storage", "thumbnails");
+        var thumbnailsDir = _storage.ResolveThumbnailsPath();
+        Directory.CreateDirectory(thumbnailsDir);
 
         // 1. Load cached directory mtimes and existing series
         var storedMtimes = await _dbContext.ScannedDirectories
@@ -297,6 +311,45 @@ public class LibraryScannerService : ILibraryScannerService
         }
     }
 
+    /// <summary>
+    /// Parallel phase of a scan: opens, decompresses and hashes each book and writes its
+    /// thumbnail. Deliberately touches no DbContext state, so it is safe to fan out.
+    /// A book that fails to process is logged and dropped rather than aborting the batch.
+    /// </summary>
+    private async Task<List<PreparedMedia>> PrepareMediaAsync(
+        List<(string MediaId, string Path)> targets,
+        string thumbnailsDir,
+        CancellationToken cancellationToken)
+    {
+        var results = new PreparedMedia?[targets.Count];
+
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, targets.Count),
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = AnalysisParallelism,
+                CancellationToken = cancellationToken
+            },
+            async (index, token) =>
+            {
+                var (mediaId, mediaPath) = targets[index];
+                try
+                {
+                    // includeCover reuses the archive that the analysis already opened,
+                    // instead of decompressing the whole book a second time for the cover.
+                    var analyzed = await _bookProcessor.AnalyzeAsync(mediaPath, includeCover: true, token);
+                    var thumbPath = await _thumbnailService.SaveThumbnailAsync(mediaId, analyzed.Cover, thumbnailsDir, token);
+                    results[index] = new PreparedMedia(mediaId, mediaPath, analyzed, thumbPath);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "Failed to process media file {Path}; skipping it", mediaPath);
+                }
+            });
+
+        return results.OfType<PreparedMedia>().ToList();
+    }
+
     private async Task CreateNewMediaAsync(
         string seriesId,
         List<string> mediaToCreate,
@@ -304,15 +357,19 @@ public class LibraryScannerService : ILibraryScannerService
         LibraryScanReport report,
         CancellationToken cancellationToken)
     {
-        foreach (var mediaPath in mediaToCreate)
+        if (mediaToCreate.Count == 0) return;
+
+        var prepared = await PrepareMediaAsync(
+            mediaToCreate.Select(path => (Guid.NewGuid().ToString(), path)).ToList(),
+            thumbnailsDir,
+            cancellationToken);
+
+        // Sequential phase: the change tracker must only ever be touched by one thread.
+        foreach (var (newMediaId, mediaPath, analyzed, thumbPath) in prepared)
         {
             var fileInfo = new FileInfo(mediaPath);
             var ext = fileInfo.Extension.TrimStart('.').ToLowerInvariant();
             var name = Path.GetFileNameWithoutExtension(mediaPath);
-
-            var analyzed = await _bookProcessor.AnalyzeAsync(mediaPath, cancellationToken);
-            var newMediaId = Guid.NewGuid().ToString();
-            var thumbPath = await _thumbnailService.GenerateThumbnailAsync(newMediaId, mediaPath, thumbnailsDir, cancellationToken);
 
             var newMedia = new Media
             {
@@ -355,13 +412,26 @@ public class LibraryScannerService : ILibraryScannerService
             .Where(m => m.SeriesId == seriesId && toVisitPaths.Contains(m.Path))
             .ToListAsync(cancellationToken);
 
-        foreach (var m in mediaToUpdate)
+        var existingOnDisk = mediaToUpdate.Where(m => File.Exists(m.Path)).ToList();
+        if (existingOnDisk.Count == 0) return;
+
+        var prepared = await PrepareMediaAsync(
+            existingOnDisk.Select(m => (m.Id, m.Path)).ToList(),
+            thumbnailsDir,
+            cancellationToken);
+
+        var byId = prepared.ToDictionary(p => p.MediaId, StringComparer.Ordinal);
+
+        // Sequential phase: the change tracker must only ever be touched by one thread.
+        foreach (var m in existingOnDisk)
         {
+            if (!byId.TryGetValue(m.Id, out var result)) continue;
+
             var fileInfo = new FileInfo(m.Path);
             if (!fileInfo.Exists) continue;
 
-            var analyzed = await _bookProcessor.AnalyzeAsync(m.Path, cancellationToken);
-            var thumbPath = await _thumbnailService.GenerateThumbnailAsync(m.Id, m.Path, thumbnailsDir, cancellationToken);
+            var analyzed = result.Analysis;
+            var thumbPath = result.ThumbnailPath;
 
             m.Size = fileInfo.Length;
             m.Pages = analyzed.Pages;

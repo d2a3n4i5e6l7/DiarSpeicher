@@ -1,7 +1,8 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Xml.Linq;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Metadata;
+using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Processors;
@@ -9,7 +10,14 @@ namespace DiarSpeicher.Infrastructure.Filesystem.Processors;
 public interface IBookProcessor
 {
     bool CanProcess(string extension);
-    Task<ProcessedBook> AnalyzeBookAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Analyzes a book. When <paramref name="includeCover"/> is set the cover page is
+    /// returned in <see cref="ProcessedBook.Cover"/>, so callers that need both metadata
+    /// and a thumbnail only open and decompress the archive once.
+    /// </summary>
+    Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default);
+
     Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
 }
 
@@ -21,104 +29,118 @@ public class ZipBookProcessor : IBookProcessor
         return clean is "cbz" or "zip";
     }
 
-    public Task<ProcessedBook> AnalyzeBookAsync(string path, CancellationToken cancellationToken = default)
+    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default)
     {
         ExtractedMetadata? metadata = null;
         List<string> tags = [];
-        var imageEntries = new List<string>();
+        var pageCount = 0;
+        ExtractedPage? cover = null;
 
         try
         {
-            using var archive = ZipFile.OpenRead(path);
+            await using var archive = await ZipFile.OpenReadAsync(path, cancellationToken);
+            var imageEntries = new List<ZipArchiveEntry>();
+
             foreach (var entry in archive.Entries)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var entryName = entry.FullName;
                 if (PathUtils.IsHiddenFile(entryName))
                 {
                     continue;
                 }
 
-                var ext = Path.GetExtension(entryName);
-                var ct = ContentTypeExtensions.FromExtension(ext);
+                var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entryName));
 
                 if (string.Equals(Path.GetFileName(entryName), "ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
                 {
-                    using var stream = entry.Open();
+                    await using var stream = await entry.OpenAsync(cancellationToken);
                     using var reader = new StreamReader(stream);
-                    var xmlContent = reader.ReadToEnd();
+                    var xmlContent = await reader.ReadToEndAsync(cancellationToken);
                     (metadata, tags) = ComicInfoParser.Parse(xmlContent);
                 }
                 else if (ct.IsImage())
                 {
-                    imageEntries.Add(entryName);
+                    imageEntries.Add(entry);
                 }
             }
 
-            imageEntries.Sort(NaturalSortComparer.OrdinalIgnoreCase);
+            imageEntries.Sort(static (a, b) => NaturalSortComparer.OrdinalIgnoreCase.Compare(a.FullName, b.FullName));
+            pageCount = imageEntries.Count;
+
+            if (includeCover && imageEntries.Count > 0)
+            {
+                cover = await ReadEntryAsync(imageEntries[0], cancellationToken);
+            }
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Corrupt archive or read error: proceed with 0 pages
         }
 
         var fileInfo = new FileInfo(path);
         var length = fileInfo.Exists ? fileInfo.Length : 0;
-        var stumpHash = MediaHasher.ComputeStumpHash(path, length);
+        var stumpHash = await MediaHasher.ComputeStumpHashAsync(path, length, cancellationToken);
 
-        var result = new ProcessedBook
+        return new ProcessedBook
         {
-            Pages = imageEntries.Count,
+            Pages = pageCount,
             Hash = stumpHash,
             KoreaderHash = null,
             Metadata = metadata,
-            Tags = tags
+            Tags = tags,
+            Cover = cover
         };
-
-        return Task.FromResult(result);
     }
 
-    public Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
+    public async Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
     {
-        if (pageNumber < 1) return Task.FromResult<ExtractedPage?>(null);
+        if (pageNumber < 1) return null;
 
         try
         {
-            using var archive = ZipFile.OpenRead(path);
+            await using var archive = await ZipFile.OpenReadAsync(path, cancellationToken);
             var imageEntries = new List<ZipArchiveEntry>();
 
             foreach (var entry in archive.Entries)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (PathUtils.IsHiddenFile(entry.FullName))
                     continue;
 
-                var ext = Path.GetExtension(entry.FullName);
-                var ct = ContentTypeExtensions.FromExtension(ext);
+                var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entry.FullName));
                 if (ct.IsImage())
                 {
                     imageEntries.Add(entry);
                 }
             }
 
-            imageEntries.Sort((a, b) => NaturalSortComparer.OrdinalIgnoreCase.Compare(a.FullName, b.FullName));
+            imageEntries.Sort(static (a, b) => NaturalSortComparer.OrdinalIgnoreCase.Compare(a.FullName, b.FullName));
 
             int targetIndex = pageNumber - 1;
             if (targetIndex >= imageEntries.Count)
             {
-                return Task.FromResult<ExtractedPage?>(null);
+                return null;
             }
 
-            var targetEntry = imageEntries[targetIndex];
-            using var stream = targetEntry.Open();
-            using var ms = new MemoryStream();
-            stream.CopyTo(ms);
-
-            var ctTarget = ContentTypeExtensions.FromExtension(Path.GetExtension(targetEntry.FullName));
-            return Task.FromResult<ExtractedPage?>(new ExtractedPage(ctTarget, ms.ToArray()));
+            return await ReadEntryAsync(imageEntries[targetIndex], cancellationToken);
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return Task.FromResult<ExtractedPage?>(null);
+            return null;
         }
+    }
+
+    private static async Task<ExtractedPage> ReadEntryAsync(ZipArchiveEntry entry, CancellationToken cancellationToken)
+    {
+        await using var stream = await entry.OpenAsync(cancellationToken);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, cancellationToken);
+
+        var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entry.FullName));
+        return new ExtractedPage(ct, ms.ToArray());
     }
 }
 
@@ -130,15 +152,19 @@ public class RarBookProcessor : IBookProcessor
         return clean is "cbr" or "rar";
     }
 
-    public Task<ProcessedBook> AnalyzeBookAsync(string path, CancellationToken cancellationToken = default)
+    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default)
     {
         ExtractedMetadata? metadata = null;
         List<string> tags = [];
-        var imageNames = new List<string>();
+        var pageCount = 0;
+        ExtractedPage? cover = null;
 
-        using (var archive = RarArchive.OpenArchive(path))
+        try
         {
-            foreach (var entry in archive.Entries)
+            await using var archive = await RarArchive.OpenAsyncArchive(path, cancellationToken: cancellationToken);
+            var imageEntries = new List<IArchiveEntry>();
+
+            await foreach (var entry in archive.EntriesAsync.WithCancellation(cancellationToken))
             {
                 if (entry.IsDirectory) continue;
                 var key = entry.Key;
@@ -146,68 +172,90 @@ public class RarBookProcessor : IBookProcessor
 
                 if (string.Equals(Path.GetFileName(key), "ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
                 {
-                    using var entryStream = entry.OpenEntryStream();
+                    await using var entryStream = await entry.OpenEntryStreamAsync(cancellationToken);
                     using var streamReader = new StreamReader(entryStream);
-                    var xmlContent = streamReader.ReadToEnd();
+                    var xmlContent = await streamReader.ReadToEndAsync(cancellationToken);
                     (metadata, tags) = ComicInfoParser.Parse(xmlContent);
                 }
-                else
+                else if (ContentTypeExtensions.FromExtension(Path.GetExtension(key)).IsImage())
                 {
-                    var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(key));
-                    if (ct.IsImage())
-                    {
-                        imageNames.Add(key);
-                    }
+                    imageEntries.Add(entry);
                 }
             }
-        }
 
-        imageNames.Sort(NaturalSortComparer.OrdinalIgnoreCase);
+            imageEntries.Sort(static (a, b) => NaturalSortComparer.OrdinalIgnoreCase.Compare(a.Key, b.Key));
+            pageCount = imageEntries.Count;
+
+            if (includeCover && imageEntries.Count > 0)
+            {
+                cover = await ReadEntryAsync(imageEntries[0], cancellationToken);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Corrupt archive or read error: proceed with 0 pages
+        }
 
         var fileInfo = new FileInfo(path);
         var length = fileInfo.Exists ? fileInfo.Length : 0;
-        var stumpHash = MediaHasher.ComputeStumpHash(path, length);
+        var stumpHash = await MediaHasher.ComputeStumpHashAsync(path, length, cancellationToken);
 
-        var result = new ProcessedBook
+        return new ProcessedBook
         {
-            Pages = imageNames.Count,
+            Pages = pageCount,
             Hash = stumpHash,
             KoreaderHash = null,
             Metadata = metadata,
-            Tags = tags
+            Tags = tags,
+            Cover = cover
         };
-
-        return Task.FromResult(result);
     }
 
-    public Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
+    public async Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
     {
-        if (pageNumber < 1) return Task.FromResult<ExtractedPage?>(null);
+        if (pageNumber < 1) return null;
 
-        using var archive = RarArchive.OpenArchive(path);
-
-        var imageEntries = archive.Entries
-            .Where(e => !e.IsDirectory
-                        && !string.IsNullOrEmpty(e.Key)
-                        && !PathUtils.IsHiddenFile(e.Key)
-                        && ContentTypeExtensions.FromExtension(Path.GetExtension(e.Key)).IsImage())
-            .OrderBy(e => e.Key, NaturalSortComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var targetIndex = pageNumber - 1;
-        if (targetIndex >= imageEntries.Count)
+        try
         {
-            return Task.FromResult<ExtractedPage?>(null);
+            await using var archive = await RarArchive.OpenAsyncArchive(path, cancellationToken: cancellationToken);
+
+            var imageEntries = new List<IArchiveEntry>();
+            await foreach (var entry in archive.EntriesAsync.WithCancellation(cancellationToken))
+            {
+                if (entry.IsDirectory) continue;
+                var key = entry.Key;
+                if (string.IsNullOrEmpty(key) || PathUtils.IsHiddenFile(key)) continue;
+
+                if (ContentTypeExtensions.FromExtension(Path.GetExtension(key)).IsImage())
+                {
+                    imageEntries.Add(entry);
+                }
+            }
+
+            imageEntries.Sort(static (a, b) => NaturalSortComparer.OrdinalIgnoreCase.Compare(a.Key, b.Key));
+
+            var targetIndex = pageNumber - 1;
+            if (targetIndex >= imageEntries.Count)
+            {
+                return null;
+            }
+
+            return await ReadEntryAsync(imageEntries[targetIndex], cancellationToken);
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
 
-        var targetEntry = imageEntries[targetIndex];
-
-        using var entryStream = targetEntry.OpenEntryStream();
+    private static async Task<ExtractedPage> ReadEntryAsync(IArchiveEntry entry, CancellationToken cancellationToken)
+    {
+        await using var entryStream = await entry.OpenEntryStreamAsync(cancellationToken);
         using var ms = new MemoryStream();
-        entryStream.CopyTo(ms);
+        await entryStream.CopyToAsync(ms, cancellationToken);
 
-        var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(targetEntry.Key));
-        return Task.FromResult<ExtractedPage?>(new ExtractedPage(ct, ms.ToArray()));
+        var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entry.Key));
+        return new ExtractedPage(ct, ms.ToArray());
     }
 }
 
@@ -219,49 +267,84 @@ public class EpubBookProcessor : IBookProcessor
         return clean == "epub";
     }
 
-    public Task<ProcessedBook> AnalyzeBookAsync(string path, CancellationToken cancellationToken = default)
+    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default)
     {
-        using var archive = ZipFile.OpenRead(path);
         var metadata = new ExtractedMetadata();
         var tags = new List<string>();
         int chapterCount = 0;
+        ExtractedPage? cover = null;
 
-        var opfPath = FindOpfPath(archive);
-        if (!string.IsNullOrEmpty(opfPath))
+        await using (var archive = await ZipFile.OpenReadAsync(path, cancellationToken))
         {
-            var opfEntry = archive.GetEntry(opfPath);
-            if (opfEntry is not null)
+            var opfPath = await FindOpfPathAsync(archive, cancellationToken);
+            if (!string.IsNullOrEmpty(opfPath))
             {
-                ReadOpfData(opfEntry, metadata, tags, ref chapterCount);
+                var opfEntry = archive.GetEntry(opfPath);
+                if (opfEntry is not null)
+                {
+                    chapterCount = await ReadOpfDataAsync(opfEntry, metadata, tags, cancellationToken);
+                }
             }
-        }
 
-        if (chapterCount == 0)
-        {
-            chapterCount = CountFallbackHtmlEntries(archive);
+            if (chapterCount == 0)
+            {
+                chapterCount = CountFallbackHtmlEntries(archive);
+            }
+
+            if (includeCover)
+            {
+                var coverEntry = await FindCoverEntryAsync(archive, cancellationToken);
+                if (coverEntry is not null)
+                {
+                    cover = await ReadEntryAsync(coverEntry, cancellationToken);
+                }
+            }
         }
 
         var fileInfo = new FileInfo(path);
         var length = fileInfo.Exists ? fileInfo.Length : 0;
-        var stumpHash = MediaHasher.ComputeStumpHash(path, length);
-        var koreaderHash = MediaHasher.ComputeKoreaderHash(path);
+        var stumpHash = await MediaHasher.ComputeStumpHashAsync(path, length, cancellationToken);
+        var koreaderHash = await MediaHasher.ComputeKoreaderHashAsync(path, cancellationToken);
 
-        var result = new ProcessedBook
+        return new ProcessedBook
         {
             Pages = Math.Max(1, chapterCount),
             Hash = stumpHash,
             KoreaderHash = koreaderHash,
             Metadata = metadata,
-            Tags = tags.Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+            Tags = tags.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            Cover = cover
         };
-
-        return Task.FromResult(result);
     }
 
-    private static void ReadOpfData(ZipArchiveEntry opfEntry, ExtractedMetadata metadata, List<string> tags, ref int chapterCount)
+    public async Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
     {
-        using var stream = opfEntry.Open();
-        var doc = XDocument.Load(stream);
+        // For EPUB, page 1 is the cover image
+        await using var archive = await ZipFile.OpenReadAsync(path, cancellationToken);
+        var coverEntry = await FindCoverEntryAsync(archive, cancellationToken);
+        if (coverEntry is null)
+        {
+            return null;
+        }
+
+        return await ReadEntryAsync(coverEntry, cancellationToken);
+    }
+
+    private static async Task<ExtractedPage> ReadEntryAsync(ZipArchiveEntry entry, CancellationToken cancellationToken)
+    {
+        await using var stream = await entry.OpenAsync(cancellationToken);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, cancellationToken);
+
+        var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entry.FullName));
+        return new ExtractedPage(ct, ms.ToArray());
+    }
+
+    /// <summary>Returns the chapter count found in the OPF spine.</summary>
+    private static async Task<int> ReadOpfDataAsync(
+        ZipArchiveEntry opfEntry, ExtractedMetadata metadata, List<string> tags, CancellationToken cancellationToken)
+    {
+        var doc = await LoadXmlAsync(opfEntry, cancellationToken);
 
         var titleElem = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "title");
         if (titleElem is not null) metadata.Title = titleElem.Value.Trim();
@@ -293,11 +376,13 @@ public class EpubBookProcessor : IBookProcessor
         }
 
         var spineElem = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "spine");
-        chapterCount = spineElem?.Descendants().Count(e => e.Name.LocalName == "itemref") ?? 0;
+        var chapterCount = spineElem?.Descendants().Count(e => e.Name.LocalName == "itemref") ?? 0;
         if (chapterCount == 0)
         {
             chapterCount = doc.Descendants().Count(e => e.Name.LocalName == "itemref");
         }
+
+        return chapterCount;
     }
 
     private static int CountFallbackHtmlEntries(ZipArchive archive)
@@ -309,54 +394,44 @@ public class EpubBookProcessor : IBookProcessor
         });
     }
 
-    public Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
+    private static async Task<XDocument> LoadXmlAsync(ZipArchiveEntry entry, CancellationToken cancellationToken)
     {
-        // For EPUB, page 1 is the cover image
-        using var archive = ZipFile.OpenRead(path);
-        var coverEntry = FindCoverEntry(archive);
-        if (coverEntry is null)
-        {
-            return Task.FromResult<ExtractedPage?>(null);
-        }
-
-        using var stream = coverEntry.Open();
-        using var ms = new MemoryStream();
-        stream.CopyTo(ms);
-
-        var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(coverEntry.FullName));
-        return Task.FromResult<ExtractedPage?>(new ExtractedPage(ct, ms.ToArray()));
+        await using var stream = await entry.OpenAsync(cancellationToken);
+        return await XDocument.LoadAsync(stream, LoadOptions.None, cancellationToken);
     }
 
-    private static string? FindOpfPath(ZipArchive archive)
+    private static async Task<string?> FindOpfPathAsync(ZipArchive archive, CancellationToken cancellationToken)
     {
         var container = archive.GetEntry("META-INF/container.xml");
         if (container is null)
         {
-            return archive.Entries.FirstOrDefault(e => e.FullName.EndsWith(".opf", StringComparison.OrdinalIgnoreCase))?.FullName;
+            return FirstOpfEntryName(archive);
         }
 
         try
         {
-            using var stream = container.Open();
-            var doc = XDocument.Load(stream);
+            var doc = await LoadXmlAsync(container, cancellationToken);
             var rootfile = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "rootfile");
             return rootfile?.Attribute("full-path")?.Value;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return archive.Entries.FirstOrDefault(e => e.FullName.EndsWith(".opf", StringComparison.OrdinalIgnoreCase))?.FullName;
+            return FirstOpfEntryName(archive);
         }
     }
 
-    private static ZipArchiveEntry? FindCoverEntry(ZipArchive archive)
+    private static string? FirstOpfEntryName(ZipArchive archive) =>
+        archive.Entries.FirstOrDefault(e => e.FullName.EndsWith(".opf", StringComparison.OrdinalIgnoreCase))?.FullName;
+
+    private static async Task<ZipArchiveEntry?> FindCoverEntryAsync(ZipArchive archive, CancellationToken cancellationToken)
     {
-        var opfPath = FindOpfPath(archive);
+        var opfPath = await FindOpfPathAsync(archive, cancellationToken);
         if (!string.IsNullOrEmpty(opfPath))
         {
             var opfEntry = archive.GetEntry(opfPath);
             if (opfEntry is not null)
             {
-                var entry = TryFindCoverFromOpf(archive, opfEntry, opfPath);
+                var entry = await TryFindCoverFromOpfAsync(archive, opfEntry, opfPath, cancellationToken);
                 if (entry is not null) return entry;
             }
         }
@@ -364,12 +439,12 @@ public class EpubBookProcessor : IBookProcessor
         return FindFallbackCoverEntry(archive);
     }
 
-    private static ZipArchiveEntry? TryFindCoverFromOpf(ZipArchive archive, ZipArchiveEntry opfEntry, string opfPath)
+    private static async Task<ZipArchiveEntry?> TryFindCoverFromOpfAsync(
+        ZipArchive archive, ZipArchiveEntry opfEntry, string opfPath, CancellationToken cancellationToken)
     {
         try
         {
-            using var stream = opfEntry.Open();
-            var doc = XDocument.Load(stream);
+            var doc = await LoadXmlAsync(opfEntry, cancellationToken);
             var href = ExtractCoverHref(doc);
 
             if (!string.IsNullOrEmpty(href))
@@ -379,7 +454,7 @@ public class EpubBookProcessor : IBookProcessor
                 return archive.GetEntry(fullHref);
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Fallback to name search
         }
@@ -431,7 +506,7 @@ public class EpubBookProcessor : IBookProcessor
 public interface ICompositeBookProcessor
 {
     IBookProcessor? GetProcessor(string path);
-    Task<ProcessedBook> AnalyzeAsync(string path, CancellationToken cancellationToken = default);
+    Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default);
     Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
 }
 
@@ -450,7 +525,7 @@ public class CompositeBookProcessor : ICompositeBookProcessor
         return _processors.FirstOrDefault(p => p.CanProcess(ext));
     }
 
-    public async Task<ProcessedBook> AnalyzeAsync(string path, CancellationToken cancellationToken = default)
+    public async Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default)
     {
         var processor = GetProcessor(path);
         if (processor is null)
@@ -460,12 +535,12 @@ public class CompositeBookProcessor : ICompositeBookProcessor
             return new ProcessedBook
             {
                 Pages = 0,
-                Hash = MediaHasher.ComputeStumpHash(path, len),
-                KoreaderHash = MediaHasher.ComputeKoreaderHash(path)
+                Hash = await MediaHasher.ComputeStumpHashAsync(path, len, cancellationToken),
+                KoreaderHash = await MediaHasher.ComputeKoreaderHashAsync(path, cancellationToken)
             };
         }
 
-        return await processor.AnalyzeBookAsync(path, cancellationToken);
+        return await processor.AnalyzeBookAsync(path, includeCover, cancellationToken);
     }
 
     public Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)

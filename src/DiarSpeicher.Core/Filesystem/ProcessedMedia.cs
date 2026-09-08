@@ -1,4 +1,4 @@
-namespace DiarSpeicher.Core.Filesystem;
+﻿namespace DiarSpeicher.Core.Filesystem;
 
 public record ExtractedPage(ContentType ContentType, byte[] Data);
 
@@ -33,4 +33,10 @@ public record ProcessedBook
     public string? KoreaderHash { get; init; }
     public ExtractedMetadata? Metadata { get; init; }
     public List<string> Tags { get; init; } = [];
+
+    /// <summary>
+    /// Cover page, populated only when the analysis was requested with includeCover.
+    /// Lets a caller obtain metadata and cover from a single archive open.
+    /// </summary>
+    public ExtractedPage? Cover { get; init; }
 }
