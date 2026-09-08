@@ -1,5 +1,8 @@
 using DiarSpeicher.Api.Middleware;
+using DiarSpeicher.Core.Filesystem;
+using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Filesystem;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,6 +14,12 @@ builder.Services.AddDbContext<DiarSpeicherDbContext>(options =>
 {
     options.UseSqlite(connectionString);
 });
+
+// Filesystem Scanner & Background Worker
+builder.Services.AddSingleton<IDirectoryScanner, DirectoryScanner>();
+builder.Services.AddScoped<ILibraryScannerService, LibraryScannerService>();
+builder.Services.AddSingleton<IScannerQueue, ScannerQueue>();
+builder.Services.AddHostedService<ScanBackgroundService>();
 
 var app = builder.Build();
 
@@ -31,5 +40,15 @@ app.MapGet("/health", () => Results.Ok(new
     version = "1.0.0",
     database = "SQLite (WAL)"
 }));
+
+app.MapPost("/api/libraries/{id}/scan", async (string id, IScannerQueue queue) =>
+{
+    await queue.QueueScanAsync(new ScanRequest(id));
+    return Results.Accepted($"/api/libraries/{id}/scan", new
+    {
+        message = "Library scan queued successfully",
+        libraryId = id
+    });
+});
 
 await app.RunAsync();
