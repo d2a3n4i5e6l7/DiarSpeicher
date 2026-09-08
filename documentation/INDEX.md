@@ -25,6 +25,9 @@ La documentación se encuentra organizada en dos fases independientes para permi
    - Procesadores por formato (`ZipArchive`, `SharpCompress`, `VersOne.Epub`).
    - Hashing doble: Stump SHA-256 (muestreo de 4 bloques) y KOReader MD5 exponencial ($1024 \ll 2i$).
    - Parsing y normalización de `ComicInfo.xml`.
+6. **[07_catalogo_opds_v2_y_compatibilidad_komga.md](file:///home/diarmund/projects/DiarSpeicher/documentation/fase_1_backend/07_catalogo_opds_v2_y_compatibilidad_komga.md)**
+   - Catálogo OPDS v2.0 (Readium JSON-LD / WebPub Manifest) con navegación, facetado y sincronización de progreso.
+   - API REST compatible con Komga (`/api/v1/...`) con paginación Spring (`Page<T>`), páginas, miniaturas y tracking de lectura.
 
 ---
 

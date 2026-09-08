@@ -204,7 +204,7 @@ public class OpdsService : IOpdsService
 
         var totalCount = await query.CountAsync(ct);
         var seriesList = await query
-            .OrderByDescending(s => s.CreatedAt)
+            .OrderByDescending(s => s.Id)
             .Skip(page * PageSize)
             .Take(PageSize)
             .ToListAsync(ct);
@@ -304,7 +304,7 @@ public class OpdsService : IOpdsService
 
         var totalCount = await query.CountAsync(ct);
         var books = await query
-            .OrderByDescending(m => m.CreatedAt)
+            .OrderByDescending(m => m.Id)
             .Skip(page * PageSize)
             .Take(PageSize)
             .ToListAsync(ct);

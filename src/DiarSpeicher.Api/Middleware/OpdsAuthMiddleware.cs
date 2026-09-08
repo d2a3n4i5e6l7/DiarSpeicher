@@ -21,7 +21,8 @@ public partial class OpdsAuthMiddleware
     {
         var path = context.Request.Path.Value ?? string.Empty;
 
-        if (!path.StartsWith("/opds", StringComparison.OrdinalIgnoreCase))
+        if (!path.StartsWith("/opds", StringComparison.OrdinalIgnoreCase) &&
+            !path.StartsWith("/api/v1", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
             return;

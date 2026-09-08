@@ -6,6 +6,7 @@ using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
+using DiarSpeicher.Infrastructure.Komga;
 using DiarSpeicher.Infrastructure.Opds;
 using Microsoft.EntityFrameworkCore;
 
@@ -28,6 +29,8 @@ builder.Services.AddSingleton<IThumbnailService, ThumbnailService>();
 
 // OPDS v1.2 & Media Streaming Service
 builder.Services.AddScoped<IOpdsService, OpdsService>();
+builder.Services.AddScoped<IOpdsV2Service, OpdsV2Service>();
+builder.Services.AddScoped<IKomgaService, KomgaService>();
 
 // Filesystem Scanner & Background Worker
 builder.Services.AddSingleton<IDirectoryScanner, DirectoryScanner>();
@@ -67,6 +70,8 @@ app.MapPost("/api/libraries/{id}/scan", async (string id, IScannerQueue queue) =
 });
 
 app.MapOpdsEndpoints();
+app.MapOpdsV2Endpoints();
+app.MapKomgaEndpoints();
 
 await app.RunAsync();
 

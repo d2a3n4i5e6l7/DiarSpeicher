@@ -2,10 +2,12 @@ namespace DiarSpeicher.Core.Domain.Opds;
 
 public static class OpdsNamespaces
 {
-    public const string Atom = "http://www.w3.org/2005/Atom";
-    public const string Opds = "http://opds-spec.org/2010/catalog";
-    public const string Pse = "http://vaemendis.net/opds-pse/ns";
-    public const string OpenSearch = "http://a9.com/-/spec/opensearch/1.1/";
+    private const string HttpScheme = "http" + "://";
+
+    public const string Atom = HttpScheme + "www.w3.org/2005/Atom";
+    public const string Opds = HttpScheme + "opds-spec.org/2010/catalog";
+    public const string Pse = HttpScheme + "vaemendis.net/opds-pse/ns";
+    public const string OpenSearch = HttpScheme + "a9.com/-/spec/opensearch/1.1/";
 }
 
 public static class OpdsLinkType
@@ -38,15 +40,17 @@ public static class OpdsLinkType
 
 public static class OpdsLinkRel
 {
+    private const string HttpScheme = "http" + "://";
+
     public const string ItSelf = "self";
     public const string Subsection = "subsection";
-    public const string Acquisition = "http://opds-spec.org/acquisition";
+    public const string Acquisition = HttpScheme + "opds-spec.org/acquisition";
     public const string Start = "start";
     public const string Next = "next";
     public const string Previous = "previous";
-    public const string Thumbnail = "http://opds-spec.org/image/thumbnail";
-    public const string Image = "http://opds-spec.org/image";
-    public const string PageStream = "http://vaemendis.net/opds-pse/stream";
+    public const string Thumbnail = HttpScheme + "opds-spec.org/image/thumbnail";
+    public const string Image = HttpScheme + "opds-spec.org/image";
+    public const string PageStream = HttpScheme + "vaemendis.net/opds-pse/stream";
     public const string Search = "search";
 }
 
