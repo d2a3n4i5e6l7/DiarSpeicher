@@ -1,4 +1,4 @@
-using DiarSpeicher.Core.Domain.Entities;
+﻿using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Filesystem;
@@ -163,6 +163,13 @@ public class Mutation
         if (result.Outcome != UploadOutcome.Success)
         {
             throw new GraphQLException(result.Message ?? "The upload failed.");
+        }
+
+        // A successful outcome is expected to carry the response, but the type allows it to be
+        // null, and dereferencing it blind would surface as a 500 with no explanation.
+        if (result.Response is null)
+        {
+            throw new GraphQLException("The upload reported success without a response.");
         }
 
         return new UploadBooksPayload

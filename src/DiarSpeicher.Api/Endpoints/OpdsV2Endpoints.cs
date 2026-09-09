@@ -184,7 +184,7 @@ public static class OpdsV2Endpoints
 
             return Results.File(
                 book.Path,
-                contentType: "application/octet-stream",
+                contentType: ContentTypeExtensions.FromExtension(book.Extension).MimeType(),
                 fileDownloadName: Path.GetFileName(book.Path),
                 enableRangeProcessing: true);
         });

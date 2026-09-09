@@ -1,4 +1,4 @@
-using DiarSpeicher.Core.Domain.Entities;
+﻿using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Opds;
@@ -87,7 +87,7 @@ public sealed class OpdsV2Tests : IDisposable
     public void GetAuthenticationDoc_ReturnsValidAuthDocument()
     {
         using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance);
+        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root);
 
         var authDoc = service.GetAuthenticationDoc(null);
 
@@ -100,7 +100,7 @@ public sealed class OpdsV2Tests : IDisposable
     public async Task GetCatalogFeedAsync_ReturnsJsonLdFeedWithNavigationAndGroups()
     {
         using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance);
+        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root);
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var feed = await service.GetCatalogFeedAsync(user, null);
@@ -117,7 +117,7 @@ public sealed class OpdsV2Tests : IDisposable
     public async Task GetPublicationAsync_ReturnsValidManifestWithReadingOrder()
     {
         using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance);
+        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root);
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var pub = await service.GetPublicationAsync(user, _kidBookId, null);
@@ -137,7 +137,7 @@ public sealed class OpdsV2Tests : IDisposable
     public async Task Progression_CanUpdateAndRetrieveProgress()
     {
         using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance);
+        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root);
 
         var user = new AuthUser { Id = "reader_v2", Username = "luffy", IsServerOwner = false };
 
@@ -168,7 +168,7 @@ public sealed class OpdsV2Tests : IDisposable
     public async Task GetBooksFeedAsync_EnforcesParentalAgeRestrictionInOpdsV2()
     {
         using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance);
+        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root);
 
         var childUser = new AuthUser
         {

@@ -1,4 +1,4 @@
-namespace DiarSpeicher.Core.Domain.Models;
+﻿namespace DiarSpeicher.Core.Domain.Models;
 
 public class AuthUser
 {
@@ -13,4 +13,21 @@ public class AuthUser
 
     public bool HasRole(string role) =>
         IsServerOwner || Roles.Contains(role);
+
+    /// <summary>
+    /// True for a request the gateway let through on a public route, which carries no identity.
+    /// </summary>
+    public bool IsAnonymous => string.IsNullOrEmpty(Id);
+
+    /// <summary>
+    /// Identity for a public route: no id, no roles, not the owner, and age-restricted on
+    /// unset, so an anonymous reader can never reach more than a named one. It is never
+    /// mirrored into the database.
+    /// </summary>
+    public static AuthUser CreateAnonymous() => new()
+    {
+        Id = string.Empty,
+        Username = "anonymous",
+        RestrictOnUnset = true
+    };
 }

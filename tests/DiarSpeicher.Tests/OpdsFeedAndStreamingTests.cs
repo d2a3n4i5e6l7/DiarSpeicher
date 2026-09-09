@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Xml.Linq;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
@@ -145,7 +145,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var xml = await service.GetCatalogXmlAsync(user, null);
@@ -171,7 +171,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
 
         // 1. Usuario con restricción de edad 12 años
         var childUser = new AuthUser
@@ -213,7 +213,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
 
         var restrictedUser = new AuthUser
         {
@@ -241,7 +241,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
 
         var user = new AuthUser { Id = "reader_1", Username = "reader_john", IsServerOwner = false };
 
@@ -272,7 +272,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
 
         var childUser = new AuthUser
         {
@@ -297,7 +297,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
 
@@ -325,7 +325,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
 
         // Crear una sesión de lectura activa para reader_1 en _kidBookId
         context.ReadingSessions.Add(new ReadingSession
@@ -359,7 +359,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
 
         var user = new AuthUser { Id = "reader_1", Username = "reader_john", IsServerOwner = true };
 

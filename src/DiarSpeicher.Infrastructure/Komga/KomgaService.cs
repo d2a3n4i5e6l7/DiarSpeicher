@@ -128,6 +128,12 @@ public class KomgaService : IKomgaService
         // SQLite; the visibility filter mirrors ForUser exactly.
         var (where, parameters) = MediaSqlFilters.BuildVisibilityFilter(user);
 
+        // EF1002 warns that an interpolated string reaches the SQL unparameterised. The only
+        // interpolated values here are MediaSqlFilters.Joins, a const, and the clause text from
+        // BuildVisibilityFilter, which emits nothing but literal SQL and "@name" placeholders:
+        // every value travels through the parameter list. Switching to FromSql would try to
+        // parameterise the fragments themselves, which is not what they are.
+#pragma warning disable EF1002
         var totalElements = await _db.Database
             .SqlQueryRaw<int>(
                 $"""
@@ -152,6 +158,7 @@ public class KomgaService : IKomgaService
             .Include(m => m.Series)
             .AsNoTracking()
             .ToListAsync(ct);
+#pragma warning restore EF1002
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id))).ToList();

@@ -1,4 +1,4 @@
-using DiarSpeicher.Core.Domain.Entities;
+﻿using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Infrastructure.Data;
@@ -89,7 +89,7 @@ public sealed class OpdsV2NavigationTests : IDisposable
     public async Task LibrariesFeed_LinksToTheLibraryFeed_SoNavigationIsNotBroken()
     {
         await using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance);
+        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root);
 
         var feed = await service.GetLibrariesFeedAsync(_owner, null);
 
@@ -101,7 +101,7 @@ public sealed class OpdsV2NavigationTests : IDisposable
     public async Task LibraryFeed_ListsItsSeries()
     {
         await using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance);
+        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root);
 
         var feed = await service.GetLibrarySeriesFeedAsync(_owner, _libraryId, 0, null);
 
@@ -116,7 +116,7 @@ public sealed class OpdsV2NavigationTests : IDisposable
     public async Task SeriesFeed_ListsItsBooks()
     {
         await using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance);
+        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root);
 
         var feed = await service.GetSeriesBooksFeedAsync(_owner, _seriesId, 0, null);
 
@@ -129,7 +129,7 @@ public sealed class OpdsV2NavigationTests : IDisposable
     public async Task UnknownIds_ReturnNull_SoTheEndpointCanRespond404()
     {
         await using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance);
+        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root);
 
         Assert.Null(await service.GetLibrarySeriesFeedAsync(_owner, "no-existe", 0, null));
         Assert.Null(await service.GetSeriesBooksFeedAsync(_owner, "no-existe", 0, null));
@@ -139,7 +139,7 @@ public sealed class OpdsV2NavigationTests : IDisposable
     public async Task AnExcludedLibraryIsNotReachableThroughItsOwnFeed()
     {
         await using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance);
+        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root);
 
         var restricted = new AuthUser
         {

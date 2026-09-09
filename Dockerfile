@@ -39,7 +39,8 @@ COPY --from=dotnet-builder /build/publish/DiarSpeicher.Api /rootfs/usr/bin/diars
 RUN set -eu; \
     TRIPLET="$([ "$(dpkg --print-architecture)" = "arm64" ] && echo "aarch64-linux-gnu" || echo "x86_64-linux-gnu")"; \
     mkdir -p "/rootfs/usr/lib/$TRIPLET" /rootfs/etc/fonts \
-             /rootfs/data/db /rootfs/data/storage /rootfs/libraries; \
+             /rootfs/data/db /rootfs/data/thumbnails /rootfs/data/cache/pages \
+             /rootfs/libraries; \
     chmod +x /rootfs/usr/bin/diarspeicher; \
     DOTNET_BUNDLE_EXTRACT_BASE_DIR=/tmp/probe timeout 5 /rootfs/usr/bin/diarspeicher >/dev/null 2>&1 || true; \
     { find /tmp/probe -name '*.so' 2>/dev/null; echo /rootfs/usr/bin/diarspeicher; } \
@@ -64,7 +65,7 @@ LABEL org.opencontainers.image.title="DiarSpeicher" \
 
 ENV ASPNETCORE_URLS=http://0.0.0.0:5000 \
     ConnectionStrings__DefaultConnection="Data Source=/data/db/diarspeicher.db;Cache=Shared;Mode=ReadWriteCreate;" \
-    Storage__RootPath=/data/storage \
+    Storage__RootPath=/data \
     DOTNET_BUNDLE_EXTRACT_BASE_DIR=/tmp/.net
 
 VOLUME /data

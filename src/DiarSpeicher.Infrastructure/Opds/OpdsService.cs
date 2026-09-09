@@ -3,6 +3,7 @@ using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Opds;
 using DiarSpeicher.Core.Filesystem;
+using DiarSpeicher.Core.Gateway;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Data.Extensions;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
@@ -20,25 +21,34 @@ public class OpdsService : IOpdsService
     private readonly DiarSpeicherDbContext _db;
     private readonly ICompositeBookProcessor _bookProcessor;
     private readonly ILogger<OpdsService> _logger;
+    private readonly ILinkPrefixProvider _linkPrefix;
 
     public OpdsService(
         DiarSpeicherDbContext db,
         ICompositeBookProcessor bookProcessor,
-        ILogger<OpdsService> logger)
+        ILogger<OpdsService> logger,
+        ILinkPrefixProvider linkPrefix)
     {
         _db = db;
         _bookProcessor = bookProcessor;
         _logger = logger;
+        _linkPrefix = linkPrefix;
     }
 
-    private static string FormatUrl(string path, string? apiKey)
+    /// <summary>
+    /// Every link in a feed goes through here, so the mount prefix is applied in exactly one
+    /// place. UsePathBase only rewrites the incoming path; it does not touch what we generate.
+    /// </summary>
+    private string FormatUrl(string path, string? apiKey)
     {
+        var prefix = _linkPrefix.Prefix;
+
         return !string.IsNullOrWhiteSpace(apiKey)
-            ? $"/opds/{apiKey}/v1.2/{path}"
-            : $"/opds/v1.2/{path}";
+            ? $"{prefix}/opds/{apiKey}/v1.2/{path}"
+            : $"{prefix}/opds/v1.2/{path}";
     }
 
-    private static string FormatParams(string path, Dictionary<string, string> queryParams, string? apiKey)
+    private string FormatParams(string path, Dictionary<string, string> queryParams, string? apiKey)
     {
         var url = FormatUrl(path, apiKey);
         if (queryParams.Count == 0) return url;
@@ -507,7 +517,7 @@ public class OpdsService : IOpdsService
         return (null, "image/jpeg");
     }
 
-    private static OpdsEntry ToOpdsEntry(Library library, string? apiKey)
+    private OpdsEntry ToOpdsEntry(Library library, string? apiKey)
     {
         return new OpdsEntry
         {
@@ -519,7 +529,7 @@ public class OpdsService : IOpdsService
         };
     }
 
-    private static OpdsEntry ToOpdsEntry(Series series, string? apiKey)
+    private OpdsEntry ToOpdsEntry(Series series, string? apiKey)
     {
         var title = series.Metadata?.Title ?? series.Name;
         var content = series.Metadata?.Summary ?? series.Description;
@@ -534,7 +544,7 @@ public class OpdsService : IOpdsService
         };
     }
 
-    private static OpdsEntry ToOpdsEntry(Media media, ReadingSession? session, string? apiKey)
+    private OpdsEntry ToOpdsEntry(Media media, ReadingSession? session, string? apiKey)
     {
         var title = media.Metadata?.Title ?? media.Name;
         var summary = media.Metadata?.Summary;
@@ -581,7 +591,7 @@ public class OpdsService : IOpdsService
         };
     }
 
-    private static OpdsFeed CreatePaginatedFeed(PaginatedFeedParams p)
+    private OpdsFeed CreatePaginatedFeed(PaginatedFeedParams p)
     {
         var thisParams = new Dictionary<string, string> { { "page", p.Page.ToString() } };
         if (!string.IsNullOrWhiteSpace(p.Search)) thisParams[SearchLiteral] = p.Search;

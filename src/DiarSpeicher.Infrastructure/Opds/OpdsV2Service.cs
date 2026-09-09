@@ -1,8 +1,9 @@
-using DiarSpeicher.Core.Domain.Entities;
+﻿using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Opds;
 using DiarSpeicher.Core.Filesystem;
+using DiarSpeicher.Core.Gateway;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Data.Extensions;
 using Microsoft.Data.Sqlite;
@@ -20,18 +21,29 @@ public class OpdsV2Service : IOpdsV2Service
 
     private readonly DiarSpeicherDbContext _db;
     private readonly ILogger<OpdsV2Service> _logger;
+    private readonly ILinkPrefixProvider _linkPrefix;
 
-    public OpdsV2Service(DiarSpeicherDbContext db, ILogger<OpdsV2Service> logger)
+    public OpdsV2Service(
+        DiarSpeicherDbContext db,
+        ILogger<OpdsV2Service> logger,
+        ILinkPrefixProvider linkPrefix)
     {
         _db = db;
         _logger = logger;
+        _linkPrefix = linkPrefix;
     }
 
-    private static string FormatUrl(string path, string? apiKey)
+    /// <summary>
+    /// Every link in a feed goes through here, so the mount prefix is applied in exactly one
+    /// place. UsePathBase only rewrites the incoming path; it does not touch what we generate.
+    /// </summary>
+    private string FormatUrl(string path, string? apiKey)
     {
+        var prefix = _linkPrefix.Prefix;
+
         return !string.IsNullOrWhiteSpace(apiKey)
-            ? $"/opds/{apiKey}/v2.0/{path}"
-            : $"/opds/v2.0/{path}";
+            ? $"{prefix}/opds/{apiKey}/v2.0/{path}"
+            : $"{prefix}/opds/v2.0/{path}";
     }
 
     public OpdsV2AuthenticationDoc GetAuthenticationDoc(string? apiKey)
@@ -276,7 +288,7 @@ public class OpdsV2Service : IOpdsV2Service
         };
     }
 
-    private static List<OpdsV2Link> BuildPagingLinks(string endpoint, int page, int totalCount, string? apiKey)
+    private List<OpdsV2Link> BuildPagingLinks(string endpoint, int page, int totalCount, string? apiKey)
     {
         var totalPages = (int)Math.Ceiling(totalCount / (double)PageSize);
         var links = new List<OpdsV2Link>
@@ -452,7 +464,7 @@ public class OpdsV2Service : IOpdsV2Service
         return true;
     }
 
-    private static OpdsV2Publication ToPublication(Media media, string? apiKey, bool includeReadingOrder = false)
+    private OpdsV2Publication ToPublication(Media media, string? apiKey, bool includeReadingOrder = false)
     {
         var title = media.Metadata?.Title ?? media.Name;
         var summary = media.Metadata?.Summary;

@@ -1,4 +1,4 @@
-using DiarSpeicher.Api.Middleware;
+﻿using DiarSpeicher.Api.Middleware;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Infrastructure.Data;
@@ -88,7 +88,7 @@ public sealed class GatewayIdentityTests : IDisposable
     }
 
     [Fact]
-    public async Task SecondUserIsNotServerOwnerUnlessHeaderSaysSo()
+    public async Task OnlyTheFirstUserBecomesServerOwner()
     {
         await InvokeAsync(("X-Auth-Sub", "u1"));
         var context = await InvokeAsync(("X-Auth-Sub", "u2"));
@@ -134,7 +134,7 @@ public sealed class GatewayIdentityTests : IDisposable
         var context = await InvokeAsync(
             ("X-Auth-Sub", "u1"),
             ("X-Auth-Role", "reader, editor"),
-            ("X-Auth-Age-Restriction", "13"));
+            ("X-Auth-Age", "13"));
 
         var user = Resolved(context)!;
         Assert.Equal(13, user.AgeRestriction);
@@ -187,18 +187,76 @@ public sealed class GatewayIdentityTests : IDisposable
         Assert.Contains("lib-1", Resolved(context)!.ExcludedLibraryIds);
     }
 
+    /// <summary>
+    /// nginx only strips the X-Auth-* headers it names one by one, and X-Auth-Server-Owner is
+    /// not one of them, so it arrives straight from the client. Honouring it would let any
+    /// authenticated user promote themselves permanently.
+    /// </summary>
     [Fact]
-    public async Task ServerOwnerHeaderPromotesAnExistingUser()
+    public async Task ServerOwnerHeaderDoesNotPromoteAnyone()
     {
         await InvokeAsync(("X-Auth-Sub", "u1"));
         await InvokeAsync(("X-Auth-Sub", "u2"));
 
         var context = await InvokeAsync(("X-Auth-Sub", "u2"), ("X-Auth-Server-Owner", "true"));
 
-        Assert.True(Resolved(context)!.IsServerOwner);
+        Assert.False(Resolved(context)!.IsServerOwner);
 
         await using var db = NewContext();
         var mirrored = await db.Users.FirstAsync(u => u.Id == "u2");
+        Assert.False(mirrored.IsServerOwner);
+    }
+
+    /// <summary>
+    /// Nor may it demote the owner, which is the same hole read the other way round.
+    /// </summary>
+    [Fact]
+    public async Task ServerOwnerHeaderDoesNotDemoteTheOwner()
+    {
+        await InvokeAsync(("X-Auth-Sub", "u1"));
+
+        var context = await InvokeAsync(("X-Auth-Sub", "u1"), ("X-Auth-Server-Owner", "false"));
+
+        Assert.True(Resolved(context)!.IsServerOwner);
+
+        await using var db = NewContext();
+        var mirrored = await db.Users.FirstAsync(u => u.Id == "u1");
         Assert.True(mirrored.IsServerOwner);
+    }
+
+    /// <summary>
+    /// The gateway may send the literal "anonymous" on a public route. Mirroring it would
+    /// create one user row shared by every anonymous visitor, and on a fresh instance that row
+    /// would take server ownership.
+    /// </summary>
+    [Fact]
+    public async Task AnonymousSubjectResolvesNoIdentity()
+    {
+        var context = await InvokeAsync(("X-Auth-Sub", "anonymous"));
+
+        Assert.Null(Resolved(context));
+
+        await using var db = NewContext();
+        Assert.Empty(await db.Users.ToListAsync());
+    }
+
+    /// <summary>
+    /// The gateway clears the header in its proxy_forward snippet and injects the validated
+    /// value afterwards. Should nginx forward both instead of keeping the last, the identity is
+    /// the last value, not the cleared one.
+    /// </summary>
+    [Fact]
+    public async Task DuplicatedSubjectHeaderTakesTheInjectedValue()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v2/series";
+        context.Request.Headers["X-Auth-Sub"] = new[] { "", "u1" };
+
+        var middleware = new GatewayIdentityMiddleware(_ => Task.CompletedTask);
+
+        await using var db = NewContext();
+        await middleware.InvokeAsync(context, db);
+
+        Assert.Equal("u1", Resolved(context)!.Id);
     }
 }

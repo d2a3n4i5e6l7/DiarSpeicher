@@ -25,6 +25,8 @@ public class StorageOptions
 
     public WatcherOptions Watcher { get; set; } = new();
 
+    public BackupOptions Backup { get; set; } = new();
+
     /// <summary>
     /// Always absolute: thumbnail paths are persisted in the database, so a path relative
     /// to the process working directory would break whenever the process is started
@@ -39,6 +41,29 @@ public class StorageOptions
         Path.GetFullPath(string.IsNullOrWhiteSpace(PageCache.Path)
             ? Path.Combine(RootPath, "cache", "pages")
             : PageCache.Path);
+
+    public string ResolveBackupPath() =>
+        Path.GetFullPath(string.IsNullOrWhiteSpace(Backup.Path)
+            ? Path.Combine(RootPath, "backups")
+            : Backup.Path);
+}
+
+/// <summary>
+/// Scheduled copies of the database. Only two are kept, in the fixed slots back1.db and
+/// back2.db, so the backup directory has a bounded size and no cleanup job of its own.
+/// </summary>
+public class BackupOptions
+{
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Overrides the backup directory. Defaults to "&lt;RootPath&gt;/backups".</summary>
+    public string? Path { get; set; }
+
+    /// <summary>
+    /// Hours between backups, at least 1. Default 12: with two slots that covers the last 12
+    /// to 24 hours, so a corruption noticed the same day still has a copy from before it.
+    /// </summary>
+    public int IntervalHours { get; set; } = 12;
 }
 
 /// <summary>

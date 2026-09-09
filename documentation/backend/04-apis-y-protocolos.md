@@ -135,8 +135,11 @@ esa administración es del plugin del Gateway.
 | `/health`       | GET    | Estado del servicio                                 |
 | `/version`      | GET    | `{ semver: "0.1.0", rev: "net10" }` — constante     |
 | `/claim`        | GET    | Si el servidor ya tiene dueño                       |
-| `/claim`        | POST   | Reclama el servidor y crea el primer usuario        |
 | `/auth/me`      | GET    | El `AuthUser` resuelto                              |
+
+No hay un `POST /claim`: reclamar el servidor dejó de ser una acción del cliente. La propiedad
+se concede sola, al primer usuario que la instancia ve llegar desde el Gateway, en
+`GatewayIdentityMiddleware.SyncMirrorAsync`.
 
 ### Catálogo
 
@@ -189,18 +192,13 @@ desactivadas, `404` si la biblioteca no existe, `413` si un fichero supera
 
 ### Identidad
 
-| Ruta                              | Método | Función                                  |
-| --------------------------------- | ------ | ------------------------------------------ |
-| `/claim`                          | POST   | Crea el primer usuario (dueño del servidor) |
-| `/users`                          | GET    | Lista de usuarios                         |
-| `/users`                          | POST   | Crea un usuario                           |
-| `/users/{id}`                     | PUT    | Contraseña, bloqueo, sesiones máximas     |
-| `/users/{id}`                     | DELETE | Borrado lógico                            |
-| `/users/{id}/api-keys`            | GET    | Claves del usuario (sin el texto plano)   |
-| `/users/{id}/api-keys`            | POST   | Genera una clave · devuelve el plano una sola vez |
-| `/users/{id}/api-keys/{keyId}`    | DELETE | Revoca una clave                          |
+Ninguna. No hay endpoints de usuarios ni de claves API bajo este prefijo: los que existían se
+retiraron y esa administración es del Gateway, que la sirve bajo `/auth/api/users`,
+`/auth/api/roles` y `/auth/api/tokens`, y guarda usuarios, claves y sesiones en el almacén que
+mantiene por plugin (`reader_user`, `api_key`, `session`).
 
-Detallado en [05-autenticacion-actual.md](05-autenticacion-actual.md).
+DiarSpeicher no valida credenciales: recibe la identidad ya resuelta en cabeceras y la refleja
+localmente. Detallado en [05-autenticacion-actual.md](05-autenticacion-actual.md).
 
 ## KOReader Sync — `/koreader/{apiKey}`
 

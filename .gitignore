@@ -53,3 +53,5 @@ project.assets.json
 .DS_Store
 Thumbs.db
 publish/
+storage/
+libraries/
