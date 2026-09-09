@@ -290,3 +290,98 @@ nada sensible.
 Existía además un `POST /api/libraries/{id}/scan` declarado a mano que caía fuera de esos
 prefijos y encolaba escaneos sin credencial. Se retiró: duplicaba
 `POST /api/v2/libraries/{id}/scan`, que sí autentica y comprueba permisos.
+
+## Rutas del Gateway — `/auth`
+
+[ProxyManagementEndpoints.cs](../../../tvboxHealth/healthBackEnd/src/Api/ProxyManagementEndpoints.cs) ·
+[GatewayAuthMiddleware.cs](../../../tvboxHealth/healthBackEnd/src/Auth/GatewayAuthMiddleware.cs) ·
+[AuthEndpoints.cs](../../../tvboxHealth/healthBackEnd/src/Api/Endpoints/AuthEndpoints.cs) ·
+[SecurityEndpoints.cs](../../../tvboxHealth/healthBackEnd/src/Api/Endpoints/SecurityEndpoints.cs)
+
+DiarSpeicher se despliega como plugin detrás del Gateway (`tvboxHealth`, contenedor
+`diarmund_gateway`, puerto 5050 expuesto), que publica a DiarSpeicher bajo el prefijo
+`/diarspeicher/`.
+
+El backend de DiarSpeicher no implementa endpoints de login ni de administración de usuarios o
+claves: la autenticación termina en el Gateway. Este valida la credencial contra su propio
+almacén SQLite (`reader_user`, `api_key`, `session`), elimina las cabeceras de autenticación del
+cliente e inyecta la identidad en cabeceras de confianza (`X-Auth-Sub`, `X-Auth-User`,
+`X-Auth-Role`, `X-Auth-Perms`, `X-Auth-Age` y `X-Auth-App`). DiarSpeicher se limita a reflejar esa
+identidad recibida.
+
+Para construir un panel de administración o una SPA que gestione usuarios, credenciales y sesiones,
+el frontend debe comunicarse directamente con los endpoints del Gateway bajo el grupo `/auth`,
+registrados en `ProxyManagementEndpoints.cs`.
+
+### Flujo de conexión y middleware
+
+El middleware `GatewayAuthMiddleware` (`UseGatewayAuth`) controla el acceso a las rutas del Gateway:
+
+- **Alcance**: solo intercepta peticiones dirigidas a rutas bajo el prefijo `/auth/`. Los plugins
+  no pasan por esta verificación directa.
+- **Rutas públicas**: quedan exentas de sesión `/auth/login` y `/auth/validate` (`IsPublicRoute`).
+  Todas las demás rutas bajo `/auth/` exigen autenticación activa (`401` en caso contrario).
+- **Validación interna de nginx (`/auth/validate`)**: responde al subrequest `auth_request`
+  interno del proxy inverso para autorizar accesos a plugins. Un frontend nunca debe llamar a esta ruta.
+- **Manejo de sesión**: el login (`POST /auth/login`) deposita en el cliente una cookie HTTP
+  `gateway_session` (`HttpOnly`, `SameSite=Lax`, `Secure`, `Path=/`) con un token JWT válido por 7
+  días. `AuthEndpoints.ExtractToken` acepta tanto esta cookie como una cabecera
+  `Authorization: Bearer <token>`.
+- **DPoP (Demostración de posesión)**: cuando `server_config.proof_required = 1`, `POST /auth/login`
+  exige el campo `client_pubkey` y las llamadas posteriores bajo `/auth/` requieren la cabecera
+  `DPoP`. Esta restricción aplica únicamente a las rutas de gestión `/auth/*`; el tráfico hacia
+  los plugins no evalúa DPoP.
+- **Conexión a DiarSpeicher**: para consumir el catálogo, lectura o escaneo, el frontend o lector
+  invoca las rutas con el prefijo `/diarspeicher/` (por ejemplo, `/diarspeicher/api/v2/...`,
+  `/diarspeicher/graphql`). La credencial se transmite en la cabecera `X-Auth-Key`, o en el
+  segmento de ruta para los protocolos que lo requieren (`/diarspeicher/opds/{apiKey}/v1.2/...`,
+  `/diarspeicher/koreader/{apiKey}/...`, `/diarspeicher/kobo/{apiKey}/...`).
+
+### Autenticación
+
+Endpoints expuestos por [AuthEndpoints.cs](../../../tvboxHealth/healthBackEnd/src/Api/Endpoints/AuthEndpoints.cs):
+
+| Ruta             | Método | Entrada                                         | Salida / Comportamiento                                                                                                    |
+| ---------------- | ------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `/auth/login`    | POST   | `{username, password, client_pubkey?}`          | Emite cookie `gateway_session`. Devuelve `{expires_at, must_change_password, user: {id, username, role, is_admin}}`. Responde `401` ante credenciales inválidas y `400` si falta `client_pubkey` con DPoP activado. |
+| `/auth/me`       | GET    | Ninguna (cookie `gateway_session` o Bearer)     | Devuelve datos del usuario autenticado: `{user: {id, username, role, is_admin}, role, is_admin, must_change_password, permissions, session: {expires_at}}`. Responde `401` si no hay sesión o ha expirado. |
+| `/auth/password` | POST   | `{current_password, new_password}`              | Verifica la contraseña actual, valida longitud mínima (6 caracteres), actualiza el hash en `app_user`, revoca credenciales previas y emite nueva cookie de sesión. Devuelve `{updated: true, revoked_credentials}`. |
+| `/auth/logout`   | POST   | Ninguna                                         | Elimina la cookie `gateway_session`. Devuelve `{success: true}`.                                                          |
+| `/auth/refresh`  | POST   | Ninguna                                         | Prolonga la vigencia de la sesión por 7 días. Devuelve `{expires_at}`.                                                    |
+
+### Usuarios, roles y tokens
+
+Endpoints expuestos por [SecurityEndpoints.cs](../../../tvboxHealth/healthBackEnd/src/Api/Endpoints/SecurityEndpoints.cs).
+Todos requieren sesión autenticada activa.
+
+#### Usuarios
+
+| Ruta                                       | Método | Entrada                                                                               | Salida / Comportamiento                                                                                                         |
+| ------------------------------------------ | ------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `/auth/api/users`                          | GET    | Ninguna                                                                               | Lista de usuarios de `app_user` excluyendo fallbacks (`id`, `username`, `role_id`, `role`, `is_admin`, `is_enabled`, `created_at`, etc.). |
+| `/auth/api/users`                          | POST   | `{username, password, role_id?, expires_in_days?, must_change_password?, language?}` | Inserta el usuario con contraseña hasheada en bcrypt. Devuelve `{id, username, role_id, is_enabled}` (`200 OK`).                 |
+| `/auth/api/users/{id:int}`                 | PUT    | `{username?, role_id?, is_enabled?, expires_in_days?, language?}`                     | Actualiza los campos provistos. Si `is_enabled` pasa a 0, revoca credenciales. Impide desactivar al último admin. Devuelve `{updated: true}`. |
+| `/auth/api/users/{id:int}`                 | DELETE | Ninguna                                                                               | Elimina el usuario (`204 No Content`). Impide eliminar usuarios del sistema (`admin`, `admin_fallback`) o al último admin.     |
+| `/auth/api/users/{id:int}/password`        | POST   | `{new_password, must_change_password?}`                                               | Actualiza la contraseña local y revoca sesiones/tokens previos. Devuelve `{updated: true, revoked_credentials}`.                |
+| `/auth/api/users/{id:int}/sessions`        | GET    | Ninguna                                                                               | Lista las sesiones registradas para el usuario en la tabla `session`.                                                           |
+| `/auth/api/users/{id:int}/revoke-sessions` | POST   | Ninguna                                                                               | Revoca de forma inmediata todas las credenciales y sesiones del usuario. Devuelve `{revoked}`.                                   |
+| `/auth/api/users/{id:int}/token`           | POST   | `{name?, days?}` (valores por defecto: `"Power BI Token"`, 90 días)                   | Emite un token JWT de usuario con vigencia de 1 a 3650 días. Devuelve `{id, name, jti, token, expires_in_days}`.               |
+
+#### Roles
+
+| Ruta                       | Método | Entrada                             | Salida / Comportamiento                                                                                                     |
+| -------------------------- | ------ | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `/auth/api/roles`          | GET    | Ninguna                             | Lista de roles registrados en `role` con el recuento de usuarios asociados (`user_count`).                                  |
+| `/auth/api/roles`          | POST   | `{name, description?, is_admin?}`   | Crea un nuevo rol local. Devuelve `{id}`.                                                                                   |
+| `/auth/api/roles/{id:int}` | PUT    | `{name?, description?, is_admin?}`  | Modifica la definición del rol y revoca las credenciales de usuarios afectados. Devuelve `{updated: true, revoked_credentials}`. |
+| `/auth/api/roles/{id:int}` | DELETE | Ninguna                             | Elimina el rol siempre que `is_admin = 0` (`204 No Content`).                                                              |
+
+#### Tokens de API
+
+| Ruta                               | Método | Entrada                             | Salida / Comportamiento                                                                                                    |
+| ---------------------------------- | ------ | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `/auth/api/tokens`                 | GET    | Ninguna                             | Lista de tokens en la tabla `token` con fecha de expiración, revocación, último uso y peticiones totales.                   |
+| `/auth/api/tokens`                 | POST   | `{name, sub?, tenant?, ttl_days?}`  | Crea un token JWT con rol `api_client` para consumo de API. Devuelve `{id, name, sub, jti, token, tenant, expires_at}`.     |
+| `/auth/api/tokens/{id:int}`        | DELETE | Ninguna                             | Elimina el registro del token de la base de datos (`204 No Content`).                                                      |
+| `/auth/api/tokens/{id:int}/revoke` | POST   | Ninguna                             | Marca `revoked_at` con la fecha actual y añade el `jti` a `RevocationCache`. Devuelve `{revoked: true, jti}`.               |
+| `/auth/api/tokens/{id:int}/routes` | PUT    | Ninguna                             | Endpoint stub de compatibilidad. Devuelve `{updated: true}`.                                                               |
