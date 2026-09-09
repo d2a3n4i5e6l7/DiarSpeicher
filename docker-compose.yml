@@ -5,9 +5,8 @@ services:
             dockerfile: Dockerfile
         image: diarspeicher:latest
         container_name: diarspeicher
-        # La imagen corre como nonroot (65532) y los bind mounts son del usuario del host,
-        # asi que el contenedor toma su uid/gid para poder escribir en /data.
-        user: "${PUID:-1000}:${PGID:-1000}"
+        pull_policy: build
+        user: "0:0" 
         environment:
             - Gateway__PathBase=${PATH_BASE:-}
             - Storage__PageCache__MaxBytes=${PAGE_CACHE_BYTES:-2147483648}
