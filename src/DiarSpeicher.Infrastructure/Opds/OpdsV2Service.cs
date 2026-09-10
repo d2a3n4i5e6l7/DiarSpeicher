@@ -17,6 +17,8 @@ public class OpdsV2Service : IOpdsV2Service
     private const int PageSize = 20;
     private const string CatalogEndpoint = "catalog";
     private const string StartRel = "start";
+    private const string BasicAuthFlow = "http" + "://opds-spec.org/auth/basic";
+    private const string LocalAuthFlow = "http" + "://opds-spec.org/auth/local";
     private const string TitleKey = "title";
 
     private readonly DiarSpeicherDbContext _db;
@@ -50,8 +52,27 @@ public class OpdsV2Service : IOpdsV2Service
     {
         return new OpdsV2AuthenticationDoc
         {
-            Type = "http" + "://opds-spec.org/auth/basic",
+            Id = FormatUrl("auth", apiKey),
             Title = "DiarSpeicher OPDS 2.0",
+            Authentication =
+            [
+                new(BasicAuthFlow)
+                {
+                    Labels = new Dictionary<string, string>
+                    {
+                        ["login"] = "Username",
+                        ["password"] = "Password"
+                    }
+                },
+                new(LocalAuthFlow)
+                {
+                    Labels = new Dictionary<string, string>
+                    {
+                        ["login"] = "Username",
+                        ["password"] = "Password"
+                    }
+                }
+            ],
             Links =
             [
                 new(FormatUrl(CatalogEndpoint, apiKey), OpdsV2MimeTypes.OpdsJson, StartRel)

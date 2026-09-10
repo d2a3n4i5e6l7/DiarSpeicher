@@ -11,6 +11,13 @@ La persistencia es una única base **SQLite en modo WAL** gestionada con EF Core
 servidor de base de datos aparte, ni caché en memoria distribuida, ni ningún proceso extra:
 un solo binario y un fichero `.db`.
 
+> **El backend no autentica y no se expone directamente.** Corre detrás de un **Gateway**
+> (proyecto aparte) que resuelve la identidad y le reenvía las cabeceras `X-Auth-*`. Su
+> contenedor no publica ningún puerto: todo entra por el gateway, en `5050/tcp` y solo por
+> HTTPS, bajo el prefijo `/diarspeicher/`. No existe ningún endpoint de login aquí.
+> Antes de probar endpoints o tocar autenticación, leer
+> [06-conexion-de-clientes.md](06-conexion-de-clientes.md).
+
 ## Índice
 
 | Documento                                                | Contenido                                                                     |
@@ -20,6 +27,7 @@ un solo binario y un fichero `.db`.
 | [03-escaneo-y-medios.md](03-escaneo-y-medios.md)         | Escáner con caché de mtimes, watcher, procesadores, orden natural, portadas   |
 | [04-apis-y-protocolos.md](04-apis-y-protocolos.md)       | Inventario de endpoints por módulo: OPDS, Komga, v2, KOReader, Kobo, GraphQL  |
 | [05-autenticacion-actual.md](05-autenticacion-actual.md) | Resolución de identidad desde cabeceras y espejo de usuario |
+| [06-conexion-de-clientes.md](06-conexion-de-clientes.md) | **Cómo conectarse por aplicación**: Gateway, SPA, Komga/CDisplayEx, OPDS, KOReader, Kobo |
 
 ## Convención de rutas
 

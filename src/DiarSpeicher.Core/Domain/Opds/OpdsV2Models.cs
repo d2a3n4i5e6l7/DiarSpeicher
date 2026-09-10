@@ -161,13 +161,34 @@ public class OpdsV2Progression
     public string? Device { get; set; }
 }
 
-public class OpdsV2AuthenticationDoc
+public class OpdsV2AuthenticationFlow
 {
     [JsonPropertyName("type")]
-    public string Type { get; set; } = "http" + "://opds-spec.org/auth/basic";
+    public string Type { get; set; } = string.Empty;
+
+    [JsonPropertyName("labels")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, string>? Labels { get; set; }
+
+    [JsonPropertyName("links")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<OpdsV2Link>? Links { get; set; }
+
+    public OpdsV2AuthenticationFlow() { }
+
+    public OpdsV2AuthenticationFlow(string type) => Type = type;
+}
+
+public class OpdsV2AuthenticationDoc
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
 
     [JsonPropertyName("title")]
     public string Title { get; set; } = "DiarSpeicher OPDS 2.0";
+
+    [JsonPropertyName("authentication")]
+    public List<OpdsV2AuthenticationFlow> Authentication { get; set; } = [];
 
     [JsonPropertyName("links")]
     public List<OpdsV2Link> Links { get; set; } = [];

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using DiarSpeicher.Core.Domain.Opds;
@@ -50,7 +51,7 @@ public static class OpdsXmlBuilder
         }
 
         var doc = new XDocument(new XDeclaration("1.0", Utf8, null), feedElem);
-        using var sw = new StringWriter();
+        using var sw = new Utf8StringWriter();
         using (var xw = XmlWriter.Create(sw, new XmlWriterSettings
         {
             OmitXmlDeclaration = false,
@@ -152,7 +153,7 @@ public static class OpdsXmlBuilder
             )
         );
 
-        using var sw = new StringWriter();
+        using var sw = new Utf8StringWriter();
         using (var xw = XmlWriter.Create(sw, new XmlWriterSettings
         {
             OmitXmlDeclaration = false,
@@ -163,4 +164,14 @@ public static class OpdsXmlBuilder
         }
         return sw.ToString();
     }
+}
+
+/// <summary>
+/// XmlWriter takes the encoding of the declaration from the writer it targets, not from the
+/// XDeclaration, so a plain StringWriter emits encoding="utf-16" while the response is served
+/// as UTF-8. Strict OPDS parsers reject that mismatch.
+/// </summary>
+internal sealed class Utf8StringWriter : StringWriter
+{
+    public override Encoding Encoding => Encoding.UTF8;
 }
