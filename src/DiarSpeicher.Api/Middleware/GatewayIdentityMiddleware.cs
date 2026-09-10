@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Infrastructure.Data;
@@ -98,6 +98,26 @@ public class GatewayIdentityMiddleware
             }
 
             return existing;
+        }
+
+        var existingByUsername = await db.Users
+            .Include(u => u.AgeRestriction)
+            .Include(u => u.ExcludedLibraries)
+            .FirstOrDefaultAsync(u => u.Username == username, ct);
+
+        if (existingByUsername is not null)
+        {
+            var oldId = existingByUsername.Id;
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE UserPreferences SET UserId = {id} WHERE UserId = {oldId};
+                UPDATE AgeRestrictions SET UserId = {id} WHERE UserId = {oldId};
+                UPDATE LibraryExclusions SET UserId = {id} WHERE UserId = {oldId};
+                UPDATE ReadingSessions SET UserId = {id} WHERE UserId = {oldId};
+                UPDATE Users SET Id = {id} WHERE Id = {oldId};
+            """, ct);
+
+            existingByUsername.Id = id;
+            return existingByUsername;
         }
 
         var isFirstUser = !await db.Users.AnyAsync(ct);

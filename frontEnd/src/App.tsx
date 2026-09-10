@@ -62,6 +62,35 @@ export default function App() {
 				client_pubkey: clientPubkey,
 			});
 
+			if (res?.requires_first_admin) {
+				return res;
+			}
+
+			if (res?.user) {
+				setUser(res.user);
+			} else {
+				await refreshUser();
+			}
+			return res;
+		},
+		[refreshUser]
+	);
+
+	const registerFirstAdmin = useCallback(
+		async (username: string, password: string) => {
+			let clientPubkey: string | undefined;
+			try {
+				clientPubkey = await getPublicKeyBase64();
+			} catch (e) {
+				console.warn("Could not generate client public key:", e);
+			}
+
+			const res = await authApi.registerFirstAdmin({
+				username,
+				password,
+				client_pubkey: clientPubkey,
+			});
+
 			if (res?.user) {
 				setUser(res.user);
 			} else {
@@ -106,10 +135,11 @@ export default function App() {
 			user,
 			loading,
 			login,
+			registerFirstAdmin,
 			logout,
 			refreshUser,
 		}),
-		[user, loading, login, logout, refreshUser]
+		[user, loading, login, registerFirstAdmin, logout, refreshUser]
 	);
 
 	let mainContent: React.ReactNode;

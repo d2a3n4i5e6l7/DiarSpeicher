@@ -14,7 +14,7 @@ function trimTrailingSlash(url: string): string {
 export const URL_ACCESS = trimTrailingSlash(rawUrlAccess);
 export const GATEWAY_URL = trimTrailingSlash(rawGatewayUrl);
 export const API_BASE = `${GATEWAY_URL}${URL_ACCESS}`;
-export const AUTH_BASE = GATEWAY_URL;
+export const AUTH_BASE = `${GATEWAY_URL}/plugins/diarspeicher/auth`;
 
 export class ApiError extends Error {
 	readonly status: number;

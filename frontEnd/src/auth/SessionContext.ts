@@ -1,4 +1,5 @@
 import { createContext, useContext } from "react";
+import type { LoginResponse } from "../api/endpoints";
 
 export interface SessionUser {
 	id: number;
@@ -10,7 +11,8 @@ export interface SessionUser {
 export interface SessionValue {
 	user: SessionUser | null;
 	loading: boolean;
-	login: (username: string, password: string) => Promise<void>;
+	login: (username: string, password: string) => Promise<LoginResponse | undefined>;
+	registerFirstAdmin: (username: string, password: string) => Promise<void>;
 	logout: () => Promise<void>;
 	refreshUser: () => Promise<void>;
 }
@@ -18,9 +20,10 @@ export interface SessionValue {
 export const SessionContext = createContext<SessionValue>({
 	user: null,
 	loading: true,
-	login: async () => {},
-	logout: async () => {},
-	refreshUser: async () => {},
+	login: () => Promise.resolve(undefined),
+	registerFirstAdmin: () => Promise.resolve(),
+	logout: () => Promise.resolve(),
+	refreshUser: () => Promise.resolve(),
 });
 
 export function useSession(): SessionValue {

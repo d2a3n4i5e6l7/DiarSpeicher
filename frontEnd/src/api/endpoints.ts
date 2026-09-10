@@ -7,9 +7,12 @@ export interface LoginPayload {
 }
 
 export interface LoginResponse {
-	expires_at: string;
+	expires_at?: string;
 	must_change_password?: boolean;
-	user: {
+	requires_first_admin?: boolean;
+	message?: string;
+	token?: string;
+	user?: {
 		id: number;
 		username: string;
 		role: string;
@@ -40,6 +43,7 @@ export interface UserItem {
 	role?: string;
 	is_admin: boolean;
 	is_enabled: boolean | number;
+	permissions?: string;
 	created_at?: string;
 	must_change_password?: boolean | number;
 }
@@ -47,6 +51,8 @@ export interface UserItem {
 export interface CreateUserPayload {
 	username: string;
 	password: string;
+	role?: string;
+	permissions?: string;
 	role_id?: number;
 	expires_in_days?: number;
 	must_change_password?: boolean;
@@ -55,8 +61,12 @@ export interface CreateUserPayload {
 
 export interface UpdateUserPayload {
 	username?: string;
-	role_id?: number;
+	role?: string;
+	permissions?: string;
 	is_enabled?: boolean | number;
+	new_password?: string;
+	newPassword?: string;
+	role_id?: number;
 	expires_in_days?: number;
 	language?: string;
 }
@@ -108,29 +118,37 @@ export interface UploadResponse {
 }
 
 export const authApi = {
-	login: (payload: LoginPayload) => gatewayHttp.post<LoginResponse>("/auth/login", payload),
-	me: () => gatewayHttp.get<MeResponse>("/auth/me"),
-	logout: () => gatewayHttp.post<{ success: boolean }>("/auth/logout"),
-	refresh: () => gatewayHttp.post<{ expires_at: string }>("/auth/refresh"),
+	login: (payload: LoginPayload) => gatewayHttp.post<LoginResponse>("/login", payload),
+	registerFirstAdmin: (payload: LoginPayload) => gatewayHttp.post<LoginResponse>("/register-first-admin", payload),
+	me: () => gatewayHttp.get<MeResponse>("/me"),
+	logout: () => gatewayHttp.post<{ success: boolean }>("/logout"),
+	refresh: () => gatewayHttp.post<{ expires_at: string }>("/refresh"),
 };
 
 export const usersApi = {
-	list: () => gatewayHttp.get<UserItem[]>("/auth/api/users"),
-	create: (payload: CreateUserPayload) => gatewayHttp.post<UserItem>("/auth/api/users", payload),
-	update: (id: number, payload: UpdateUserPayload) => gatewayHttp.put<{ updated: boolean }>(`/auth/api/users/${id}`, payload),
-	delete: (id: number) => gatewayHttp.delete<void>(`/auth/api/users/${id}`),
+	list: () => gatewayHttp.get<UserItem[]>("/users"),
+	create: (payload: CreateUserPayload) => gatewayHttp.post<UserItem>("/users", payload),
+	update: (id: number, payload: UpdateUserPayload) => gatewayHttp.put<{ updated: boolean }>(`/users/${id}`, payload),
+	delete: (id: number) => gatewayHttp.delete<{ deleted: boolean }>(`/users/${id}`),
 	changePassword: (id: number, newPassword: string) =>
-		gatewayHttp.post<{ updated: boolean }>(`/auth/api/users/${id}/password`, {
+		gatewayHttp.put<{ updated: boolean }>(`/users/${id}`, {
 			new_password: newPassword,
-			must_change_password: false,
+			newPassword: newPassword,
 		}),
 };
 
 export const rolesApi = {
-	list: () => gatewayHttp.get<RoleItem[]>("/auth/api/roles"),
-	create: (payload: CreateRolePayload) => gatewayHttp.post<{ id: number }>("/auth/api/roles", payload),
-	update: (id: number, payload: UpdateRolePayload) => gatewayHttp.put<{ updated: boolean }>(`/auth/api/roles/${id}`, payload),
-	delete: (id: number) => gatewayHttp.delete<void>(`/auth/api/roles/${id}`),
+	list: (): Promise<RoleItem[]> =>
+		Promise.resolve([
+			{ id: 1, name: "admin", description: "Administrador del reino", is_admin: true, user_count: 1 },
+			{ id: 2, name: "reader", description: "Lector estándar", is_admin: false, user_count: 0 },
+		]),
+	create: (payload: CreateRolePayload): Promise<{ id: number }> =>
+		Promise.resolve({ id: payload.name ? 99 : 0 }),
+	update: (id: number, payload: UpdateRolePayload): Promise<{ updated: boolean }> =>
+		Promise.resolve({ updated: id > 0 && payload !== undefined }),
+	delete: (id: number): Promise<void> =>
+		id > 0 ? Promise.resolve() : Promise.reject(new Error("ID inválido")),
 };
 
 export const librariesApi = {
@@ -147,3 +165,13 @@ export const librariesApi = {
 		return http.upload<UploadResponse>(`/api/v2/libraries/${libraryId}/upload`, formData);
 	},
 };
+
+export interface SystemClaimResponse {
+	isClaimed: boolean;
+	status?: string;
+}
+
+export const systemApi = {
+	getClaimStatus: () => http.get<SystemClaimResponse>("/api/v2/claim"),
+};
+

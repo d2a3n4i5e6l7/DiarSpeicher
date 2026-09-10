@@ -16,19 +16,41 @@ import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import StorageIcon from "@mui/icons-material/Storage";
-import React, { useState } from "react";
+import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
+import React, { useEffect, useState } from "react";
 import { useSession } from "../auth/SessionContext";
 import { URL_ACCESS } from "../api/client";
+import { authApi } from "../api/endpoints";
 
 export default function LoginPage() {
 	const theme = useTheme();
-	const { login } = useSession();
+	const { login, registerFirstAdmin } = useSession();
 
 	const [username, setUsername] = useState("");
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
 	const [loading, setLoading] = useState(false);
+	const [requiresFirstAdmin, setRequiresFirstAdmin] = useState(false);
+	const [infoMessage, setInfoMessage] = useState<string | null>(null);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+	useEffect(() => {
+		let isMounted = true;
+		const checkInitialSetup = async () => {
+			try {
+				const res = await authApi.login({ username: "__probe__", password: "__probe__" });
+				if (isMounted && res?.requires_first_admin) {
+					setRequiresFirstAdmin(true);
+				}
+			} catch {
+				// Si ya existen usuarios, el endpoint responde 401 y el estado permanece en login normal
+			}
+		};
+		void checkInitialSetup();
+		return () => {
+			isMounted = false;
+		};
+	}, []);
 
 	const handleSubmit = async (e: React.SyntheticEvent) => {
 		e.preventDefault();
@@ -41,17 +63,53 @@ export default function LoginPage() {
 		setLoading(true);
 
 		try {
-			await login(username.trim(), password);
+			if (requiresFirstAdmin) {
+				await registerFirstAdmin(username.trim(), password);
+			} else {
+				const res = await login(username.trim(), password);
+				if (res?.requires_first_admin) {
+					setRequiresFirstAdmin(true);
+					setInfoMessage(
+						res.message ||
+							"El reino DiarSpeicher no tiene usuarios registrados. Registra el primer Administrador."
+					);
+				}
+			}
 		} catch (err: unknown) {
 			if (err instanceof Error) {
-				setErrorMessage(err.message || "Error al iniciar sesión.");
+				setErrorMessage(err.message || "Error al procesar la solicitud.");
 			} else {
-				setErrorMessage("No se pudo iniciar sesión.");
+				setErrorMessage("No se pudo completar la operación.");
 			}
 		} finally {
 			setLoading(false);
 		}
 	};
+
+	let subtitleText = "Panel de Administración del Sistema";
+	let buttonText = "Iniciar Sesión";
+	let buttonLoadingText = "Iniciando sesión...";
+	let usernameLabel = "Usuario";
+	let usernameHelperText: string | undefined;
+	let submitButtonIcon: React.ReactNode = <LockOutlinedIcon />;
+
+	if (requiresFirstAdmin) {
+		subtitleText = "Configuración Inicial: Crear Administrador Principal";
+		buttonText = "Registrar Administrador Principal";
+		buttonLoadingText = "Registrando administrador...";
+		usernameLabel = "Usuario Administrador";
+		usernameHelperText = "Este registro único inicial tendrá control total como Administrador.";
+		submitButtonIcon = <AdminPanelSettingsOutlinedIcon />;
+	}
+
+	if (loading) {
+		submitButtonIcon = <CircularProgress size={20} color="inherit" />;
+	}
+
+	let visibilityIcon = <Visibility fontSize="small" />;
+	if (showPassword) {
+		visibilityIcon = <VisibilityOff fontSize="small" />;
+	}
 
 	return (
 		<Box
@@ -102,10 +160,37 @@ export default function LoginPage() {
 								DiarSpeicher
 							</Typography>
 							<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-								Panel de Administración del Sistema
+								{subtitleText}
 							</Typography>
 						</Box>
 					</Stack>
+
+					{requiresFirstAdmin && (
+						<Alert
+							severity="warning"
+							icon={<AdminPanelSettingsOutlinedIcon />}
+							sx={{
+								mb: 3,
+								textAlign: "left",
+								border: "1px solid",
+								borderColor: "warning.main",
+								"& .MuiAlert-message": { width: "100%" },
+							}}
+						>
+							<Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
+								Inicio inicial detectado
+							</Typography>
+							<Typography variant="body2">
+								No hay usuarios registrados en el sistema. Las credenciales escritas aquí se usarán para el registro inicial del <strong>Administrador</strong> del reino.
+							</Typography>
+						</Alert>
+					)}
+
+					{infoMessage && !requiresFirstAdmin && (
+						<Alert severity="info" sx={{ mb: 3 }}>
+							{infoMessage}
+						</Alert>
+					)}
 
 					{errorMessage && (
 						<Alert severity="error" sx={{ mb: 3 }}>
@@ -117,7 +202,8 @@ export default function LoginPage() {
 						<Stack spacing={2.5}>
 							<TextField
 								id="login-username"
-								label="Usuario"
+								label={usernameLabel}
+								helperText={usernameHelperText}
 								variant="outlined"
 								fullWidth
 								required
@@ -147,7 +233,7 @@ export default function LoginPage() {
 													edge="end"
 													size="small"
 												>
-													{showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+													{visibilityIcon}
 												</IconButton>
 											</InputAdornment>
 										),
@@ -162,10 +248,10 @@ export default function LoginPage() {
 								size="large"
 								fullWidth
 								disabled={loading}
-								startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <LockOutlinedIcon />}
+								startIcon={submitButtonIcon}
 								sx={{ py: 1.2, mt: 1 }}
 							>
-								{loading ? "Iniciando sesión..." : "Iniciar Sesión"}
+								{loading ? buttonLoadingText : buttonText}
 							</Button>
 						</Stack>
 					</form>
@@ -180,3 +266,4 @@ export default function LoginPage() {
 		</Box>
 	);
 }
+

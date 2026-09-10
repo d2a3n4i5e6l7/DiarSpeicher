@@ -112,9 +112,11 @@ export default function UsersPage() {
 		setSavingUser(true);
 		setError(null);
 		try {
+			const selectedRole = roles.find((r) => r.id === newRoleId)?.name ?? "reader";
 			await usersApi.create({
 				username: newUsername.trim(),
 				password: newPassword,
+				role: selectedRole,
 				role_id: newRoleId === "" ? undefined : Number(newRoleId),
 			});
 			setSuccessMsg(`Usuario "${newUsername}" creado con éxito.`);
@@ -137,7 +139,9 @@ export default function UsersPage() {
 		setSavingUser(true);
 		setError(null);
 		try {
+			const selectedRole = roles.find((r) => r.id === editRoleId)?.name;
 			await usersApi.update(editingUser.id, {
+				role: selectedRole,
 				role_id: editRoleId === "" ? undefined : Number(editRoleId),
 				is_enabled: editIsEnabled ? 1 : 0,
 			});
