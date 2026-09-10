@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Xml.Linq;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
@@ -436,11 +436,29 @@ public sealed class StumpV2Service : IStumpV2Service
         };
     }
 
-    public async Task<UploadResult> UploadToLibraryAsync(
+    public Task<UploadResult> UploadToLibraryAsync(
         AuthUser user,
         string libraryId,
         string? subpath,
         IEnumerable<StumpUploadFileInput> files,
+        CancellationToken ct = default)
+    {
+        return UploadToLibraryAsync(user, libraryId, subpath, ToAsync(files), ct);
+
+        static async IAsyncEnumerable<StumpUploadFileInput> ToAsync(IEnumerable<StumpUploadFileInput> source)
+        {
+            foreach (var item in source)
+            {
+                yield return item;
+            }
+        }
+    }
+
+    public async Task<UploadResult> UploadToLibraryAsync(
+        AuthUser user,
+        string libraryId,
+        string? subpath,
+        IAsyncEnumerable<StumpUploadFileInput> files,
         CancellationToken ct = default)
     {
         if (!_uploadOptions.EnableUpload)
@@ -464,7 +482,7 @@ public sealed class StumpV2Service : IStumpV2Service
         Directory.CreateDirectory(fullTargetDir);
 
         var savedFiles = new List<UploadedFileDto>();
-        foreach (var file in files)
+        await foreach (var file in files.WithCancellation(ct))
         {
             if (string.IsNullOrWhiteSpace(file.FileName) || file.Content == null) continue;
 

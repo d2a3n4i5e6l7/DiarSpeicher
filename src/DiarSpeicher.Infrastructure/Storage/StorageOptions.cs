@@ -1,4 +1,4 @@
-﻿namespace DiarSpeicher.Infrastructure.Storage;
+namespace DiarSpeicher.Infrastructure.Storage;
 
 /// <summary>
 /// Filesystem locations for data DiarSpeicher generates (as opposed to the user's libraries).
@@ -46,6 +46,9 @@ public class StorageOptions
         Path.GetFullPath(string.IsNullOrWhiteSpace(Backup.Path)
             ? Path.Combine(RootPath, "backups")
             : Backup.Path);
+
+    public string ResolveUploadsPath() =>
+        Path.GetFullPath(Path.Combine(RootPath, "cache", "uploads"));
 }
 
 /// <summary>

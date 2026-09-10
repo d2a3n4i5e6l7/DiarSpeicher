@@ -5,7 +5,6 @@ import {
 	Card,
 	CardContent,
 	Chip,
-	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -17,7 +16,6 @@ import {
 	LinearProgress,
 	List,
 	ListItem,
-	ListItemText,
 	MenuItem,
 	Select,
 	Stack,
@@ -29,14 +27,12 @@ import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import FolderIcon from "@mui/icons-material/Folder";
 import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
+import PauseOutlinedIcon from "@mui/icons-material/PauseOutlined";
+import PlayArrowOutlinedIcon from "@mui/icons-material/PlayArrowOutlined";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-	librariesApi,
-	type LibraryItem,
-	type UploadResponse,
-} from "../api/endpoints";
+import { librariesApi, type LibraryItem } from "../api/endpoints";
+import { TusUpload, type TusUploadStatus } from "../api/tusClient";
 
 function formatBytes(bytes: number, decimals = 2): string {
 	if (bytes === 0) return "0 Bytes";
@@ -47,6 +43,16 @@ function formatBytes(bytes: number, decimals = 2): string {
 	return `${Number.parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
 
+interface UploadQueueItem {
+	id: string;
+	file: File;
+	tusUpload: TusUpload;
+	status: TusUploadStatus;
+	bytesUploaded: number;
+	percentage: number;
+	errorMessage?: string;
+}
+
 export default function UploadPage() {
 	const theme = useTheme();
 	const fileInputRef = useRef<HTMLInputElement>(null);
@@ -54,13 +60,12 @@ export default function UploadPage() {
 	const [libraries, setLibraries] = useState<LibraryItem[]>([]);
 	const [selectedLibraryId, setSelectedLibraryId] = useState<string>("");
 	const [subpath, setSubpath] = useState("");
-	const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+	const [items, setItems] = useState<UploadQueueItem[]>([]);
 	const [isDragging, setIsDragging] = useState(false);
 
 	const [loadingLibraries, setLoadingLibraries] = useState(true);
-	const [uploading, setUploading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [uploadResult, setUploadResult] = useState<UploadResponse | null>(null);
+	const [successCount, setSuccessCount] = useState<number | null>(null);
 
 	// Create Library Dialog
 	const [openCreateLib, setOpenCreateLib] = useState(false);
@@ -114,10 +119,83 @@ export default function UploadPage() {
 		};
 	}, []);
 
+	const createQueueItem = useCallback(
+		(file: File): UploadQueueItem => {
+			const itemId = `${file.name}-${file.size}-${Date.now()}-${Math.random()}`;
+
+			const tusUploadInstance = new TusUpload({
+				file,
+				libraryId: selectedLibraryId,
+				subpath: subpath.trim() || undefined,
+				onProgress: (uploaded, _total, pct) => {
+					setItems((prev) =>
+						prev.map((it) =>
+							it.id === itemId
+								? {
+										...it,
+										bytesUploaded: uploaded,
+										percentage: pct,
+										status: "uploading",
+									}
+								: it
+						)
+					);
+				},
+				onSuccess: () => {
+					setItems((prev) =>
+						prev.map((it) =>
+							it.id === itemId
+								? {
+										...it,
+										percentage: 100,
+										bytesUploaded: file.size,
+										status: "completed",
+									}
+								: it
+						)
+					);
+					setSuccessCount((prev) => (prev ? prev + 1 : 1));
+				},
+				onError: (err) => {
+					setItems((prev) =>
+						prev.map((it) =>
+							it.id === itemId
+								? {
+										...it,
+										status: "error",
+										errorMessage: err.message,
+									}
+								: it
+						)
+					);
+				},
+			});
+
+			return {
+				id: itemId,
+				file,
+				tusUpload: tusUploadInstance,
+				status: "idle",
+				bytesUploaded: 0,
+				percentage: 0,
+			};
+		},
+		[selectedLibraryId, subpath]
+	);
+
+	const handleAddFiles = (files: File[]) => {
+		if (!selectedLibraryId) {
+			setError("Selecciona primero una biblioteca de destino.");
+			return;
+		}
+		setError(null);
+		const newItems = files.map((f) => createQueueItem(f));
+		setItems((prev) => [...prev, ...newItems]);
+	};
+
 	const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
 		if (e.target.files && e.target.files.length > 0) {
-			const filesArr = Array.from(e.target.files);
-			setSelectedFiles((prev) => [...prev, ...filesArr]);
+			handleAddFiles(Array.from(e.target.files));
 		}
 	};
 
@@ -134,44 +212,60 @@ export default function UploadPage() {
 		e.preventDefault();
 		setIsDragging(false);
 		if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-			const filesArr = Array.from(e.dataTransfer.files);
-			setSelectedFiles((prev) => [...prev, ...filesArr]);
+			handleAddFiles(Array.from(e.dataTransfer.files));
 		}
 	};
 
-	const handleRemoveFile = (index: number) => {
-		setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+	const handleStartUpload = async (item: UploadQueueItem) => {
+		if (item.status === "uploading" || item.status === "completed") return;
+
+		setItems((prev) =>
+			prev.map((it) =>
+				it.id === item.id ? { ...it, status: "uploading", errorMessage: undefined } : it
+			)
+		);
+
+		await item.tusUpload.start();
 	};
 
-	const handleUpload = async () => {
-		if (!selectedLibraryId) {
-			setError("Selecciona una biblioteca de destino.");
-			return;
-		}
-		if (selectedFiles.length === 0) {
-			setError("Selecciona al menos un fichero para subir.");
-			return;
-		}
+	const handlePauseUpload = (item: UploadQueueItem) => {
+		item.tusUpload.pause();
+		setItems((prev) =>
+			prev.map((it) => (it.id === item.id ? { ...it, status: "paused" } : it))
+		);
+	};
 
-		setUploading(true);
-		setError(null);
-		setUploadResult(null);
+	const handleRemoveItem = async (item: UploadQueueItem) => {
+		await item.tusUpload.cancel();
+		setItems((prev) => prev.filter((it) => it.id !== item.id));
+	};
 
-		try {
-			const result = await librariesApi.upload(
-				selectedLibraryId,
-				selectedFiles,
-				subpath.trim() || undefined
-			);
-			setUploadResult(result);
-			setSelectedFiles([]);
-			if (fileInputRef.current) {
-				fileInputRef.current.value = "";
+	const handleStartAll = () => {
+		for (const item of items) {
+			if (item.status === "idle" || item.status === "paused" || item.status === "error") {
+				void item.tusUpload.start();
 			}
-		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error durante la subida de ficheros.");
-		} finally {
-			setUploading(false);
+		}
+	};
+
+	const handlePauseAll = () => {
+		for (const item of items) {
+			if (item.status === "uploading") {
+				item.tusUpload.pause();
+			}
+		}
+		setItems((prev) =>
+			prev.map((it) => (it.status === "uploading" ? { ...it, status: "paused" } : it))
+		);
+	};
+
+	const handleClearAll = async () => {
+		for (const item of items) {
+			await item.tusUpload.cancel();
+		}
+		setItems([]);
+		if (fileInputRef.current) {
+			fileInputRef.current.value = "";
 		}
 	};
 
@@ -199,40 +293,49 @@ export default function UploadPage() {
 				setSelectedLibraryId(created.id);
 			}
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error creando la biblioteca.");
+			setError(err instanceof Error ? err.message : "Error al crear la biblioteca.");
 		} finally {
 			setSavingLib(false);
 		}
 	};
 
-	const isDarkMode = theme.palette.mode === "dark";
-	const defaultBorderColor = isDarkMode ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.2)";
-	const dropBorderColor = isDragging ? theme.palette.primary.main : defaultBorderColor;
+	const dropBorderColor = isDragging ? theme.palette.primary.main : theme.palette.divider;
+	let dropBgColor = isDragging ? "action.hover" : "background.paper";
+	if (theme.palette.mode === "dark") {
+		dropBgColor = isDragging ? "rgba(99, 102, 241, 0.12)" : "rgba(30, 41, 59, 0.5)";
+	}
 
-	const draggingBgColor = isDarkMode ? "rgba(99, 102, 241, 0.1)" : "rgba(79, 70, 229, 0.05)";
-	const dropBgColor = isDragging ? draggingBgColor : "transparent";
+	const hasUploading = items.some((it) => it.status === "uploading");
+	const hasPausedOrIdle = items.some(
+		(it) => it.status === "idle" || it.status === "paused" || it.status === "error"
+	);
 
 	return (
-		<Box>
-			<Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", mb: 3 }}>
+		<Box sx={{ maxWidth: 1000, mx: "auto", py: 3, px: 2 }}>
+			<Stack spacing={3}>
+				{/* Cabecera */}
 				<Box>
-					<Typography variant="h5" component="h2" sx={{ fontWeight: 700 }}>
-						Subida de Ficheros
+					<Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
+						Subida de Ficheros Reanudable (TUS)
 					</Typography>
-					<Typography variant="body2" color="text.secondary">
-						Sube cómics, libros y documentos digitales directamente a las bibliotecas de DiarSpeicher.
+					<Typography variant="body1" color="text.secondary" sx={{ mt: 0.5 }}>
+						Sube cómics, libros y mangas con soporte de pausa, reanudación y tolerancia a micro-cortes.
 					</Typography>
 				</Box>
-			</Stack>
 
-			{error && (
-				<Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
-					{error}
-				</Alert>
-			)}
+				{error && (
+					<Alert severity="error" onClose={() => setError(null)}>
+						{error}
+					</Alert>
+				)}
 
-			<Stack spacing={3}>
-				{/* Configuración de Biblioteca Destino */}
+				{successCount !== null && (
+					<Alert severity="success" icon={<CheckCircleIcon />} onClose={() => setSuccessCount(null)}>
+						Ficheros completados ({successCount}). El escáner automático de DiarSpeicher se ha activado.
+					</Alert>
+				)}
+
+				{/* Selección de Biblioteca y Destino */}
 				<Card>
 					<CardContent>
 						<Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
@@ -240,17 +343,17 @@ export default function UploadPage() {
 						</Typography>
 
 						{loadingLibraries ? (
-							<CircularProgress size={24} />
+							<LinearProgress sx={{ my: 2 }} />
 						) : (
 							<Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ alignItems: "center" }}>
-								<FormControl fullWidth size="small" sx={{ maxWidth: 400 }}>
+								<FormControl size="small" sx={{ minWidth: 260, flexGrow: 1 }}>
 									<InputLabel id="library-select-label">Biblioteca</InputLabel>
 									<Select
 										labelId="library-select-label"
 										label="Biblioteca"
 										value={selectedLibraryId}
 										onChange={(e) => setSelectedLibraryId(e.target.value)}
-										disabled={uploading}
+										disabled={hasUploading}
 									>
 										{libraries.map((lib) => (
 											<MenuItem key={lib.id} value={lib.id}>
@@ -264,7 +367,7 @@ export default function UploadPage() {
 									variant="outlined"
 									startIcon={<AddIcon />}
 									onClick={() => setOpenCreateLib(true)}
-									disabled={uploading}
+									disabled={hasUploading}
 								>
 									Nueva Biblioteca
 								</Button>
@@ -274,7 +377,7 @@ export default function UploadPage() {
 									size="small"
 									value={subpath}
 									onChange={(e) => setSubpath(e.target.value)}
-									disabled={uploading}
+									disabled={hasUploading}
 									placeholder="ej. Tomo 1"
 									sx={{ flexGrow: 1 }}
 								/>
@@ -325,117 +428,166 @@ export default function UploadPage() {
 								Haz clic o arrastra ficheros aquí para subirlos
 							</Typography>
 							<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-								Formatos compatibles: CBZ, CBR, EPUB, PDF, ZIP
+								Formatos compatibles: CBZ, CBR, EPUB, PDF, ZIP (Streaming Directo TUS)
 							</Typography>
 						</Box>
 
-						{/* Lista de Ficheros Preparados */}
-						{selectedFiles.length > 0 && (
+						{/* Cola de Subidas Granular */}
+						{items.length > 0 && (
 							<Box sx={{ mt: 3 }}>
-								<Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-									<Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-										Ficheros seleccionados ({selectedFiles.length})
+								<Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+									<Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+										Cola de Transferencia ({items.length})
 									</Typography>
-									<Button
-										size="small"
-										color="error"
-										onClick={() => setSelectedFiles([])}
-										disabled={uploading}
-									>
-										Limpiar todos
-									</Button>
+									<Stack direction="row" spacing={1}>
+										{hasPausedOrIdle && (
+											<Button
+												size="small"
+												variant="contained"
+												startIcon={<PlayArrowOutlinedIcon />}
+												onClick={() => {
+													handleStartAll();
+												}}
+											>
+												Subir Todos
+											</Button>
+										)}
+										{hasUploading && (
+											<Button
+												size="small"
+												variant="outlined"
+												color="warning"
+												startIcon={<PauseOutlinedIcon />}
+												onClick={handlePauseAll}
+											>
+												Pausar Todos
+											</Button>
+										)}
+										<Button
+											size="small"
+											color="error"
+											onClick={() => {
+												void handleClearAll();
+											}}
+										>
+											Limpiar Todos
+										</Button>
+									</Stack>
 								</Stack>
 
-								<List dense sx={{ maxHeight: 220, overflowY: "auto", border: 1, borderColor: "divider", borderRadius: 1 }}>
-									{selectedFiles.map((file, idx) => (
-										<ListItem
-											key={`${file.name}-${file.size}-${idx}`}
-											secondaryAction={
-												<IconButton
-													edge="end"
-													size="small"
-													onClick={() => handleRemoveFile(idx)}
-													disabled={uploading}
-												>
-													<DeleteOutlinedIcon fontSize="small" />
-												</IconButton>
-											}
-										>
-											<InsertDriveFileIcon sx={{ mr: 1.5, color: "text.secondary" }} fontSize="small" />
-											<ListItemText
-												primary={file.name}
-												secondary={formatBytes(file.size)}
-											/>
-										</ListItem>
-									))}
+								<List sx={{ border: 1, borderColor: "divider", borderRadius: 1.5, p: 0 }}>
+									{items.map((item, idx) => {
+										let statusChipColor: "default" | "primary" | "warning" | "success" | "error" = "default";
+										let statusText = "En cola";
+
+										if (item.status === "uploading") {
+											statusChipColor = "primary";
+											statusText = `Subiendo (${item.percentage}%)`;
+										} else if (item.status === "paused") {
+											statusChipColor = "warning";
+											statusText = `Pausado (${item.percentage}%)`;
+										} else if (item.status === "completed") {
+											statusChipColor = "success";
+											statusText = "Completado";
+										} else if (item.status === "error") {
+											statusChipColor = "error";
+											statusText = "Error";
+										}
+
+										return (
+											<React.Fragment key={item.id}>
+												{idx > 0 && <Divider />}
+												<ListItem sx={{ py: 1.5, display: "block" }}>
+													<Stack spacing={1}>
+														<Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
+															<Stack direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0 }}>
+																<InsertDriveFileIcon color="action" fontSize="small" />
+																<Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
+																	{item.file.name}
+																</Typography>
+																<Typography variant="caption" color="text.secondary">
+																	({formatBytes(item.file.size)})
+																</Typography>
+															</Stack>
+
+															<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+																<Chip
+																	label={statusText}
+																	size="small"
+																	color={statusChipColor}
+																	variant={item.status === "idle" ? "outlined" : "filled"}
+																/>
+
+																{item.status === "uploading" && (
+																	<IconButton
+																		size="small"
+																		color="warning"
+																		title="Pausar subida"
+																		onClick={() => handlePauseUpload(item)}
+																	>
+																		<PauseOutlinedIcon fontSize="small" />
+																	</IconButton>
+																)}
+
+																{(item.status === "paused" || item.status === "idle" || item.status === "error") && (
+																	<IconButton
+																		size="small"
+																		color="primary"
+																		title="Reanudar o Iniciar subida"
+																		onClick={() => {
+																			void handleStartUpload(item);
+																		}}
+																	>
+																		<PlayArrowOutlinedIcon fontSize="small" />
+																	</IconButton>
+																)}
+
+																<IconButton
+																	size="small"
+																	color="error"
+																	title="Cancelar y eliminar"
+																	onClick={() => {
+																		void handleRemoveItem(item);
+																	}}
+																>
+																	<DeleteOutlinedIcon fontSize="small" />
+																</IconButton>
+															</Stack>
+														</Stack>
+
+														{/* Barra de progreso */}
+														<Box sx={{ width: "100%" }}>
+															<LinearProgress
+																variant="determinate"
+																value={item.percentage}
+																color={item.status === "error" ? "error" : "primary"}
+																sx={{ height: 6, borderRadius: 3 }}
+															/>
+															<Stack direction="row" sx={{ justifyContent: "space-between", mt: 0.5 }}>
+																<Typography variant="caption" color="text.secondary">
+																	{formatBytes(item.bytesUploaded)} / {formatBytes(item.file.size)}
+																</Typography>
+																<Typography variant="caption" color="text.secondary">
+																	{item.percentage}%
+																</Typography>
+															</Stack>
+														</Box>
+
+														{item.errorMessage && (
+															<Typography variant="caption" color="error">
+																{item.errorMessage}
+															</Typography>
+														)}
+													</Stack>
+												</ListItem>
+											</React.Fragment>
+										);
+									})}
 								</List>
-
-								{uploading && (
-									<Box sx={{ mt: 2 }}>
-										<LinearProgress />
-										<Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
-											Subiendo ficheros e indexando en DiarSpeicher...
-										</Typography>
-									</Box>
-								)}
-
-								<Button
-									id="start-upload-btn"
-									variant="contained"
-									size="large"
-									startIcon={uploading ? <CircularProgress size={20} color="inherit" /> : <CloudUploadIcon />}
-									onClick={() => {
-										void handleUpload();
-									}}
-									disabled={uploading || selectedFiles.length === 0}
-									sx={{ mt: 2 }}
-								>
-									{uploading ? "Subiendo..." : "Iniciar Subida"}
-								</Button>
 							</Box>
 						)}
 					</CardContent>
 				</Card>
-
-				{/* Resultado de la Subida */}
-				{uploadResult && (
-					<Card sx={{ borderLeft: 4, borderColor: "success.main" }}>
-						<CardContent>
-							<Stack direction="row" spacing={1.5} sx={{ alignItems: "center", mb: 2 }}>
-								<CheckCircleIcon color="success" />
-								<Typography variant="h6" sx={{ fontWeight: 600 }}>
-									Subida Completada con Éxito
-								</Typography>
-							</Stack>
-
-							<Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-								Se procesaron correctamente <strong>{uploadResult.uploadedCount}</strong> ficheros.
-								{uploadResult.scanJobTriggered && (
-									<Chip
-										label="Escaneo automático encolado"
-										size="small"
-										color="success"
-										sx={{ ml: 1.5 }}
-									/>
-								)}
-							</Typography>
-
-							<Divider sx={{ my: 1.5 }} />
-
-							<Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-								Archivos recibidos en el servidor:
-							</Typography>
-							<List dense>
-								{uploadResult.files.map((f, i) => (
-									<ListItem key={`${f.path}-${i}`}>
-										<FolderIcon sx={{ mr: 1, color: "text.secondary" }} fontSize="small" />
-										<ListItemText primary={f.name} secondary={`${f.path} · ${formatBytes(f.size)}`} />
-									</ListItem>
-								))}
-							</List>
-						</CardContent>
-					</Card>
-				)}
 			</Stack>
 
 			{/* Modal: Crear Biblioteca */}

@@ -1,4 +1,4 @@
-﻿using DiarSpeicher.Api.Endpoints;
+using DiarSpeicher.Api.Endpoints;
 using DiarSpeicher.Api.GraphQL;
 using DiarSpeicher.Api.Middleware;
 using DiarSpeicher.Core.Filesystem;
@@ -159,6 +159,7 @@ app.MapKomgaEndpoints();
 app.MapKoReaderEndpoints();
 app.MapKoboEndpoints();
 app.MapStumpV2Endpoints();
+app.MapTusEndpoints();
 
 await app.RunAsync();
 
@@ -178,6 +179,7 @@ static void EnsureDataDirectories(IServiceProvider services, string connectionSt
         storage.ResolveThumbnailsPath(),
         storage.ResolvePageCachePath(),
         storage.ResolveBackupPath(),
+        storage.ResolveUploadsPath(),
     };
 
     // Una base en memoria no tiene directorio que crear.

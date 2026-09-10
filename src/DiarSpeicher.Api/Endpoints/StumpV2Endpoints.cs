@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.StumpV2;
 using DiarSpeicher.Core.Filesystem;
@@ -5,7 +6,9 @@ using DiarSpeicher.Infrastructure.StumpV2;
 using DiarSpeicher.Infrastructure.Storage;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
+using Microsoft.Net.Http.Headers;
 
 namespace DiarSpeicher.Api.Endpoints;
 
@@ -257,25 +260,19 @@ public static class StumpV2Endpoints
             sizeFeature.MaxRequestBodySize = maxUploadBytes;
         }
 
-        httpContext.Features.Set<IFormFeature>(new FormFeature(httpContext.Request, new FormOptions
+        var mediaType = MediaTypeHeaderValue.Parse(httpContext.Request.ContentType);
+        var boundary = HeaderUtilities.RemoveQuotes(mediaType.Boundary).Value;
+        if (string.IsNullOrEmpty(boundary))
         {
-            MultipartBodyLengthLimit = maxUploadBytes,
-            ValueLengthLimit = int.MaxValue
-        }));
+            return Results.BadRequest("Missing multipart boundary");
+        }
 
-        var form = await httpContext.Request.ReadFormAsync(ct);
-        var files = form.Files;
-        if (files.Count == 0)
-            return Results.BadRequest("No files provided");
+        var reader = new MultipartReader(boundary, httpContext.Request.Body);
+        string? subpath = httpContext.Request.Query["subpath"].FirstOrDefault();
 
-        var subpath = form["subpath"].ToString();
-        var uploadInputs = files.Select(f => new StumpUploadFileInput
-        {
-            FileName = f.FileName,
-            Content = f.OpenReadStream()
-        }).ToList();
+        var files = ReadMultipartFilesAsync(reader, s => { if (string.IsNullOrEmpty(subpath)) subpath = s; }, ct);
 
-        var result = await service.UploadToLibraryAsync(user, id, subpath, uploadInputs, ct);
+        var result = await service.UploadToLibraryAsync(user, id, subpath, files, ct);
 
         return result.Outcome switch
         {
@@ -285,6 +282,48 @@ public static class StumpV2Endpoints
             UploadOutcome.FileTooLarge => Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status413PayloadTooLarge),
             _ => Results.BadRequest(new { error = result.Message })
         };
+    }
+
+    private static async IAsyncEnumerable<StumpUploadFileInput> ReadMultipartFilesAsync(
+        MultipartReader reader,
+        Action<string> onSubpathFound,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        MultipartSection? section;
+        while ((section = await reader.ReadNextSectionAsync(ct)) != null)
+        {
+            if (!ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var cd) || cd == null)
+            {
+                continue;
+            }
+
+            if (cd.IsFormDisposition())
+            {
+                var name = HeaderUtilities.RemoveQuotes(cd.Name).Value;
+                if (string.Equals(name, "subpath", StringComparison.OrdinalIgnoreCase))
+                {
+                    using var streamReader = new StreamReader(section.Body);
+                    var val = await streamReader.ReadToEndAsync(ct);
+                    if (!string.IsNullOrWhiteSpace(val))
+                    {
+                        onSubpathFound(val);
+                    }
+                }
+                continue;
+            }
+
+            if (cd.IsFileDisposition())
+            {
+                var rawName = HeaderUtilities.RemoveQuotes(cd.FileNameStar.HasValue ? cd.FileNameStar.Value : cd.FileName.Value).Value;
+                if (string.IsNullOrWhiteSpace(rawName)) continue;
+
+                yield return new StumpUploadFileInput
+                {
+                    FileName = rawName,
+                    Content = section.Body
+                };
+            }
+        }
     }
 
     private static void MapEpubRoutes(RouteGroupBuilder group)

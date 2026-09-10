@@ -89,7 +89,7 @@ RUN set -eu; \
     done; \
     [ "$MISSING" = 0 ]
 
-RUN chown -R 1000:1000 /rootfs/data
+RUN chown -R 1000:1000 /rootfs/data && chmod 1777 /rootfs/tmp
 
 # Stage 3: runtime distroless
 FROM gcr.io/distroless/base-debian13:nonroot

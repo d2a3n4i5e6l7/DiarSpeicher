@@ -17,6 +17,10 @@ mkdir -p /data/db /data/thumbnails /data/cache/pages /data/backups
 as_root chown -R node:node /data
 as_root chmod -R u+rwX,g+rwX,o+rX /data
 
+mkdir -p /tmp
+as_root chmod 1777 /tmp
+as_root chown -R node:node /tmp
+
 DOTNET_EXTRACT="${DOTNET_BUNDLE_EXTRACT_BASE_DIR:-/tmp/.net}"
 mkdir -p "$DOTNET_EXTRACT"
 as_root chown -R node:node "$DOTNET_EXTRACT"
