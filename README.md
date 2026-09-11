@@ -81,7 +81,7 @@ identidad, así que no la abras.
 | `PATH_BASE`        | Prefijo bajo el que el Gateway lo monta, sin barras. Vacío = raíz |
 | `NETWORK_NAME`     | Red Docker externa compartida con el Gateway                      |
 | `STORAGE_PATH`     | Ruta del host para base de datos, miniaturas y caché              |
-| `LIBRARIES_PATH`   | Ruta del host con los cómics. Se monta en solo lectura            |
+| `LIBRARIES_PATH`   | Ruta del host con los cómics. Escribible si `ENABLE_UPLOAD=true`  |
 | `PAGE_CACHE_BYTES` | Techo de la caché de páginas en disco                             |
 | `ENABLE_UPLOAD`    | Subida de ficheros desde la API                                   |
 

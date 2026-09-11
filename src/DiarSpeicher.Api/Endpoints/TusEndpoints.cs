@@ -124,7 +124,11 @@ public static class TusEndpoints
         if (!TryEnsureWritableDirectory(fullTargetDir, out var destinationError))
         {
             return Results.Json(
-                new { error = $"Upload destination is not writable: {destinationError}" },
+                new
+                {
+                    error = $"Upload destination '{fullTargetDir}' is not writable: {destinationError}. " +
+                            "Check that the libraries volume is not mounted read-only."
+                },
                 statusCode: StatusCodes.Status500InternalServerError);
         }
 

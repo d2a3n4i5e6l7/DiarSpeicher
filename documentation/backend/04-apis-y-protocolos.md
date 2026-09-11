@@ -70,6 +70,23 @@ porque hay lectores clásicos que no permiten configurar cabeceras.
 
 JSON-LD estilo Readium / WebPub. Mismo doble registro con `{apiKey}`.
 
+**El grupo se registra bajo dos prefijos**, `/opds/v2.0` y `/opds/v2`. El segundo es el que
+usa Komga (`Opds2Controller.kt`: `@RequestMapping(value = ["/opds/v2/"])`), y sin él un cliente
+escrito contra Komga recibe un 404. Con `{apiKey}` son cuatro registros en total.
+
+Komga además cuelga varios feeds de `libraries/` en lugar de `books/`, así que esos cuatro
+tienen alias hacia el mismo handler:
+
+| Ruta de Komga              | Alias de                |
+| -------------------------- | ----------------------- |
+| `libraries/browse`         | `books/browse`          |
+| `libraries/books/latest`   | `books/latest`          |
+| `libraries/keep-reading`   | `books/keep-reading`    |
+| `libraries/{id}/browse`    | `libraries/{id}`        |
+
+No existen equivalentes de `libraries/on-deck`, `libraries/series/latest`, `collections/{id}`
+ni `readlists/{id}`: colecciones y listas de lectura no son entidades del modelo.
+
 | Ruta                              | Devuelve                                              |
 | --------------------------------- | ------------------------------------------------------ |
 | `GET /auth`                       | Authentication Document (`application/opds-authentication+json`) |

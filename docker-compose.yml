@@ -15,7 +15,7 @@ services:
             - Storage__Backup__IntervalHours=${BACKUP_INTERVAL_HOURS:-12}
         volumes:
             - ${STORAGE_PATH:-./storage}:/data
-            - ${LIBRARIES_PATH:-./libraries}:/libraries:ro
+            - ${LIBRARIES_PATH:-./libraries}:/libraries
         restart: unless-stopped
         logging:
             driver: json-file

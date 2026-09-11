@@ -34,6 +34,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import VpnKeyIcon from "@mui/icons-material/VpnKey";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useCallback, useEffect, useState } from "react";
+import PageHeader from "../components/PageHeader";
 import {
 	usersApi,
 	rolesApi,
@@ -526,40 +527,35 @@ export default function UsersPage() {
 
 	return (
 		<Box>
-			<Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", mb: 3 }}>
-				<Box>
-					<Typography variant="h5" component="h2" sx={{ fontWeight: 700 }}>
-						Gestión de Usuarios
-					</Typography>
-					<Typography variant="body2" color="text.secondary">
-						Administra las cuentas, su edad, lo que pueden hacer y cómo se conectan.
-					</Typography>
-				</Box>
-
-				<Stack direction="row" spacing={1.5}>
-					<Button
-						variant="outlined"
-						startIcon={<RefreshIcon />}
-						onClick={() => {
-							void loadData();
-						}}
-						disabled={loading}
-					>
-						Refrescar
-					</Button>
-					<Button
-						id="create-user-btn"
-						variant="contained"
-						startIcon={<AddIcon />}
-						onClick={() => {
-							setCreateForm(EMPTY_FORM);
-							setOpenCreate(true);
-						}}
-					>
-						Nuevo Usuario
-					</Button>
-				</Stack>
-			</Stack>
+			<PageHeader
+				title="Gestión de Usuarios"
+				subtitle="Administra las cuentas, su edad, lo que pueden hacer y cómo se conectan."
+				actions={
+					<>
+						<Button
+							variant="outlined"
+							startIcon={<RefreshIcon />}
+							onClick={() => {
+								void loadData();
+							}}
+							disabled={loading}
+						>
+							Refrescar
+						</Button>
+						<Button
+							id="create-user-btn"
+							variant="contained"
+							startIcon={<AddIcon />}
+							onClick={() => {
+								setCreateForm(EMPTY_FORM);
+								setOpenCreate(true);
+							}}
+						>
+							Nuevo Usuario
+						</Button>
+					</>
+				}
+			/>
 
 			{error && (
 				<Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>

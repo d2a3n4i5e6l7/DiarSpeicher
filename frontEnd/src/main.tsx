@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import App from "./App";
 
 const container = document.getElementById("root");
@@ -9,6 +10,8 @@ if (!container) {
 
 createRoot(container).render(
 	<StrictMode>
-		<App />
+		<MemoryRouter>
+			<App />
+		</MemoryRouter>
 	</StrictMode>
 );

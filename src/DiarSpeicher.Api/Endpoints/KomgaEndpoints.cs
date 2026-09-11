@@ -16,8 +16,59 @@ public static class KomgaEndpoints
         MapSeriesEndpoints(group);
         MapBookEndpoints(group);
         MapProgressEndpoints(group);
+        MapSessionEndpoints(endpoints, group);
 
         return endpoints;
+    }
+
+    /// <summary>
+    /// Lo que un cliente de Komga pide nada más conectar, antes de tocar el catálogo. Sin
+    /// esto responde 404, el cliente da la conexión por inválida y nunca llega a pedir
+    /// bibliotecas: las rutas del catálogo pueden estar perfectas y aun así no entra.
+    ///
+    /// Komga colgó los usuarios de <c>api/v2/users</c> (UserController.kt) aunque el resto
+    /// de su API siga en v1, de ahí que este registro vaya fuera del grupo.
+    /// </summary>
+    private static void MapSessionEndpoints(IEndpointRouteBuilder endpoints, RouteGroupBuilder group)
+    {
+        endpoints.MapGet("/api/v2/users/me", (HttpContext context) =>
+        {
+            var user = GetAuthUser(context);
+
+            // Komga identifica al usuario por su correo; aquí no hay correos, así que va el
+            // nombre, que es lo que el cliente acaba mostrando.
+            var roles = new List<string> { "USER" };
+            if (user.IsServerOwner || user.HasRole("admin"))
+            {
+                roles.Add("ADMIN");
+            }
+
+            // Declarado como object? y no en linea: un ternario entre un tipo anonimo y null
+            // no tiene tipo comun y no compila.
+            object? ageRestriction = user.AgeRestriction.HasValue
+                ? new { age = user.AgeRestriction.Value, restriction = user.RestrictOnUnset ? "ALLOW_ONLY" : "EXCLUDE" }
+                : null;
+
+            return Results.Ok(new
+            {
+                id = user.Id,
+                email = user.Username,
+                roles,
+                sharedAllLibraries = user.ExcludedLibraryIds.Count == 0,
+                sharedLibrariesIds = Array.Empty<string>(),
+                labelsAllow = Array.Empty<string>(),
+                labelsExclude = Array.Empty<string>(),
+                ageRestriction
+            });
+        });
+
+        // El servidor siempre tiene dueño: la propiedad se concede al primer usuario que
+        // llega, así que nunca hay nada que reclamar desde un cliente.
+        group.MapGet("/claim", () => Results.Ok(new { isClaimed = true }));
+
+        // En Komga convierte una sesión de cabecera en cookie. Aquí la sesión la administra
+        // el Gateway y no hay nada que escribir, pero el 204 es lo que el cliente espera.
+        group.MapGet("/login/set-cookie", () => Results.NoContent());
     }
 
     private static void MapLibraryEndpoints(RouteGroupBuilder group)

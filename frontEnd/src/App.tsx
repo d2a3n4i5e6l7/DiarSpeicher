@@ -1,12 +1,17 @@
 import { Box, CircularProgress, CssBaseline, ThemeProvider, type PaletteMode } from "@mui/material";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { buildTheme } from "./theme";
+import { ColorModeContext } from "./theme/ColorModeContext";
 import { SessionContext, type SessionUser } from "./auth/SessionContext";
 import { authApi } from "./api/endpoints";
 import { onUnauthorized } from "./api/client";
 import { getPublicKeyBase64, resetKeyPair } from "./auth/dpop";
 import LoginPage from "./pages/LoginPage";
 import AppLayout from "./layout/AppLayout";
+import UsersPage from "./pages/UsersPage";
+import RolesPage from "./pages/RolesPage";
+import UploadPage from "./pages/UploadPage";
 
 const THEME_KEY = "diarspeicher-theme-mode";
 
@@ -129,6 +134,7 @@ export default function App() {
 	}, [refreshUser]);
 
 	const theme = useMemo(() => buildTheme(mode), [mode]);
+	const colorMode = useMemo(() => ({ mode, toggle: toggleTheme }), [mode, toggleTheme]);
 
 	const sessionValue = useMemo(
 		() => ({
@@ -160,15 +166,27 @@ export default function App() {
 	} else if (!user) {
 		mainContent = <LoginPage />;
 	} else {
-		mainContent = <AppLayout onToggleTheme={toggleTheme} />;
+		mainContent = (
+			<Routes>
+				<Route element={<AppLayout />}>
+					<Route index element={<Navigate to="/users" replace />} />
+					<Route path="/users" element={<UsersPage />} />
+					<Route path="/roles" element={<RolesPage />} />
+					<Route path="/upload" element={<UploadPage />} />
+					<Route path="*" element={<Navigate to="/users" replace />} />
+				</Route>
+			</Routes>
+		);
 	}
 
 	return (
-		<ThemeProvider theme={theme}>
-			<CssBaseline />
-			<SessionContext.Provider value={sessionValue}>
-				{mainContent}
-			</SessionContext.Provider>
-		</ThemeProvider>
+		<ColorModeContext.Provider value={colorMode}>
+			<ThemeProvider theme={theme}>
+				<CssBaseline />
+				<SessionContext.Provider value={sessionValue}>
+					{mainContent}
+				</SessionContext.Provider>
+			</ThemeProvider>
+		</ColorModeContext.Provider>
 	);
 }

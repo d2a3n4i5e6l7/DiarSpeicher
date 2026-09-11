@@ -9,8 +9,13 @@ public static class OpdsV2Endpoints
 {
     public static IEndpointRouteBuilder MapOpdsV2Endpoints(this IEndpointRouteBuilder endpoints)
     {
+        // Komga monta OPDS 2 en "/opds/v2/" (Opds2Controller.kt), no en "/opds/v2.0/". Un
+        // cliente escrito contra Komga pide la ruta corta y aqui recibia un 404, asi que se
+        // registran las dos: la larga se mantiene para no romper a quien ya la use.
         MapGroup(endpoints.MapGroup("/opds/v2.0"));
         MapGroup(endpoints.MapGroup("/opds/{apiKey}/v2.0"));
+        MapGroup(endpoints.MapGroup("/opds/v2"));
+        MapGroup(endpoints.MapGroup("/opds/{apiKey}/v2"));
 
         return endpoints;
     }
@@ -54,13 +59,16 @@ public static class OpdsV2Endpoints
             return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
         });
 
-        group.MapGet("/libraries/{id}", async (string id, int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
+        async Task<IResult> LibraryFeed(string id, int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct)
         {
             var feed = await opdsV2.GetLibrarySeriesFeedAsync(GetAuthUser(context), id, Math.Max(0, page ?? 0), GetApiKey(context), ct);
             return feed == null
                 ? Results.NotFound()
                 : Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
-        });
+        }
+
+        group.MapGet("/libraries/{id}", LibraryFeed);
+        group.MapGet("/libraries/{id}/browse", LibraryFeed);
 
         group.MapGet("/series/{id}", async (string id, int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {
@@ -81,29 +89,33 @@ public static class OpdsV2Endpoints
 
     private static void MapBookEndpoints(RouteGroupBuilder group)
     {
-        group.MapGet("/books/browse", async (int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
+        // Komga cuelga estos tres de "libraries/" (Opds2Controller.kt), no de "books/". Se
+        // registran las dos formas contra el mismo handler para que un cliente escrito
+        // contra Komga encuentre el feed donde lo busca.
+        async Task<IResult> BooksFeed(int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct)
         {
             var user = GetAuthUser(context);
             var apiKey = GetApiKey(context);
             var feed = await opdsV2.GetBooksFeedAsync(user, Math.Max(0, page ?? 0), apiKey, ct);
             return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
-        });
+        }
 
-        group.MapGet("/books/latest", async (int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
-        {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
-            var feed = await opdsV2.GetBooksFeedAsync(user, Math.Max(0, page ?? 0), apiKey, ct);
-            return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
-        });
-
-        group.MapGet("/books/keep-reading", async (HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
+        async Task<IResult> KeepReadingFeed(HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct)
         {
             var user = GetAuthUser(context);
             var apiKey = GetApiKey(context);
             var feed = await opdsV2.GetKeepReadingFeedAsync(user, apiKey, ct);
             return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
-        });
+        }
+
+        group.MapGet("/books/browse", BooksFeed);
+        group.MapGet("/libraries/browse", BooksFeed);
+
+        group.MapGet("/books/latest", BooksFeed);
+        group.MapGet("/libraries/books/latest", BooksFeed);
+
+        group.MapGet("/books/keep-reading", KeepReadingFeed);
+        group.MapGet("/libraries/keep-reading", KeepReadingFeed);
 
         group.MapGet("/books/{id}", async (string id, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {

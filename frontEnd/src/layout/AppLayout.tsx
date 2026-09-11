@@ -1,169 +1,168 @@
 import {
 	AppBar,
-	Avatar,
 	Box,
 	Chip,
-	Container,
+	Divider,
+	Drawer,
 	IconButton,
-	Stack,
-	Tab,
-	Tabs,
+	List,
+	ListItemButton,
+	ListItemIcon,
+	ListItemText,
 	Toolbar,
 	Tooltip,
 	Typography,
+	useMediaQuery,
 	useTheme,
 } from "@mui/material";
-import StorageIcon from "@mui/icons-material/Storage";
-import Brightness4Icon from "@mui/icons-material/Brightness4";
-import Brightness7Icon from "@mui/icons-material/Brightness7";
-import LogoutIcon from "@mui/icons-material/Logout";
 import PeopleIcon from "@mui/icons-material/People";
-import SecurityIcon from "@mui/icons-material/Security";
+import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
+import LogoutIcon from "@mui/icons-material/Logout";
+import MenuIcon from "@mui/icons-material/Menu";
+import DarkModeIcon from "@mui/icons-material/DarkMode";
+import LightModeIcon from "@mui/icons-material/LightMode";
 import { useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NAV_ITEMS } from "./navItems";
+import { useColorMode } from "../theme/ColorModeContext";
 import { useSession } from "../auth/SessionContext";
 import { URL_ACCESS } from "../api/client";
-import UsersPage from "../pages/UsersPage";
-import RolesPage from "../pages/RolesPage";
-import UploadPage from "../pages/UploadPage";
 
-interface AppLayoutProps {
-	onToggleTheme: () => void;
-}
+const DRAWER_WIDTH = 236;
 
-export default function AppLayout({ onToggleTheme }: AppLayoutProps) {
+const ICONS: Record<string, typeof PeopleIcon> = {
+	People: PeopleIcon,
+	AdminPanelSettings: AdminPanelSettingsIcon,
+	CloudUpload: CloudUploadIcon,
+};
+
+export default function AppLayout() {
 	const theme = useTheme();
+	const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
+	const [mobileOpen, setMobileOpen] = useState(false);
+	const { mode, toggle } = useColorMode();
 	const { user, logout } = useSession();
-	const [activeTab, setActiveTab] = useState(0);
+	const location = useLocation();
+
+	const current = NAV_ITEMS.find((item) => location.pathname.startsWith(item.path));
+
+	const drawerContent = (
+		<Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
+			<Toolbar sx={{ px: 2 }}>
+				<Typography variant="h6" noWrap>
+					DiarSpeicher
+				</Typography>
+			</Toolbar>
+			<Divider />
+			<List sx={{ px: 1, py: 1, flexGrow: 1 }}>
+				{NAV_ITEMS.map((item) => {
+					const Icon = ICONS[item.icon];
+					return (
+						<ListItemButton
+							key={item.path}
+							component={NavLink}
+							to={item.path}
+							selected={location.pathname.startsWith(item.path)}
+							onClick={() => setMobileOpen(false)}
+							sx={{ borderRadius: 1, mb: 0.5 }}>
+							<ListItemIcon sx={{ minWidth: 38 }}>
+								<Icon fontSize="small" />
+							</ListItemIcon>
+							<ListItemText primary={item.label} slotProps={{ primary: { sx: { fontSize: 14 } } }} />
+						</ListItemButton>
+					);
+				})}
+			</List>
+			<Divider />
+			<Box sx={{ p: 2 }}>
+				<Typography variant="caption" color="text.secondary">
+					Admin Gateway: <code>{URL_ACCESS}</code>
+				</Typography>
+			</Box>
+		</Box>
+	);
 
 	return (
-		<Box sx={{ minHeight: "100vh", backgroundColor: "background.default" }}>
+		<Box sx={{ display: "flex", height: "100vh", overflow: "hidden" }}>
 			<AppBar
-				position="sticky"
+				position="fixed"
+				color="default"
 				elevation={0}
 				sx={{
 					borderBottom: 1,
 					borderColor: "divider",
-					backgroundColor: "background.paper",
-					color: "text.primary",
-				}}
-			>
-				<Toolbar sx={{ justifyContent: "space-between" }}>
-					<Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
-						<Box
-							sx={{
-								width: 38,
-								height: 38,
-								borderRadius: 2,
-								display: "flex",
-								alignItems: "center",
-								justifyContent: "center",
-								background:
-									theme.palette.mode === "dark"
-										? "linear-gradient(135deg, #6366f1 0%, #4338ca 100%)"
-										: "linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)",
-								color: "#fff",
-							}}
-						>
-							<StorageIcon fontSize="small" />
-						</Box>
-						<Box>
-							<Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
-								DiarSpeicher
-							</Typography>
-							<Typography variant="caption" color="text.secondary">
-								Admin Gateway: <code>{URL_ACCESS}</code>
-							</Typography>
-						</Box>
-					</Stack>
-
-					<Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-						{user && (
-							<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-								<Avatar
-									sx={{
-										width: 32,
-										height: 32,
-										bgcolor: "primary.main",
-										fontSize: "0.875rem",
-										fontWeight: 600,
-									}}
-								>
-									{user.username.charAt(0).toUpperCase()}
-								</Avatar>
-								<Box sx={{ display: { xs: "none", sm: "block" } }}>
-									<Typography variant="body2" sx={{ fontWeight: 600 }}>
-										{user.username}
-									</Typography>
-									<Chip
-										label={user.role || (user.is_admin ? "admin" : "reader")}
-										size="small"
-										color={user.is_admin ? "primary" : "default"}
-										sx={{ height: 18, fontSize: "0.65rem" }}
-									/>
-								</Box>
-							</Stack>
-						)}
-
-						<Tooltip title="Cambiar Tema (Claro / Oscuro)">
-							<IconButton onClick={onToggleTheme} color="inherit" size="small">
-								{theme.palette.mode === "dark" ? <Brightness7Icon fontSize="small" /> : <Brightness4Icon fontSize="small" />}
-							</IconButton>
-						</Tooltip>
-
-						<Tooltip title="Cerrar Sesión">
-							<IconButton
-								id="logout-btn"
-								onClick={() => {
-									void logout();
-								}}
-								color="error"
-								size="small"
-							>
-								<LogoutIcon fontSize="small" />
-							</IconButton>
-						</Tooltip>
-					</Stack>
+					bgcolor: "background.paper",
+					width: { md: `calc(100% - ${DRAWER_WIDTH}px)` },
+					ml: { md: `${DRAWER_WIDTH}px` },
+				}}>
+				<Toolbar>
+					{!isDesktop && (
+						<IconButton edge="start" onClick={() => setMobileOpen(true)} sx={{ mr: 1 }}>
+							<MenuIcon />
+						</IconButton>
+					)}
+					<Typography variant="subtitle1" sx={{ flexGrow: 1, fontWeight: 600 }}>
+						{current?.label ?? "Administración"}
+					</Typography>
+					{user && (
+						<Chip
+							label={user.username}
+							size="small"
+							color={user.is_admin ? "primary" : "default"}
+							variant="outlined"
+							sx={{ mr: 1 }}
+						/>
+					)}
+					<Tooltip title={mode === "light" ? "Tema oscuro" : "Tema claro"}>
+						<IconButton onClick={toggle}>{mode === "light" ? <DarkModeIcon /> : <LightModeIcon />}</IconButton>
+					</Tooltip>
+					<Tooltip title="Cerrar sesión">
+						<IconButton
+							id="logout-btn"
+							onClick={() => {
+								void logout();
+							}}>
+							<LogoutIcon />
+						</IconButton>
+					</Tooltip>
 				</Toolbar>
-
-				<Box sx={{ px: { xs: 2, sm: 3 } }}>
-					<Tabs
-						value={activeTab}
-						onChange={(_: React.SyntheticEvent, val: number) => setActiveTab(val)}
-						textColor="primary"
-						indicatorColor="primary"
-						sx={{ minHeight: 44 }}
-					>
-						<Tab
-							id="tab-users"
-							icon={<PeopleIcon fontSize="small" />}
-							iconPosition="start"
-							label="Usuarios"
-							sx={{ minHeight: 44, py: 0 }}
-						/>
-						<Tab
-							id="tab-roles"
-							icon={<SecurityIcon fontSize="small" />}
-							iconPosition="start"
-							label="Roles"
-							sx={{ minHeight: 44, py: 0 }}
-						/>
-						<Tab
-							id="tab-upload"
-							icon={<CloudUploadIcon fontSize="small" />}
-							iconPosition="start"
-							label="Subida de Ficheros"
-							sx={{ minHeight: 44, py: 0 }}
-						/>
-					</Tabs>
-				</Box>
 			</AppBar>
 
-			<Container maxWidth="xl" sx={{ py: 4 }}>
-				{activeTab === 0 && <UsersPage />}
-				{activeTab === 1 && <RolesPage />}
-				{activeTab === 2 && <UploadPage />}
-			</Container>
+			<Box component="nav" sx={{ width: { md: DRAWER_WIDTH }, flexShrink: { md: 0 } }}>
+				<Drawer
+					variant={isDesktop ? "permanent" : "temporary"}
+					open={isDesktop || mobileOpen}
+					onClose={() => setMobileOpen(false)}
+					ModalProps={{ keepMounted: true }}
+					sx={{
+						"& .MuiDrawer-paper": {
+							width: DRAWER_WIDTH,
+							boxSizing: "border-box",
+							borderRight: 1,
+							borderColor: "divider",
+						},
+					}}>
+					{drawerContent}
+				</Drawer>
+			</Box>
+
+			<Box
+				component="main"
+				sx={{
+					flexGrow: 1,
+					minWidth: 0,
+					maxWidth: { xs: "100%", md: `calc(100% - ${DRAWER_WIDTH}px)` },
+					height: "100vh",
+					display: "flex",
+					flexDirection: "column",
+					overflow: "hidden",
+				}}>
+				<Toolbar />
+				<Box sx={{ flex: 1, minHeight: 0, minWidth: 0, overflowY: "auto", overflowX: "hidden", p: 3 }}>
+					<Outlet />
+				</Box>
+			</Box>
 		</Box>
 	);
 }

@@ -1,102 +1,44 @@
-import { createTheme, type PaletteMode } from "@mui/material";
+import { createTheme } from "@mui/material/styles";
+import type { PaletteMode, Theme } from "@mui/material";
 
-export function buildTheme(mode: PaletteMode) {
-	const isDark = mode === "dark";
-
+export function buildTheme(mode: PaletteMode): Theme {
 	return createTheme({
 		palette: {
 			mode,
-			primary: {
-				main: isDark ? "#818cf8" : "#4f46e5",
-				light: isDark ? "#a5b4fc" : "#6366f1",
-				dark: isDark ? "#4f46e5" : "#4338ca",
-				contrastText: "#ffffff",
-			},
-			secondary: {
-				main: isDark ? "#38bdf8" : "#0284c7",
-				light: isDark ? "#7dd3fc" : "#38bdf8",
-				dark: isDark ? "#0284c7" : "#0369a1",
-			},
+			primary: { main: mode === "light" ? "#00695c" : "#4db6ac" },
+			secondary: { main: mode === "light" ? "#5d4037" : "#bcaaa4" },
 			background: {
-				default: isDark ? "#0f172a" : "#f8fafc",
-				paper: isDark ? "#1e293b" : "#ffffff",
+				default: mode === "light" ? "#f4f6f8" : "#12161b",
+				paper: mode === "light" ? "#ffffff" : "#1b2129",
 			},
-			text: {
-				primary: isDark ? "#f1f5f9" : "#0f172a",
-				secondary: isDark ? "#94a3b8" : "#64748b",
-			},
-			divider: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
 		},
+		shape: { borderRadius: 8 },
 		typography: {
-			fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-			h5: {
-				fontWeight: 700,
-				letterSpacing: "-0.02em",
-			},
-			h6: {
-				fontWeight: 600,
-				letterSpacing: "-0.01em",
-			},
-			button: {
-				textTransform: "none",
-				fontWeight: 600,
-			},
-		},
-		shape: {
-			borderRadius: 10,
+			fontFamily: ["Inter", "Roboto", "system-ui", "sans-serif"].join(","),
+			h5: { fontWeight: 600 },
+			h6: { fontWeight: 600 },
 		},
 		components: {
-			MuiButton: {
+			MuiCssBaseline: {
 				styleOverrides: {
-					root: {
-						borderRadius: 8,
-						boxShadow: "none",
-						"&:hover": {
-							boxShadow: "none",
-						},
+					body: {
+						WebkitUserSelect: "none",
+						MozUserSelect: "none",
+						msUserSelect: "none",
+						userSelect: "none",
 					},
-				},
-				variants: [
-					{
-						props: { variant: "contained", color: "primary" },
-						style: {
-							background: isDark
-								? "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)"
-								: "linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)",
-						},
-					},
-				],
-			},
-			MuiPaper: {
-				styleOverrides: {
-					root: {
-						backgroundImage: "none",
+					'input, textarea, [contenteditable="true"], [contenteditable=""], [role="textbox"]': {
+						WebkitUserSelect: "text",
+						MozUserSelect: "text",
+						msUserSelect: "text",
+						userSelect: "text",
 					},
 				},
 			},
-			MuiCard: {
-				styleOverrides: {
-					root: {
-						borderRadius: 12,
-						border: isDark ? "1px solid rgba(255, 255, 255, 0.08)" : "1px solid rgba(0, 0, 0, 0.06)",
-						boxShadow: isDark
-							? "0 4px 20px -2px rgba(0, 0, 0, 0.5)"
-							: "0 4px 20px -2px rgba(0, 0, 0, 0.05)",
-					},
-				},
-			},
-			MuiTextField: {
-				defaultProps: {
-					size: "small",
-				},
-			},
-			MuiOutlinedInput: {
-				styleOverrides: {
-					root: {
-						borderRadius: 8,
-					},
-				},
-			},
+			MuiPaper: { defaultProps: { elevation: 0 }, styleOverrides: { root: { backgroundImage: "none" } } },
+			MuiButton: { defaultProps: { disableElevation: true } },
+			MuiTextField: { defaultProps: { size: "small" } },
+			MuiSelect: { defaultProps: { size: "small" } },
 		},
 	});
 }

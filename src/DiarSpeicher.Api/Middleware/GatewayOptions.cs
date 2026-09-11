@@ -33,7 +33,9 @@ public class GatewayOptions
     public static readonly string[] DefaultPublicPaths =
     [
         "/opds/v2.0/auth",
-        "/opds/*/v2.0/auth"
+        "/opds/*/v2.0/auth",
+        "/opds/v2/auth",
+        "/opds/*/v2/auth"
     ];
 
     public IReadOnlyList<string> ResolvePublicPaths() =>

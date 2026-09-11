@@ -29,6 +29,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import SecurityIcon from "@mui/icons-material/Security";
 import { useCallback, useEffect, useState } from "react";
+import PageHeader from "../components/PageHeader";
 import { rolesApi, type RoleItem } from "../api/endpoints";
 
 export default function RolesPage() {
@@ -250,37 +251,32 @@ export default function RolesPage() {
 
 	return (
 		<Box>
-			<Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", mb: 3 }}>
-				<Box>
-					<Typography variant="h5" component="h2" sx={{ fontWeight: 700 }}>
-						Gestión de Roles
-					</Typography>
-					<Typography variant="body2" color="text.secondary">
-						Configura los niveles de acceso y permisos para los usuarios del sistema.
-					</Typography>
-				</Box>
-
-				<Stack direction="row" spacing={1.5}>
-					<Button
-						variant="outlined"
-						startIcon={<RefreshIcon />}
-						onClick={() => {
-							void loadRoles();
-						}}
-						disabled={loading}
-					>
-						Refrescar
-					</Button>
-					<Button
-						id="create-role-btn"
-						variant="contained"
-						startIcon={<AddIcon />}
-						onClick={() => setOpenCreate(true)}
-					>
-						Nuevo Rol
-					</Button>
-				</Stack>
-			</Stack>
+			<PageHeader
+				title="Gestión de Roles"
+				subtitle="Configura los niveles de acceso y permisos para los usuarios del sistema."
+				actions={
+					<>
+						<Button
+							variant="outlined"
+							startIcon={<RefreshIcon />}
+							onClick={() => {
+								void loadRoles();
+							}}
+							disabled={loading}
+						>
+							Refrescar
+						</Button>
+						<Button
+							id="create-role-btn"
+							variant="contained"
+							startIcon={<AddIcon />}
+							onClick={() => setOpenCreate(true)}
+						>
+							Nuevo Rol
+						</Button>
+					</>
+				}
+			/>
 
 			{error && (
 				<Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>

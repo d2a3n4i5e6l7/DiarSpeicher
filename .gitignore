@@ -55,3 +55,6 @@ Thumbs.db
 publish/
 storage/
 libraries/
+
+# Paquetes de despliegue generados por build.sh
+/dist/
