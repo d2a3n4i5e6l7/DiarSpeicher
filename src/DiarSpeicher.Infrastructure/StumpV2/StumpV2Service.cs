@@ -466,6 +466,11 @@ public sealed class StumpV2Service : IStumpV2Service
             return UploadResult.Fail(UploadOutcome.UploadDisabled, "Uploads are disabled on this server.");
         }
 
+        if (!user.HasPermission(Permissions.FileUpload))
+        {
+            return UploadResult.Fail(UploadOutcome.PermissionDenied, "This account is not allowed to upload files.");
+        }
+
         var library = await _db.Libraries.ForUser(user)
             .FirstOrDefaultAsync(l => l.Id == libraryId, ct);
 
@@ -477,6 +482,14 @@ public sealed class StumpV2Service : IStumpV2Service
         if (!TryResolveTargetDirectory(library.Path, subpath, out var fullTargetDir))
         {
             return UploadResult.Fail(UploadOutcome.LibraryNotFound, "Library not found.");
+        }
+
+        // Subir a una subcarpeta que ya existe no exige poder crearlas.
+        if (!Directory.Exists(fullTargetDir) && !user.HasPermission(Permissions.CreateFolder))
+        {
+            return UploadResult.Fail(
+                UploadOutcome.PermissionDenied,
+                "This account is not allowed to create folders in the library.");
         }
 
         Directory.CreateDirectory(fullTargetDir);

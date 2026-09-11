@@ -259,4 +259,98 @@ public sealed class GatewayIdentityTests : IDisposable
 
         Assert.Equal("u1", Resolved(context)!.Id);
     }
+
+    [Fact]
+    public async Task PermissionsComeFromTheHeader()
+    {
+        var context = await InvokeAsync(
+            ("X-Auth-Sub", "u1"),
+            ("X-Auth-Perms", "FileUpload, AccessKoboSync"));
+
+        var user = Resolved(context)!;
+        Assert.Contains("FileUpload", user.Permissions);
+        Assert.Contains("AccessKoboSync", user.Permissions);
+        Assert.True(user.HasPermission(Permissions.FileUpload));
+        Assert.True(user.HasPermission(Permissions.AccessKoboSync));
+    }
+
+    /// <summary>
+    /// El primer usuario que llega se queda la propiedad del servidor, asi que este caso
+    /// comprueba la exencion de <see cref="AuthUser.HasPermission"/>: sin ella, una instancia
+    /// recien desplegada se quedaria sin nadie capaz de subir nada, porque los permisos por
+    /// defecto del Gateway no incluyen FileUpload.
+    /// </summary>
+    [Fact]
+    public async Task ServerOwnerIsExemptFromPermissions()
+    {
+        var context = await InvokeAsync(("X-Auth-Sub", "u1"));
+
+        var user = Resolved(context)!;
+        Assert.True(user.IsServerOwner);
+        Assert.Empty(user.Permissions);
+        Assert.True(user.HasPermission(Permissions.FileUpload));
+    }
+
+    [Fact]
+    public async Task MissingPermissionIsDenied()
+    {
+        await using (var seed = NewContext())
+        {
+            seed.Users.Add(new User { Id = "owner", Username = "owner", IsServerOwner = true });
+            await seed.SaveChangesAsync();
+        }
+
+        var context = await InvokeAsync(
+            ("X-Auth-Sub", "u2"),
+            ("X-Auth-Perms", "AccessKoreaderSync"));
+
+        var user = Resolved(context)!;
+        Assert.False(user.IsServerOwner);
+        Assert.True(user.HasPermission(Permissions.AccessKoreaderSync));
+        Assert.False(user.HasPermission(Permissions.FileUpload));
+    }
+
+    /// <summary>El Gateway acepta "*" como comodin; el plugin debe entenderlo igual.</summary>
+    [Fact]
+    public async Task WildcardGrantsEveryPermission()
+    {
+        await using (var seed = NewContext())
+        {
+            seed.Users.Add(new User { Id = "owner", Username = "owner", IsServerOwner = true });
+            await seed.SaveChangesAsync();
+        }
+
+        var context = await InvokeAsync(("X-Auth-Sub", "u2"), ("X-Auth-Perms", "*"));
+
+        var user = Resolved(context)!;
+        Assert.False(user.IsServerOwner);
+        Assert.True(user.HasPermission(Permissions.FileUpload));
+        Assert.True(user.HasPermission(Permissions.ManageLibrary));
+    }
+
+    /// <summary>
+    /// Misma trampa que con X-Auth-Sub: nginx blanquea la cabecera y luego inyecta la validada,
+    /// de modo que la primera aparicion vendria vacia y dejaria al usuario sin permisos.
+    /// </summary>
+    [Fact]
+    public async Task DuplicatedPermissionsHeaderTakesTheInjectedValue()
+    {
+        await using (var seed = NewContext())
+        {
+            seed.Users.Add(new User { Id = "owner", Username = "owner", IsServerOwner = true });
+            await seed.SaveChangesAsync();
+        }
+
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v2/series";
+        context.Request.Headers["X-Auth-Sub"] = new[] { "", "u2" };
+        context.Request.Headers["X-Auth-Perms"] = new[] { "", "FileUpload" };
+
+        var middleware = new GatewayIdentityMiddleware(_ => Task.CompletedTask);
+
+        await using var db = NewContext();
+        await middleware.InvokeAsync(context, db);
+
+        Assert.True(Resolved(context)!.HasPermission(Permissions.FileUpload));
+    }
 }

@@ -217,6 +217,11 @@ public static class StumpV2Endpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            if (!user.HasPermission(Permissions.ManageLibrary))
+            {
+                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
             var result = await service.CreateLibraryAsync(user, input, ct);
             return result == null ? Results.BadRequest("Could not create library") : Results.Created($"/api/v2/libraries/{result.Id}", result);
         });
@@ -230,6 +235,11 @@ public static class StumpV2Endpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            if (!user.HasPermission(Permissions.ScanLibrary))
+            {
+                return Results.Json(new { error = "This account is not allowed to scan libraries." }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
             var success = await service.TriggerLibraryScanAsync(user, id, ct);
             return success ? Results.Accepted($"/api/v2/libraries/{id}") : Results.NotFound();
         });
@@ -278,6 +288,7 @@ public static class StumpV2Endpoints
         {
             UploadOutcome.Success => Results.Ok(result.Response),
             UploadOutcome.UploadDisabled => Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status403Forbidden),
+            UploadOutcome.PermissionDenied => Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status403Forbidden),
             UploadOutcome.LibraryNotFound => Results.NotFound(new { error = result.Message }),
             UploadOutcome.FileTooLarge => Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status413PayloadTooLarge),
             _ => Results.BadRequest(new { error = result.Message })

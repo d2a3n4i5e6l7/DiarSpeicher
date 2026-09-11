@@ -385,3 +385,75 @@ Todos requieren sesión autenticada activa.
 | `/auth/api/tokens/{id:int}`        | DELETE | Ninguna                             | Elimina el registro del token de la base de datos (`204 No Content`).                                                      |
 | `/auth/api/tokens/{id:int}/revoke` | POST   | Ninguna                             | Marca `revoked_at` con la fecha actual y añade el `jti` a `RevocationCache`. Devuelve `{revoked: true, jti}`.               |
 | `/auth/api/tokens/{id:int}/routes` | PUT    | Ninguna                             | Endpoint stub de compatibilidad. Devuelve `{updated: true}`.                                                               |
+
+### Administración del plugin — `/plugins/{slug}/auth`
+
+`PluginAuthEndpoints.cs` en el Gateway. **Es el grupo que consume el panel de DiarSpeicher**
+(`frontEnd/`, `AUTH_BASE` en [client.ts](../../frontEnd/src/api/client.ts)), no el `/auth/api`
+de la sección anterior: aquel administra los usuarios del propio Gateway y este los lectores
+del reino del plugin, que son los que llegan a DiarSpeicher en las cabeceras `X-Auth-*`.
+
+Los usuarios viven en la tabla `reader_user` del almacén del plugin. Todas las rutas de
+gestión exigen rol `admin` del reino, resuelto desde la cookie de sesión; si no, `403`.
+
+| Ruta                  | Método | Entrada                                                                                          | Salida                                                                                        |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `/protocols`          | GET    | Ninguna · sin auth                                                                                | Catálogo para pintar la UI: `{secure_default, protocols[]}` con etiqueta, descripción y aviso     |
+| `/users`              | GET    | Ninguna                                                                                           | `id`, `username`, `role`, `permissions`, `is_enabled`, `is_admin`, `created_at`, `allowed_protocols`, `age_restriction` |
+| `/users`              | POST   | `{username, password, role?, permissions?, allowedProtocols?, ageRestriction?}`                   | `200` con el usuario · `400` si el nombre ya existe en el reino                                  |
+| `/users/{id}`         | PUT    | `{role?, permissions?, isEnabled?, newPassword?, allowedProtocols?, ageRestriction?, clearAgeRestriction?}` | `{updated}` · solo se escribe lo que llega no nulo                                     |
+| `/users/{id}`         | DELETE | Ninguna                                                                                           | `{deleted}` · no deja borrarse a uno mismo                                                       |
+| `/api-keys`           | GET    | `userId?`                                                                                         | Claves del usuario                                                                                |
+| `/api-keys`           | POST   | `{clientType?, expiresInDays?}`                                                                   | La clave en claro, una sola vez                                                                   |
+| `/api-keys/{id}`      | DELETE | Ninguna                                                                                           | Revoca la clave                                                                                   |
+
+**Los nombres del cuerpo van en camelCase, no en snake_case.** El binder de minimal APIs
+ignora las mayúsculas pero no los guiones bajos, así que un `is_enabled` o un
+`allowed_protocols` se enlazan como `null` y el campo se queda sin tocar **sin dar error**:
+la respuesta es un `200 {updated:false}` o un `{updated:true}` que no cambió lo que se
+pretendía.
+
+#### `permissions`
+
+CSV libre. El Gateway solo interpreta dos valores —`AccessApiKeys`, que decide si el usuario
+puede administrar sus propias claves, y `*`, que vale por todos— y el resto los almacena y
+los reenvía en `X-Auth-Perms` sin mirarlos. El vocabulario que pinta el panel lo fija
+`PERMISSION_GROUPS` en [endpoints.ts](../../frontEnd/src/api/endpoints.ts).
+
+DiarSpeicher lee la cabecera en `GatewayIdentityMiddleware` y la aplica en los endpoints de
+subida, creación de bibliotecas, escaneo y sincronización. La tabla de qué permiso cierra qué
+puerta, junto con la exención del propietario del servidor y el aviso de migración, está en
+[05-autenticacion-actual.md](05-autenticacion-actual.md#permisos).
+
+#### `allowedProtocols` · habilitar OPDS con contraseña
+
+CSV de `api_key` y `basic_password`. `UserProtocols.Normalize` descarta lo desconocido y
+**cae a `api_key` si la lista queda vacía**: no existe un usuario con cero protocolos.
+
+Los usuarios nacen con `api_key` a secas, o sea que **OPDS con usuario y contraseña está
+desactivado por defecto** y se habilita uno a uno con
+`PUT /users/{id}` y `{"allowedProtocols": "api_key,basic_password"}`.
+
+Hace falta además que el montaje del plugin incluya `header_basic_key` en sus
+`authenticators` y regenerar `gateway.conf`: sin eso el `401` sale sin `WWW-Authenticate` y
+el lector OPDS falla en silencio, que es a propósito para que el navegador no abra su diálogo
+nativo encima de la SPA.
+
+Basic manda la contraseña de la cuenta en Base64 sin cifrar en cada petición, así que exige
+HTTPS. El aviso literal que devuelve `GET /protocols` es el que el panel muestra al activar
+la opción.
+
+#### `ageRestriction`
+
+Entero de 0 a 120, o `null` para «sin restricción». Viaja al plugin en `X-Auth-Age` y allí
+filtra el catálogo por clasificación de edad.
+
+En el `PUT`, omitir el campo significa «no lo toques», de modo que volver a dejarlo en blanco
+necesita `clearAgeRestriction: true`.
+
+#### Caché de credenciales Basic
+
+Verificar un hash bcrypt cuesta unos 100 ms y cada página que pide un lector OPDS pasa por
+`auth_request`, así que las verificaciones positivas se cachean 5 minutos en memoria del
+proceso. Cualquier `PUT /users/{id}` que cambie algo invalida la entrada del usuario; tocar
+`reader_user` por SQL a mano, no, y el cambio tarda hasta el TTL en notarse.

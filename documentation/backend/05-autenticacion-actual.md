@@ -34,8 +34,13 @@ traduce cabeceras a un `AuthUser` y mantiene el espejo.
 | `X-Auth-Sub`             | `Id` · sin ella no se resuelve identidad  |
 | `X-Auth-User`            | `Username` · si falta se usa el `Sub`     |
 | `X-Auth-Role`            | `Roles`, separados por coma               |
-| `X-Auth-Server-Owner`    | `IsServerOwner`                           |
-| `X-Auth-Age-Restriction` | `AgeRestriction`                          |
+| `X-Auth-Age`             | `AgeRestriction`                          |
+| `X-Auth-Perms`           | `Permissions`, separados por coma         |
+
+`IsServerOwner` **no sale de ninguna cabecera**: se concede en la base local al primer
+usuario que la instancia ve y desde ahí solo cambia por la base de datos. nginx únicamente
+borra las cabeceras que nombra una a una, así que cualquiera que no nombre llegaría tal cual
+desde el cliente; que la propiedad del servidor no dependa de ninguna es deliberado.
 
 **El espejo se crea just-in-time.** En la primera petición de un usuario desconocido se
 inserta su fila; en las siguientes se reutiliza, y el nombre y la propiedad del servidor se
@@ -44,9 +49,10 @@ actualizan si el Gateway los cambió.
 **El primero que entra queda como propietario del servidor**, aunque la cabecera no lo
 diga: un servidor recién desplegado no tiene administrador hasta que alguien llega.
 
-La restricción de edad y las bibliotecas excluidas se leen del espejo, no de las cabeceras,
-porque son datos del dominio de medios que el Gateway no administra. La cabecera
-`X-Auth-Age-Restriction`, si viene, tiene prioridad.
+Las bibliotecas excluidas se leen del espejo, no de las cabeceras, porque son datos del
+dominio de medios que el Gateway no administra. La edad sí la administra el Gateway —en la
+columna `age_restriction` de `reader_user`, editable desde la pestaña de usuarios del panel—
+y la cabecera `X-Auth-Age`, si viene, gana sobre el valor del espejo.
 
 ### OpdsAuthMiddleware
 
@@ -69,7 +75,7 @@ deliberada: el contenedor no publica su puerto y el Gateway es el único que pue
 alcanzarlo, así que la garantía la da la topología del despliegue.
 
 La contrapartida hay que tenerla presente: si ese puerto llegara a exponerse, cualquiera
-podría enviar `X-Auth-Server-Owner: true` y obtener propiedad del servidor. No hay segunda
+podría enviar `X-Auth-Sub` con el identificador de otro usuario y suplantarlo. No hay segunda
 barrera.
 
 ## Lo que permanece en el backend
@@ -83,12 +89,41 @@ barrera.
 Ver [MediaSqlFilters](../../src/DiarSpeicher.Infrastructure/Data/Extensions/MediaSqlFilters.cs)
 para la variante en SQL de esas reglas.
 
-## Campos sin consumidor
+## Permisos
 
-Quedan en el modelo y nadie los escribe. Son huecos previstos o restos:
+El Gateway guarda una lista de permisos por usuario (`reader_user.permissions`, CSV
+editable desde la pestaña de usuarios del panel) y la inyecta en cada petición. El
+middleware la trocea por comas en `AuthUser.Permissions` y `AuthUser.HasPermission`
+decide. El vocabulario lo fijan dos ficheros que **deben decir lo mismo**:
+[Permissions.cs](../../src/DiarSpeicher.Core/Domain/Models/Permissions.cs) y
+`PERMISSION_GROUPS` en [endpoints.ts](../../frontEnd/src/api/endpoints.ts).
 
-- **`Sessions`** está mapeada e indexada; nada del pipeline crea ni valida sesiones. Igual
-  que `User.MaxSessionsAllowed`.
-- **`User.OidcIssuerId`** y **`User.OidcEmail`**: el plugin administra OIDC, así que
-  probablemente sobran aquí.
-- **`User.Permissions`**: los permisos llegan por cabecera en cada petición.
+| Permiso              | Dónde se comprueba                                                    |
+| -------------------- | ----------------------------------------------------------------------- |
+| `FileUpload`         | `TusEndpoints` POST y PATCH · `StumpV2Service.UploadToLibraryAsync`, que cubre también la mutación `uploadBooks` |
+| `CreateFolder`       | Los mismos dos, **solo si el subpath no existe todavía**                |
+| `ManageLibrary`      | `POST /api/v2/libraries`                                                |
+| `ScanLibrary`        | `POST /api/v2/libraries/{id}/scan` y la mutación `scanLibrary`          |
+| `AccessKoreaderSync` | Filtro de grupo sobre `/koreader/{apiKey}`                              |
+| `AccessKoboSync`     | Filtro de grupo sobre `/kobo/{apiKey}`                                  |
+| `AccessApiKeys`      | Nada aquí: lo comprueba el propio Gateway antes de emitir identidad     |
+
+Dos reglas que conviene tener presentes antes de tocar nada:
+
+**El propietario del servidor está exento.** `HasPermission` devuelve `true` para él sin
+mirar la lista, igual que `HasRole`. Sin esa exención una instancia recién desplegada se
+quedaría sin nadie capaz de subir, porque los permisos por defecto del Gateway
+(`AccessApiKeys,AccessKoreaderSync,AccessKoboSync`) **no incluyen `FileUpload`**.
+
+**Ese mismo valor por defecto es la trampa de la migración.** Cualquier usuario que ya
+existiera antes de esto y no sea el propietario se queda sin subir, sin crear bibliotecas y
+sin escanear hasta que un administrador le marque las casillas. Las dos sincronizaciones no
+se ven afectadas porque sí están en el valor por defecto. El comodín `*` vale por todos, y
+lo entienden los dos lados.
+
+Las reglas que no pasan por la cabecera son las del dominio de medios y viven en el espejo
+local: `AgeRestriction` y `LibraryExclusion`, ambas a través de `ForUser`.
+
+`X-Auth-App` y `X-Auth-Jti` siguen sin consumidor. `X-Auth-Role` se lee y aterriza en
+`AuthUser.Roles`, pero ningún código de producción lo consulta: la única puerta de
+privilegio que no viene de la cabecera es `IsServerOwner`.

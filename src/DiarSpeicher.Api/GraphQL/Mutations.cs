@@ -90,7 +90,13 @@ public class Mutation
         string id,
         CancellationToken ct)
     {
-        var exists = await db.Libraries.ForUser(auth.Require()).AnyAsync(l => l.Id == id, ct);
+        var user = auth.Require();
+        if (!user.HasPermission(Permissions.ScanLibrary))
+        {
+            throw new GraphQLException("This account is not allowed to scan libraries.");
+        }
+
+        var exists = await db.Libraries.ForUser(user).AnyAsync(l => l.Id == id, ct);
         if (!exists)
         {
             throw new GraphQLException($"Library '{id}' not found.");

@@ -44,31 +44,120 @@ export interface UserItem {
 	is_admin: boolean;
 	is_enabled: boolean | number;
 	permissions?: string;
+	/** CSV de protocolos de conexion permitidos. Ver PROTOCOL_API_KEY / PROTOCOL_BASIC. */
+	allowed_protocols?: string;
+	/** Edad del lector. null = sin restriccion de edad. */
+	age_restriction?: number | null;
 	created_at?: string;
 	must_change_password?: boolean | number;
 }
 
+/**
+ * Cuerpo de POST /plugins/{slug}/auth/users. Los nombres son los del record
+ * CreatePluginUserRequest del Gateway: el binder de minimal APIs ignora mayusculas
+ * pero no los guiones bajos, asi que `allowed_protocols` no llegaria a enlazarse.
+ */
 export interface CreateUserPayload {
 	username: string;
 	password: string;
 	role?: string;
 	permissions?: string;
-	role_id?: number;
-	expires_in_days?: number;
-	must_change_password?: boolean;
-	language?: string;
+	allowedProtocols?: string;
+	ageRestriction?: number;
 }
 
+/** Cuerpo de PUT /plugins/{slug}/auth/users/{id}. Solo se aplica lo que llega no nulo. */
 export interface UpdateUserPayload {
-	username?: string;
 	role?: string;
 	permissions?: string;
-	is_enabled?: boolean | number;
-	new_password?: string;
+	isEnabled?: boolean;
 	newPassword?: string;
-	role_id?: number;
-	expires_in_days?: number;
-	language?: string;
+	allowedProtocols?: string;
+	ageRestriction?: number;
+	/** Pone la edad a NULL. Necesario porque omitir el campo significa "no tocar". */
+	clearAgeRestriction?: boolean;
+}
+
+export const PROTOCOL_API_KEY = "api_key";
+export const PROTOCOL_BASIC = "basic_password";
+
+export interface ProtocolItem {
+	id: string;
+	label: string;
+	description: string;
+	sends_credentials_over_network: boolean;
+	warning?: string | null;
+}
+
+export interface ProtocolCatalog {
+	secure_default: string;
+	protocols: ProtocolItem[];
+}
+
+export interface PermissionItem {
+	id: string;
+	label: string;
+	description: string;
+}
+
+export interface PermissionGroup {
+	title: string;
+	permissions: PermissionItem[];
+}
+
+/** Comodin que el Gateway interpreta como "todos los permisos". */
+export const PERMISSION_WILDCARD = "*";
+
+/**
+ * El Gateway guarda `permissions` como CSV libre y no valida los nombres, asi que el
+ * vocabulario lo fijan esta constante y `Permissions.cs` del backend
+ * (src/DiarSpeicher.Core/Domain/Models/Permissions.cs), que deben decir lo mismo.
+ *
+ * Aqui solo aparecen permisos que algun endpoint comprueba de verdad: un interruptor que no
+ * apaga nada es peor que no tenerlo, porque el administrador cree haber cerrado una puerta.
+ */
+export const PERMISSION_GROUPS: PermissionGroup[] = [
+	{
+		title: "Contenido",
+		permissions: [
+			{ id: "FileUpload", label: "Subir ficheros", description: "Enviar libros a una biblioteca, por subida directa o por TUS." },
+			{ id: "CreateFolder", label: "Crear carpetas", description: "Subir a una subcarpeta que aun no existe. Subir a una que ya existe no lo necesita." },
+		],
+	},
+	{
+		title: "Bibliotecas",
+		permissions: [
+			{ id: "ManageLibrary", label: "Crear bibliotecas", description: "Dar de alta bibliotecas nuevas. Editarlas y borrarlas sigue siendo exclusivo del propietario del servidor." },
+			{ id: "ScanLibrary", label: "Lanzar escaneos", description: "Encolar el escaneo de una biblioteca." },
+		],
+	},
+	{
+		title: "Clientes de lectura",
+		permissions: [
+			{ id: "AccessApiKeys", label: "Claves de API", description: "Crear y revocar sus propias claves de dispositivo. Lo comprueba el Gateway, no DiarSpeicher." },
+			{ id: "AccessKoreaderSync", label: "Sincronizacion KOReader", description: "Usar el endpoint /koreader para guardar el progreso." },
+			{ id: "AccessKoboSync", label: "Sincronizacion Kobo", description: "Usar el endpoint /kobo para sincronizar con el dispositivo." },
+		],
+	},
+];
+
+export const DEFAULT_PERMISSIONS = "AccessApiKeys,AccessKoreaderSync,AccessKoboSync";
+
+export function parseCsv(raw: string | null | undefined): string[] {
+	if (!raw) return [];
+	return raw
+		.split(",")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+}
+
+export function hasPermission(permissions: string | null | undefined, id: string): boolean {
+	const entries = parseCsv(permissions);
+	return entries.includes(PERMISSION_WILDCARD) || entries.some((entry) => entry.toLowerCase() === id.toLowerCase());
+}
+
+export function hasProtocol(allowedProtocols: string | null | undefined, id: string): boolean {
+	return parseCsv(allowedProtocols).some((entry) => entry.toLowerCase() === id.toLowerCase());
 }
 
 export interface RoleItem {
@@ -131,10 +220,8 @@ export const usersApi = {
 	update: (id: number, payload: UpdateUserPayload) => gatewayHttp.put<{ updated: boolean }>(`/users/${id}`, payload),
 	delete: (id: number) => gatewayHttp.delete<{ deleted: boolean }>(`/users/${id}`),
 	changePassword: (id: number, newPassword: string) =>
-		gatewayHttp.put<{ updated: boolean }>(`/users/${id}`, {
-			new_password: newPassword,
-			newPassword: newPassword,
-		}),
+		gatewayHttp.put<{ updated: boolean }>(`/users/${id}`, { newPassword }),
+	protocols: () => gatewayHttp.get<ProtocolCatalog>("/protocols"),
 };
 
 export const rolesApi = {

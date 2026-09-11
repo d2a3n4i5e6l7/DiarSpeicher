@@ -41,6 +41,9 @@ public class GatewayIdentityMiddleware
         // names one by one, so any header it does not name reaches us straight from the client.
         var ageHeader = context.Request.Headers["X-Auth-Age"].LastOrDefault();
 
+        // Misma regla que el resto: la última aparición es la que el Gateway validó.
+        var permsHeader = context.Request.Headers["X-Auth-Perms"].LastOrDefault() ?? "";
+
         var mirrored = await SyncMirrorAsync(
             db,
             sub,
@@ -60,6 +63,11 @@ public class GatewayIdentityMiddleware
         foreach (var role in roleHeader.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             authUser.Roles.Add(role);
+        }
+
+        foreach (var permission in permsHeader.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            authUser.Permissions.Add(permission);
         }
 
         if (int.TryParse(ageHeader, out var age))

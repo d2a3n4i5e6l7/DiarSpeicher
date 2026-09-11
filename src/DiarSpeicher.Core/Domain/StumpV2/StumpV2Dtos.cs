@@ -234,6 +234,7 @@ public enum UploadOutcome
 {
     Success,
     UploadDisabled,
+    PermissionDenied,
     LibraryNotFound,
     NoAcceptedFiles,
     FileTooLarge,

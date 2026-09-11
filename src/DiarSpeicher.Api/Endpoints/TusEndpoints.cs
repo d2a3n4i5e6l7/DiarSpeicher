@@ -64,6 +64,11 @@ public static class TusEndpoints
             return Results.Json(new { error = "Uploads are disabled on this server." }, statusCode: StatusCodes.Status403Forbidden);
         }
 
+        if (!user.HasPermission(Permissions.FileUpload))
+        {
+            return Results.Json(new { error = "This account is not allowed to upload files." }, statusCode: StatusCodes.Status403Forbidden);
+        }
+
         if (!ctx.Request.Headers.TryGetValue("Upload-Length", out var lengthValues) ||
             !long.TryParse(lengthValues.FirstOrDefault(), out var uploadLength) ||
             uploadLength <= 0)
@@ -104,6 +109,23 @@ public static class TusEndpoints
         if (!TryResolveTargetDirectory(library.Path, subpath, out var fullTargetDir))
         {
             return Results.BadRequest("Invalid subpath.");
+        }
+
+        if (!Directory.Exists(fullTargetDir) && !user.HasPermission(Permissions.CreateFolder))
+        {
+            return Results.Json(
+                new { error = "This account is not allowed to create folders in the library." },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        // El destino se comprueba aquí y no al finalizar: un directorio montado en solo
+        // lectura existe igualmente, y sin esta comprobación el fallo aparecía en el último
+        // PATCH, cuando el fichero entero ya se había transferido.
+        if (!TryEnsureWritableDirectory(fullTargetDir, out var destinationError))
+        {
+            return Results.Json(
+                new { error = $"Upload destination is not writable: {destinationError}" },
+                statusCode: StatusCodes.Status500InternalServerError);
         }
 
         var uploadsDir = storageOptions.Value.ResolveUploadsPath();
@@ -184,6 +206,16 @@ public static class TusEndpoints
         if (user == null) return Results.Unauthorized();
 
         var uploadOptions = storageOptions.Value.Upload;
+        if (!uploadOptions.EnableUpload)
+        {
+            return Results.Json(new { error = "Uploads are disabled on this server." }, statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!user.HasPermission(Permissions.FileUpload))
+        {
+            return Results.Json(new { error = "This account is not allowed to upload files." }, statusCode: StatusCodes.Status403Forbidden);
+        }
+
         var sizeFeature = ctx.Features.Get<IHttpMaxRequestBodySizeFeature>();
         if (sizeFeature is not null && !sizeFeature.IsReadOnly)
         {
@@ -238,13 +270,39 @@ public static class TusEndpoints
         // Comprobar si se completó la subida total
         if (updatedOffset >= meta.TotalBytes)
         {
-            var destDir = Path.GetDirectoryName(meta.FinalPath);
-            if (!string.IsNullOrEmpty(destDir))
+            var destinationExisted = File.Exists(meta.FinalPath);
+
+            try
             {
-                Directory.CreateDirectory(destDir);
+                var destDir = Path.GetDirectoryName(meta.FinalPath);
+                if (!string.IsNullOrEmpty(destDir))
+                {
+                    Directory.CreateDirectory(destDir);
+                }
+
+                File.Move(partPath, meta.FinalPath, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // El directorio de subidas y las bibliotecas suelen estar en mounts distintos,
+                // así que el move degrada a copia y puede dejar el destino a medias. Solo se
+                // borra si lo creamos nosotros: un fichero previo no es nuestro para tirarlo.
+                if (!destinationExisted)
+                {
+                    TryDelete(meta.FinalPath);
+                }
+
+                // La sesión se descarta en lugar de conservarla: con el offset ya completo,
+                // cada reintento del cliente volvería a este mismo bloque y al mismo error,
+                // dejando un .part por intento en el directorio de subidas.
+                TryDelete(partPath);
+                TryDelete(metaPath);
+
+                return Results.Json(
+                    new { error = $"Could not move the upload to its final location: {ex.Message}" },
+                    statusCode: StatusCodes.Status500InternalServerError);
             }
 
-            File.Move(partPath, meta.FinalPath, overwrite: true);
             File.Delete(metaPath);
 
             await scannerQueue.QueueScanAsync(new ScanRequest(meta.LibraryId), ct);
@@ -308,6 +366,45 @@ public static class TusEndpoints
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Creates the directory if it is missing and writes a throwaway probe file to it.
+    /// Directory.Exists says nothing about whether writes are accepted: a read-only bind
+    /// mount reports every directory in it as existing.
+    /// </summary>
+    private static bool TryEnsureWritableDirectory(string directory, out string error)
+    {
+        try
+        {
+            Directory.CreateDirectory(directory);
+
+            var probePath = Path.Combine(directory, $".diarspeicher-write-probe-{Guid.NewGuid():N}");
+            using (var probe = new FileStream(probePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose))
+            {
+                probe.WriteByte(0);
+            }
+
+            error = string.Empty;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>Best-effort cleanup: must not mask the error that triggered it.</summary>
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private static bool _uploadOptionsAllows(UploadOptions options, string fileName)

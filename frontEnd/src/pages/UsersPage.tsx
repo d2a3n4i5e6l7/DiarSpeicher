@@ -9,6 +9,7 @@ import {
 	DialogActions,
 	DialogContent,
 	DialogTitle,
+	Divider,
 	FormControl,
 	FormControlLabel,
 	IconButton,
@@ -33,34 +34,231 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import VpnKeyIcon from "@mui/icons-material/VpnKey";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useCallback, useEffect, useState } from "react";
-import { usersApi, rolesApi, type UserItem, type RoleItem } from "../api/endpoints";
+import {
+	usersApi,
+	rolesApi,
+	DEFAULT_PERMISSIONS,
+	PERMISSION_GROUPS,
+	PERMISSION_WILDCARD,
+	PROTOCOL_API_KEY,
+	PROTOCOL_BASIC,
+	hasPermission,
+	hasProtocol,
+	parseCsv,
+	type ProtocolItem,
+	type UserItem,
+	type RoleItem,
+} from "../api/endpoints";
+
+/**
+ * Catalogo de respaldo por si GET /protocols no responde: sin el, el dialogo se
+ * quedaria sin los interruptores de conexion y no se podria habilitar OPDS.
+ */
+const FALLBACK_PROTOCOLS: ProtocolItem[] = [
+	{
+		id: PROTOCOL_API_KEY,
+		label: "Clave de API (KOReader, Kobo, OPDS)",
+		description: "Clave revocable por dispositivo. No expone la contraseña de la cuenta.",
+		sends_credentials_over_network: false,
+		warning: null,
+	},
+	{
+		id: PROTOCOL_BASIC,
+		label: "OPDS con usuario y contraseña (HTTP Basic)",
+		description: "Necesario para lectores como Panels, Chunky, Moon+ o Aldiko.",
+		sends_credentials_over_network: true,
+		warning: null,
+	},
+];
+
+interface UserFormState {
+	username: string;
+	password: string;
+	role: string;
+	isEnabled: boolean;
+	age: string;
+	permissions: string[];
+	wildcard: boolean;
+	protocols: string[];
+}
+
+const EMPTY_FORM: UserFormState = {
+	username: "",
+	password: "",
+	role: "reader",
+	isEnabled: true,
+	age: "",
+	permissions: parseCsv(DEFAULT_PERMISSIONS),
+	wildcard: false,
+	protocols: [PROTOCOL_API_KEY],
+};
+
+function formFromUser(user: UserItem): UserFormState {
+	const entries = parseCsv(user.permissions);
+	return {
+		username: user.username,
+		password: "",
+		role: user.role ?? "reader",
+		isEnabled: user.is_enabled === true || user.is_enabled === 1,
+		age: user.age_restriction === null || user.age_restriction === undefined ? "" : String(user.age_restriction),
+		permissions: entries.filter((entry) => entry !== PERMISSION_WILDCARD),
+		wildcard: entries.includes(PERMISSION_WILDCARD),
+		protocols: parseCsv(user.allowed_protocols),
+	};
+}
+
+function serializePermissions(form: UserFormState): string {
+	return form.wildcard ? PERMISSION_WILDCARD : form.permissions.join(",");
+}
+
+/**
+ * UserProtocols.Normalize del Gateway devuelve api_key cuando la lista queda vacia,
+ * asi que mandarla vacia haria que la interfaz mostrase algo distinto a lo guardado.
+ */
+function serializeProtocols(form: UserFormState): string {
+	return form.protocols.length > 0 ? form.protocols.join(",") : PROTOCOL_API_KEY;
+}
+
+function roleOptions(roles: RoleItem[], current: string): string[] {
+	const names = roles.map((r) => r.name);
+	return current && !names.includes(current) ? [...names, current] : names;
+}
+
+function toggle(list: string[], id: string, on: boolean): string[] {
+	if (on) {
+		return list.includes(id) ? list : [...list, id];
+	}
+	return list.filter((entry) => entry !== id);
+}
+
+interface AccessFieldsProps {
+	form: UserFormState;
+	protocols: ProtocolItem[];
+	onChange: (next: UserFormState) => void;
+}
+
+function AccessFields({ form, protocols, onChange }: Readonly<AccessFieldsProps>) {
+	const basicEnabled = form.protocols.includes(PROTOCOL_BASIC);
+	const basicWarning = protocols.find((p) => p.id === PROTOCOL_BASIC)?.warning;
+
+	return (
+		<Stack spacing={2.5}>
+			<TextField
+				label="Edad del lector"
+				type="number"
+				fullWidth
+				size="small"
+				value={form.age}
+				onChange={(e) => onChange({ ...form, age: e.target.value })}
+				slotProps={{ htmlInput: { min: 0, max: 120 } }}
+				helperText="Filtra el catálogo por clasificación de edad. Vacío = sin restricción."
+			/>
+
+			<Divider textAlign="left">
+				<Typography variant="caption" color="text.secondary">
+					Permisos
+				</Typography>
+			</Divider>
+
+			<FormControlLabel
+				control={
+					<Switch
+						checked={form.wildcard}
+						onChange={(e) => onChange({ ...form, wildcard: e.target.checked })}
+					/>
+				}
+				label="Acceso total (*)"
+			/>
+
+			{PERMISSION_GROUPS.map((group) => (
+				<Box key={group.title}>
+					<Typography variant="overline" color="text.secondary">
+						{group.title}
+					</Typography>
+					<Stack>
+						{group.permissions.map((permission) => (
+							<Tooltip key={permission.id} title={permission.description} placement="right">
+								<FormControlLabel
+									control={
+										<Switch
+											size="small"
+											disabled={form.wildcard}
+											checked={form.wildcard || form.permissions.includes(permission.id)}
+											onChange={(e) =>
+												onChange({
+													...form,
+													permissions: toggle(form.permissions, permission.id, e.target.checked),
+												})
+											}
+										/>
+									}
+									label={<Typography variant="body2">{permission.label}</Typography>}
+								/>
+							</Tooltip>
+						))}
+					</Stack>
+				</Box>
+			))}
+
+			<Divider textAlign="left">
+				<Typography variant="caption" color="text.secondary">
+					Formas de conexión
+				</Typography>
+			</Divider>
+
+			{protocols.map((protocol) => (
+				<Box key={protocol.id}>
+					<FormControlLabel
+						control={
+							<Switch
+								size="small"
+								checked={form.protocols.includes(protocol.id)}
+								onChange={(e) =>
+									onChange({ ...form, protocols: toggle(form.protocols, protocol.id, e.target.checked) })
+								}
+							/>
+						}
+						label={<Typography variant="body2">{protocol.label}</Typography>}
+					/>
+					<Typography variant="caption" color="text.secondary" sx={{ display: "block", pl: 6 }}>
+						{protocol.description}
+					</Typography>
+				</Box>
+			))}
+
+			{basicEnabled && basicWarning && (
+				<Alert severity="warning" variant="outlined">
+					{basicWarning}
+				</Alert>
+			)}
+
+			<Typography variant="caption" color="text.secondary">
+				El Gateway nunca deja a un usuario sin protocolos: si los desactivas todos, conserva la clave de API.
+			</Typography>
+		</Stack>
+	);
+}
 
 export default function UsersPage() {
 	const [users, setUsers] = useState<UserItem[]>([]);
 	const [roles, setRoles] = useState<RoleItem[]>([]);
+	const [protocols, setProtocols] = useState<ProtocolItem[]>(FALLBACK_PROTOCOLS);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-	// Create User Dialog
 	const [openCreate, setOpenCreate] = useState(false);
-	const [newUsername, setNewUsername] = useState("");
-	const [newPassword, setNewPassword] = useState("");
-	const [newRoleId, setNewRoleId] = useState<number | "">("");
+	const [createForm, setCreateForm] = useState<UserFormState>(EMPTY_FORM);
 	const [savingUser, setSavingUser] = useState(false);
 
-	// Edit User Dialog
 	const [openEdit, setOpenEdit] = useState(false);
 	const [editingUser, setEditingUser] = useState<UserItem | null>(null);
-	const [editRoleId, setEditRoleId] = useState<number | "">("");
-	const [editIsEnabled, setEditIsEnabled] = useState(true);
+	const [editForm, setEditForm] = useState<UserFormState>(EMPTY_FORM);
 
-	// Password Dialog
 	const [openPassword, setOpenPassword] = useState(false);
 	const [passwordUser, setPasswordUser] = useState<UserItem | null>(null);
 	const [newPasswordVal, setNewPasswordVal] = useState("");
 
-	// Delete Dialog
 	const [deleteUser, setDeleteUser] = useState<UserItem | null>(null);
 
 	const loadData = useCallback(async () => {
@@ -95,6 +293,16 @@ export default function UsersPage() {
 					setLoading(false);
 				}
 			}
+
+			// El catalogo de protocolos es informativo: si falla, quedan los de respaldo.
+			try {
+				const catalog = await usersApi.protocols();
+				if (isMounted && catalog?.protocols?.length) {
+					setProtocols(catalog.protocols);
+				}
+			} catch {
+				// Silencio deliberado: no es un error que el administrador deba resolver.
+			}
 		};
 		void init();
 		return () => {
@@ -104,7 +312,7 @@ export default function UsersPage() {
 
 	const handleCreateUser = async (e: React.SyntheticEvent) => {
 		e.preventDefault();
-		if (!newUsername.trim() || !newPassword) {
+		if (!createForm.username.trim() || !createForm.password) {
 			setError("El usuario y la contraseña son obligatorios.");
 			return;
 		}
@@ -112,18 +320,18 @@ export default function UsersPage() {
 		setSavingUser(true);
 		setError(null);
 		try {
-			const selectedRole = roles.find((r) => r.id === newRoleId)?.name ?? "reader";
+			const age = createForm.age.trim();
 			await usersApi.create({
-				username: newUsername.trim(),
-				password: newPassword,
-				role: selectedRole,
-				role_id: newRoleId === "" ? undefined : Number(newRoleId),
+				username: createForm.username.trim(),
+				password: createForm.password,
+				role: createForm.role || "reader",
+				permissions: serializePermissions(createForm),
+				allowedProtocols: serializeProtocols(createForm),
+				ageRestriction: age === "" ? undefined : Number(age),
 			});
-			setSuccessMsg(`Usuario "${newUsername}" creado con éxito.`);
+			setSuccessMsg(`Usuario "${createForm.username}" creado con éxito.`);
 			setOpenCreate(false);
-			setNewUsername("");
-			setNewPassword("");
-			setNewRoleId("");
+			setCreateForm(EMPTY_FORM);
 			await loadData();
 		} catch (err: unknown) {
 			setError(err instanceof Error ? err.message : "Error creando el usuario.");
@@ -139,11 +347,14 @@ export default function UsersPage() {
 		setSavingUser(true);
 		setError(null);
 		try {
-			const selectedRole = roles.find((r) => r.id === editRoleId)?.name;
+			const age = editForm.age.trim();
 			await usersApi.update(editingUser.id, {
-				role: selectedRole,
-				role_id: editRoleId === "" ? undefined : Number(editRoleId),
-				is_enabled: editIsEnabled ? 1 : 0,
+				role: editForm.role || undefined,
+				permissions: serializePermissions(editForm),
+				isEnabled: editForm.isEnabled,
+				allowedProtocols: serializeProtocols(editForm),
+				ageRestriction: age === "" ? undefined : Number(age),
+				clearAgeRestriction: age === "" ? true : undefined,
 			});
 			setSuccessMsg(`Usuario "${editingUser.username}" actualizado.`);
 			setOpenEdit(false);
@@ -211,6 +422,8 @@ export default function UsersPage() {
 							<TableCell>ID</TableCell>
 							<TableCell>Usuario</TableCell>
 							<TableCell>Rol</TableCell>
+							<TableCell>Edad</TableCell>
+							<TableCell>Accesos</TableCell>
 							<TableCell>Estado</TableCell>
 							<TableCell align="right">Acciones</TableCell>
 						</TableRow>
@@ -219,6 +432,7 @@ export default function UsersPage() {
 						{users.map((u) => {
 							const isEnabled = u.is_enabled === true || u.is_enabled === 1;
 							const isAdmin = u.is_admin === true || (typeof u.is_admin === "number" && u.is_admin === 1);
+							const hasAge = u.age_restriction !== null && u.age_restriction !== undefined;
 							return (
 								<TableRow key={u.id} hover>
 									<TableCell>{u.id}</TableCell>
@@ -234,6 +448,27 @@ export default function UsersPage() {
 												color={isAdmin ? "primary" : "default"}
 											/>
 											{isAdmin && <Chip label="Admin" size="small" color="primary" />}
+										</Stack>
+									</TableCell>
+									<TableCell>
+										<Typography variant="body2" color={hasAge ? "text.primary" : "text.secondary"}>
+											{hasAge ? `${String(u.age_restriction)} años` : "Sin límite"}
+										</Typography>
+									</TableCell>
+									<TableCell>
+										<Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap", gap: 0.5 }}>
+											{hasPermission(u.permissions, "FileUpload") && (
+												<Chip label="Subir" size="small" variant="outlined" />
+											)}
+											{hasPermission(u.permissions, "CreateFolder") && (
+												<Chip label="Carpetas" size="small" variant="outlined" />
+											)}
+											{hasProtocol(u.allowed_protocols, PROTOCOL_API_KEY) && (
+												<Chip label="Clave API" size="small" variant="outlined" />
+											)}
+											{hasProtocol(u.allowed_protocols, PROTOCOL_BASIC) && (
+												<Chip label="OPDS Basic" size="small" color="warning" variant="outlined" />
+											)}
 										</Stack>
 									</TableCell>
 									<TableCell>
@@ -257,13 +492,12 @@ export default function UsersPage() {
 												<VpnKeyIcon fontSize="small" />
 											</IconButton>
 										</Tooltip>
-										<Tooltip title="Editar Rol y Estado">
+										<Tooltip title="Editar permisos y acceso">
 											<IconButton
 												size="small"
 												onClick={() => {
 													setEditingUser(u);
-													setEditRoleId(u.role_id ?? "");
-													setEditIsEnabled(isEnabled);
+													setEditForm(formFromUser(u));
 													setOpenEdit(true);
 												}}
 											>
@@ -298,7 +532,7 @@ export default function UsersPage() {
 						Gestión de Usuarios
 					</Typography>
 					<Typography variant="body2" color="text.secondary">
-						Administra las cuentas de usuario y sus credenciales de acceso.
+						Administra las cuentas, su edad, lo que pueden hacer y cómo se conectan.
 					</Typography>
 				</Box>
 
@@ -317,7 +551,10 @@ export default function UsersPage() {
 						id="create-user-btn"
 						variant="contained"
 						startIcon={<AddIcon />}
-						onClick={() => setOpenCreate(true)}
+						onClick={() => {
+							setCreateForm(EMPTY_FORM);
+							setOpenCreate(true);
+						}}
 					>
 						Nuevo Usuario
 					</Button>
@@ -336,27 +573,25 @@ export default function UsersPage() {
 				</Alert>
 			)}
 
-			<Card>
-				{tableContent}
-			</Card>
+			<Card>{tableContent}</Card>
 
 			{/* Modal: Crear Usuario */}
-			<Dialog open={openCreate} onClose={() => setOpenCreate(false)} maxWidth="xs" fullWidth>
+			<Dialog open={openCreate} onClose={() => setOpenCreate(false)} maxWidth="sm" fullWidth>
 				<form
 					onSubmit={(e) => {
 						void handleCreateUser(e);
 					}}
 				>
 					<DialogTitle>Crear Nuevo Usuario</DialogTitle>
-					<DialogContent>
+					<DialogContent dividers>
 						<Stack spacing={2.5} sx={{ mt: 1 }}>
 							<TextField
 								id="new-user-username"
 								label="Nombre de Usuario"
 								fullWidth
 								required
-								value={newUsername}
-								onChange={(e) => setNewUsername(e.target.value)}
+								value={createForm.username}
+								onChange={(e) => setCreateForm({ ...createForm, username: e.target.value })}
 							/>
 							<TextField
 								id="new-user-password"
@@ -364,27 +599,26 @@ export default function UsersPage() {
 								type="password"
 								fullWidth
 								required
-								value={newPassword}
-								onChange={(e) => setNewPassword(e.target.value)}
+								value={createForm.password}
+								onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
 							/>
 							<FormControl fullWidth size="small">
 								<InputLabel id="new-user-role-label">Rol Asignado</InputLabel>
 								<Select
 									labelId="new-user-role-label"
 									label="Rol Asignado"
-									value={newRoleId}
-									onChange={(e) => setNewRoleId(e.target.value)}
+									value={createForm.role}
+									onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })}
 								>
-									<MenuItem value="">
-										<em>Sin rol específico</em>
-									</MenuItem>
-									{roles.map((r) => (
-										<MenuItem key={r.id} value={r.id}>
-											{r.name} {r.is_admin ? "(Admin)" : ""}
+									{roleOptions(roles, createForm.role).map((name) => (
+										<MenuItem key={name} value={name}>
+											{name}
 										</MenuItem>
 									))}
 								</Select>
 							</FormControl>
+
+							<AccessFields form={createForm} protocols={protocols} onChange={setCreateForm} />
 						</Stack>
 					</DialogContent>
 					<DialogActions>
@@ -399,29 +633,26 @@ export default function UsersPage() {
 			</Dialog>
 
 			{/* Modal: Editar Usuario */}
-			<Dialog open={openEdit} onClose={() => setOpenEdit(false)} maxWidth="xs" fullWidth>
+			<Dialog open={openEdit} onClose={() => setOpenEdit(false)} maxWidth="sm" fullWidth>
 				<form
 					onSubmit={(e) => {
 						void handleUpdateUser(e);
 					}}
 				>
 					<DialogTitle>Editar Usuario: {editingUser?.username}</DialogTitle>
-					<DialogContent>
+					<DialogContent dividers>
 						<Stack spacing={2.5} sx={{ mt: 1 }}>
 							<FormControl fullWidth size="small">
 								<InputLabel id="edit-user-role-label">Rol Asignado</InputLabel>
 								<Select
 									labelId="edit-user-role-label"
 									label="Rol Asignado"
-									value={editRoleId}
-									onChange={(e) => setEditRoleId(e.target.value)}
+									value={editForm.role}
+									onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
 								>
-									<MenuItem value="">
-										<em>Sin rol específico</em>
-									</MenuItem>
-									{roles.map((r) => (
-										<MenuItem key={r.id} value={r.id}>
-											{r.name} {r.is_admin ? "(Admin)" : ""}
+									{roleOptions(roles, editForm.role).map((name) => (
+										<MenuItem key={name} value={name}>
+											{name}
 										</MenuItem>
 									))}
 								</Select>
@@ -430,12 +661,14 @@ export default function UsersPage() {
 							<FormControlLabel
 								control={
 									<Switch
-										checked={editIsEnabled}
-										onChange={(e) => setEditIsEnabled(e.target.checked)}
+										checked={editForm.isEnabled}
+										onChange={(e) => setEditForm({ ...editForm, isEnabled: e.target.checked })}
 									/>
 								}
 								label="Cuenta Habilitada"
 							/>
+
+							<AccessFields form={editForm} protocols={protocols} onChange={setEditForm} />
 						</Stack>
 					</DialogContent>
 					<DialogActions>

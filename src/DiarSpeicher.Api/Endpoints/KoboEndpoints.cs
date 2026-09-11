@@ -8,9 +8,29 @@ public static class KoboEndpoints
 {
     private const string AuthUserKey = "AuthUser";
 
+    private static async ValueTask<object?> RequireKoboSyncAsync(
+        EndpointFilterInvocationContext ctx,
+        EndpointFilterDelegate next)
+    {
+        if (ctx.HttpContext.Items[AuthUserKey] is not AuthUser user ||
+            !user.HasPermission(Permissions.AccessKoboSync))
+        {
+            return Results.Json(
+                new { error = "This account is not allowed to use Kobo sync." },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        return await next(ctx);
+    }
+
     public static RouteGroupBuilder MapKoboEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/kobo/{apiKey}");
+
+        // Filtro de grupo en lugar de una comprobación por ruta: el permiso cubre toda la
+        // superficie de Kobo, y repetirlo en cada lambda deja la puerta abierta en la
+        // siguiente que se añada.
+        group.AddEndpointFilter(RequireKoboSyncAsync);
 
         group.MapGet("/v1/initialization", async (
             string apiKey,
