@@ -33,6 +33,20 @@ public record ExtractedMetadata
     public int? FrontCoverIndex { get; set; }
 }
 
+/// <summary>
+/// Dimensiones de una pagina obtenidas durante el analisis del archivo.
+/// Width/Height quedan a nulo cuando la cabecera de la imagen no se pudo decodificar.
+/// </summary>
+public record MeasuredPage
+{
+    public int Number { get; init; }
+    public string FileName { get; init; } = null!;
+    public string MediaType { get; init; } = "image/jpeg";
+    public int? Width { get; init; }
+    public int? Height { get; init; }
+    public long? SizeBytes { get; init; }
+}
+
 public record ProcessedBook
 {
     public int Pages { get; init; }
@@ -46,4 +60,10 @@ public record ProcessedBook
     /// Lets a caller obtain metadata and cover from a single archive open.
     /// </summary>
     public ExtractedPage? Cover { get; init; }
+
+    /// <summary>
+    /// Dimensiones por pagina, pobladas solo cuando el analisis se pidio con measurePages.
+    /// Vacia cuando el formato no permite medir sin descomprimir el libro entero.
+    /// </summary>
+    public List<MeasuredPage> PageDimensions { get; init; } = [];
 }

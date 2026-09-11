@@ -5,10 +5,6 @@ import {
 	Card,
 	CardContent,
 	Chip,
-	Dialog,
-	DialogActions,
-	DialogContent,
-	DialogTitle,
 	Divider,
 	FormControl,
 	IconButton,
@@ -24,7 +20,7 @@ import {
 	useTheme,
 } from "@mui/material";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
-import AddIcon from "@mui/icons-material/Add";
+import LibraryBooksIcon from "@mui/icons-material/LibraryBooks";
 import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
@@ -33,6 +29,7 @@ import PlayArrowOutlinedIcon from "@mui/icons-material/PlayArrowOutlined";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { librariesApi, type LibraryItem } from "../api/endpoints";
 import { TusUpload, type TusUploadStatus } from "../api/tusClient";
+import { Link as RouterLink } from "react-router-dom";
 
 function formatBytes(bytes: number, decimals = 2): string {
 	if (bytes === 0) return "0 Bytes";
@@ -66,29 +63,6 @@ export default function UploadPage() {
 	const [loadingLibraries, setLoadingLibraries] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [successCount, setSuccessCount] = useState<number | null>(null);
-
-	// Create Library Dialog
-	const [openCreateLib, setOpenCreateLib] = useState(false);
-	const [libName, setLibName] = useState("");
-	const [libPath, setLibPath] = useState("");
-	const [libDesc, setLibDesc] = useState("");
-	const [savingLib, setSavingLib] = useState(false);
-
-	const loadLibraries = useCallback(async () => {
-		setLoadingLibraries(true);
-		setError(null);
-		try {
-			const list = await librariesApi.list();
-			setLibraries(list || []);
-			if (list && list.length > 0) {
-				setSelectedLibraryId((prev) => prev || list[0].id);
-			}
-		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error cargando las bibliotecas.");
-		} finally {
-			setLoadingLibraries(false);
-		}
-	}, []);
 
 	useEffect(() => {
 		let isMounted = true;
@@ -269,36 +243,6 @@ export default function UploadPage() {
 		}
 	};
 
-	const handleCreateLibrary = async (e: React.SyntheticEvent) => {
-		e.preventDefault();
-		if (!libName.trim() || !libPath.trim()) {
-			setError("El nombre y la ruta de la biblioteca son obligatorios.");
-			return;
-		}
-
-		setSavingLib(true);
-		setError(null);
-		try {
-			const created = await librariesApi.create({
-				name: libName.trim(),
-				path: libPath.trim(),
-				description: libDesc.trim() || undefined,
-			});
-			setOpenCreateLib(false);
-			setLibName("");
-			setLibPath("");
-			setLibDesc("");
-			await loadLibraries();
-			if (created?.id) {
-				setSelectedLibraryId(created.id);
-			}
-		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error al crear la biblioteca.");
-		} finally {
-			setSavingLib(false);
-		}
-	};
-
 	const dropBorderColor = isDragging ? theme.palette.primary.main : theme.palette.divider;
 	let dropBgColor = isDragging ? "action.hover" : "background.paper";
 	if (theme.palette.mode === "dark") {
@@ -365,11 +309,11 @@ export default function UploadPage() {
 
 								<Button
 									variant="outlined"
-									startIcon={<AddIcon />}
-									onClick={() => setOpenCreateLib(true)}
-									disabled={hasUploading}
+									startIcon={<LibraryBooksIcon />}
+									component={RouterLink}
+									to="/libraries"
 								>
-									Nueva Biblioteca
+									Gestionar bibliotecas
 								</Button>
 
 								<TextField
@@ -590,52 +534,6 @@ export default function UploadPage() {
 				</Card>
 			</Stack>
 
-			{/* Modal: Crear Biblioteca */}
-			<Dialog open={openCreateLib} onClose={() => setOpenCreateLib(false)} maxWidth="xs" fullWidth>
-				<form
-					onSubmit={(e) => {
-						void handleCreateLibrary(e);
-					}}
-				>
-					<DialogTitle>Nueva Biblioteca en DiarSpeicher</DialogTitle>
-					<DialogContent>
-						<Stack spacing={2.5} sx={{ mt: 1 }}>
-							<TextField
-								label="Nombre de la Biblioteca"
-								fullWidth
-								required
-								value={libName}
-								onChange={(e) => setLibName(e.target.value)}
-								placeholder="ej. Comics Marvel"
-							/>
-							<TextField
-								label="Ruta en el Disco"
-								fullWidth
-								required
-								value={libPath}
-								onChange={(e) => setLibPath(e.target.value)}
-								placeholder="ej. /data/comics"
-							/>
-							<TextField
-								label="Descripción (opcional)"
-								fullWidth
-								multiline
-								rows={2}
-								value={libDesc}
-								onChange={(e) => setLibDesc(e.target.value)}
-							/>
-						</Stack>
-					</DialogContent>
-					<DialogActions>
-						<Button onClick={() => setOpenCreateLib(false)} disabled={savingLib}>
-							Cancelar
-						</Button>
-						<Button type="submit" variant="contained" disabled={savingLib}>
-							{savingLib ? "Guardando..." : "Crear"}
-						</Button>
-					</DialogActions>
-				</form>
-			</Dialog>
 		</Box>
 	);
 }

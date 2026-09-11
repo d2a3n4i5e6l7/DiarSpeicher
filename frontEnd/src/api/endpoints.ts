@@ -180,18 +180,78 @@ export interface UpdateRolePayload {
 	is_admin?: boolean;
 }
 
+export const LIBRARY_TYPES = ["Comic", "Manga", "Book", "LightNovel", "Manhwa", "Mixed", "WebNovel", "Webtoon"] as const;
+export const LIBRARY_PATTERNS = ["SeriesBased", "CollectionBased"] as const;
+export const READING_DIRECTIONS = ["LeftToRight", "RightToLeft"] as const;
+export const READING_MODES = ["Paged", "ContinuousVertical", "ContinuousHorizontal"] as const;
+
+/** Espejo de StumpLibraryConfigDto. Los enums viajan como el nombre del miembro, no su indice. */
+export interface LibraryConfig {
+	libraryType: (typeof LIBRARY_TYPES)[number];
+	libraryPattern: (typeof LIBRARY_PATTERNS)[number];
+	defaultReadingDir: (typeof READING_DIRECTIONS)[number];
+	defaultReadingMode: (typeof READING_MODES)[number];
+	defaultLibraryViewMode: "Grid" | "List";
+	convertRarToZip: boolean;
+	hardDeleteConversions: boolean;
+	generateFileHashes: boolean;
+	generateKoreaderHashes: boolean;
+	processMetadata: boolean;
+	watch: boolean;
+	hideSeriesView: boolean;
+	thumbnailWidth: number;
+	thumbnailHeight: number;
+	ignoreRules?: string;
+}
+
+export const DEFAULT_LIBRARY_CONFIG: LibraryConfig = {
+	libraryType: "Mixed",
+	libraryPattern: "SeriesBased",
+	defaultReadingDir: "LeftToRight",
+	defaultReadingMode: "Paged",
+	defaultLibraryViewMode: "Grid",
+	convertRarToZip: false,
+	hardDeleteConversions: false,
+	generateFileHashes: true,
+	generateKoreaderHashes: true,
+	processMetadata: true,
+	watch: false,
+	hideSeriesView: false,
+	thumbnailWidth: 400,
+	thumbnailHeight: 600,
+};
+
 export interface LibraryItem {
 	id: string;
 	name: string;
 	path: string;
 	status?: string;
 	seriesCount?: number;
+	mediaCount?: number;
+	description?: string;
+	emoji?: string;
+	createdAt?: string;
+	updatedAt?: string;
+	lastScannedAt?: string;
+	config?: LibraryConfig;
 }
+
+export const LIBRARY_STATUS_SCANNING = "SCANNING";
 
 export interface CreateLibraryPayload {
 	name: string;
 	path: string;
 	description?: string;
+	emoji?: string;
+	config?: LibraryConfig;
+}
+
+/** Cuerpo de PUT: un campo ausente significa "no tocar". */
+export interface UpdateLibraryPayload {
+	name?: string;
+	description?: string;
+	emoji?: string;
+	config?: LibraryConfig;
 }
 
 export interface UploadedFileItem {
@@ -240,7 +300,11 @@ export const rolesApi = {
 
 export const librariesApi = {
 	list: () => http.get<LibraryItem[]>("/api/v2/libraries"),
+	get: (id: string) => http.get<LibraryItem>(`/api/v2/libraries/${id}`),
 	create: (payload: CreateLibraryPayload) => http.post<LibraryItem>("/api/v2/libraries", payload),
+	update: (id: string, payload: UpdateLibraryPayload) => http.put<LibraryItem>(`/api/v2/libraries/${id}`, payload),
+	delete: (id: string) => http.delete<void>(`/api/v2/libraries/${id}`),
+	scan: (id: string) => http.post<void>(`/api/v2/libraries/${id}/scan`),
 	upload: (libraryId: string, files: File[], subpath?: string) => {
 		const formData = new FormData();
 		if (subpath) {

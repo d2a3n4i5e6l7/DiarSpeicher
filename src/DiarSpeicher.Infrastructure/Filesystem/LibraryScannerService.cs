@@ -32,7 +32,7 @@ public class LibraryScannerService : ILibraryScannerService
     /// Archive decompression and hashing are CPU-bound, so the analysis phase is spread
     /// across cores. The database phase stays single-threaded: DbContext is not thread-safe.
     /// </summary>
-    private static readonly int AnalysisParallelism = Environment.ProcessorCount;
+    private static readonly int AnalysisParallelism = Math.Max(1, Environment.ProcessorCount - 1);
 
     private sealed record PreparedMedia(string MediaId, string Path, ProcessedBook Analysis, string? ThumbnailPath);
 
@@ -381,7 +381,7 @@ public class LibraryScannerService : ILibraryScannerService
                 {
                     // includeCover reuses the archive that the analysis already opened,
                     // instead of decompressing the whole book a second time for the cover.
-                    var analyzed = await _bookProcessor.AnalyzeAsync(mediaPath, includeCover: true, token);
+                    var analyzed = await _bookProcessor.AnalyzeAsync(mediaPath, includeCover: true, token, measurePages: true);
                     var thumbPath = await _thumbnailService.SaveThumbnailAsync(mediaId, analyzed.Cover, thumbnailsDir, token);
                     results[index] = new PreparedMedia(mediaId, mediaPath, analyzed, thumbPath);
                 }
@@ -439,6 +439,7 @@ public class LibraryScannerService : ILibraryScannerService
             }
 
             _dbContext.Media.Add(newMedia);
+            AddPageDimensions(newMediaId, analyzed);
             report.CreatedMedia++;
         }
     }
@@ -488,7 +489,41 @@ public class LibraryScannerService : ILibraryScannerService
             m.ModifiedAt = new DateTimeOffset(fileInfo.LastWriteTimeUtc);
             m.Status = FileStatus.Ready;
             m.UpdatedAt = DateTimeOffset.UtcNow;
+
+            var staleDimensions = await _dbContext.MediaPages
+                .Where(mp => mp.MediaId == m.Id)
+                .ToListAsync(cancellationToken);
+            if (staleDimensions.Count > 0)
+            {
+                _dbContext.MediaPages.RemoveRange(staleDimensions);
+            }
+            AddPageDimensions(m.Id, analyzed);
+
             report.UpdatedMedia++;
+        }
+    }
+
+    /// <summary>
+    /// Guarda las dimensiones que el analisis ya midio. Se persisten en el scan porque los
+    /// clientes de Komga las exigen para abrir el libro, y calcularlas en la peticion del
+    /// lector obliga a descomprimir el libro entero con el usuario esperando.
+    /// </summary>
+    private void AddPageDimensions(string mediaId, ProcessedBook analyzed)
+    {
+        if (analyzed.PageDimensions.Count == 0) return;
+
+        foreach (var page in analyzed.PageDimensions)
+        {
+            _dbContext.MediaPages.Add(new MediaPage
+            {
+                MediaId = mediaId,
+                Number = page.Number,
+                FileName = page.FileName,
+                MediaType = page.MediaType,
+                Width = page.Width,
+                Height = page.Height,
+                SizeBytes = page.SizeBytes
+            });
         }
     }
 

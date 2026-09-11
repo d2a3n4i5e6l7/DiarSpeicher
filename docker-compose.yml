@@ -6,10 +6,15 @@ services:
         image: diarspeicher:latest
         container_name: diarspeicher
         pull_policy: build
-        user: "0:0" 
+        user: "0:0"
+        cpus: 3.0
+        cpuset: "0-5"
+        mem_limit: 4g
+        mem_reservation: 2g
+        memswap_limit: 4g
         environment:
             - Gateway__PathBase=${PATH_BASE:-}
-            - Storage__PageCache__MaxBytes=${PAGE_CACHE_BYTES:-2147483648}
+            - Storage__PageCache__MaxBytes=${PAGE_CACHE_BYTES:-1610612736}
             - Storage__Upload__EnableUpload=${ENABLE_UPLOAD:-true}
             - Storage__Backup__Enabled=${ENABLE_BACKUP:-true}
             - Storage__Backup__IntervalHours=${BACKUP_INTERVAL_HOURS:-12}

@@ -23,16 +23,18 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Data Source=diarspeicher.db;Cache=Shared;Mode=ReadWriteCreate;";
 
+const int SqliteMaxBatchSize = 200;
+
 builder.Services.AddDbContext<DiarSpeicherDbContext>(options =>
 {
-    options.UseSqlite(connectionString);
+    options.UseSqlite(connectionString, sqlite => sqlite.MaxBatchSize(SqliteMaxBatchSize));
 });
 
 // DataLoaders resolve batches concurrently, and a DbContext is not thread-safe, so the
 // GraphQL layer takes a short-lived context per batch from the factory.
 builder.Services.AddDbContextFactory<DiarSpeicherDbContext>(options =>
 {
-    options.UseSqlite(connectionString);
+    options.UseSqlite(connectionString, sqlite => sqlite.MaxBatchSize(SqliteMaxBatchSize));
 }, lifetime: ServiceLifetime.Scoped);
 
 builder.Services.AddHttpContextAccessor();

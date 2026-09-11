@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Xml.Linq;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Metadata;
@@ -16,7 +16,7 @@ public interface IBookProcessor
     /// returned in <see cref="ProcessedBook.Cover"/>, so callers that need both metadata
     /// and a thumbnail only open and decompress the archive once.
     /// </summary>
-    Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default);
+    Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false);
 
     Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
 }
@@ -45,12 +45,13 @@ public class ZipBookProcessor : IBookProcessor
         return clean is "cbz" or "zip";
     }
 
-    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default)
+    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false)
     {
         ExtractedMetadata? metadata = null;
         List<string> tags = [];
         var pageCount = 0;
         ExtractedPage? cover = null;
+        List<MeasuredPage> dimensions = [];
 
         try
         {
@@ -89,6 +90,11 @@ public class ZipBookProcessor : IBookProcessor
             {
                 cover = await ReadEntryAsync(imageEntries[CoverSelection.SelectCoverIndex(metadata, imageEntries.Count)], cancellationToken);
             }
+
+            if (measurePages)
+            {
+                dimensions = await MeasurePagesAsync(imageEntries, cancellationToken);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -106,7 +112,8 @@ public class ZipBookProcessor : IBookProcessor
             KoreaderHash = null,
             Metadata = metadata,
             Tags = tags,
-            Cover = cover
+            Cover = cover,
+            PageDimensions = dimensions
         };
     }
 
@@ -158,6 +165,42 @@ public class ZipBookProcessor : IBookProcessor
         var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entry.FullName));
         return new ExtractedPage(ct, ms.ToArray());
     }
+
+    private static async Task<List<MeasuredPage>> MeasurePagesAsync(List<ZipArchiveEntry> imageEntries, CancellationToken cancellationToken)
+    {
+        var dimensions = new List<MeasuredPage>(imageEntries.Count);
+        for (var i = 0; i < imageEntries.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var pageEntry = imageEntries[i];
+            int? width = null;
+            int? height = null;
+
+            try
+            {
+                await using var headerStream = await pageEntry.OpenAsync(cancellationToken);
+                (width, height) = await PageMeasurer.MeasureAsync(headerStream, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Una pagina ilegible se guarda sin dimensiones y el resto sigue.
+            }
+
+            var entryName = pageEntry.FullName;
+            dimensions.Add(new MeasuredPage
+            {
+                Number = i + 1,
+                FileName = Path.GetFileName(entryName),
+                MediaType = PageMeasurer.MimeTypeFor(entryName),
+                Width = width,
+                Height = height,
+                SizeBytes = pageEntry.Length
+            });
+        }
+
+        return dimensions;
+    }
 }
 
 public class RarBookProcessor : IBookProcessor
@@ -168,12 +211,13 @@ public class RarBookProcessor : IBookProcessor
         return clean is "cbr" or "rar";
     }
 
-    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default)
+    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false)
     {
         ExtractedMetadata? metadata = null;
         List<string> tags = [];
         var pageCount = 0;
         ExtractedPage? cover = null;
+        List<MeasuredPage> dimensions = [];
 
         try
         {
@@ -206,6 +250,11 @@ public class RarBookProcessor : IBookProcessor
             {
                 cover = await ReadEntryAsync(imageEntries[CoverSelection.SelectCoverIndex(metadata, imageEntries.Count)], cancellationToken);
             }
+
+            if (measurePages)
+            {
+                dimensions = await MeasurePagesAsync(imageEntries, cancellationToken);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -223,7 +272,8 @@ public class RarBookProcessor : IBookProcessor
             KoreaderHash = null,
             Metadata = metadata,
             Tags = tags,
-            Cover = cover
+            Cover = cover,
+            PageDimensions = dimensions
         };
     }
 
@@ -273,6 +323,42 @@ public class RarBookProcessor : IBookProcessor
         var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entry.Key));
         return new ExtractedPage(ct, ms.ToArray());
     }
+
+    private static async Task<List<MeasuredPage>> MeasurePagesAsync(List<IArchiveEntry> imageEntries, CancellationToken cancellationToken)
+    {
+        var dimensions = new List<MeasuredPage>(imageEntries.Count);
+        for (var i = 0; i < imageEntries.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var pageEntry = imageEntries[i];
+            int? width = null;
+            int? height = null;
+
+            try
+            {
+                await using var headerStream = await pageEntry.OpenEntryStreamAsync(cancellationToken);
+                (width, height) = await PageMeasurer.MeasureAsync(headerStream, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Una pagina ilegible se guarda sin dimensiones y el resto sigue.
+            }
+
+            var entryName = pageEntry.Key ?? string.Empty;
+            dimensions.Add(new MeasuredPage
+            {
+                Number = i + 1,
+                FileName = Path.GetFileName(entryName),
+                MediaType = PageMeasurer.MimeTypeFor(entryName),
+                Width = width,
+                Height = height,
+                SizeBytes = pageEntry.Size
+            });
+        }
+
+        return dimensions;
+    }
 }
 
 public class EpubBookProcessor : IBookProcessor
@@ -283,7 +369,7 @@ public class EpubBookProcessor : IBookProcessor
         return clean == "epub";
     }
 
-    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default)
+    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false)
     {
         var metadata = new ExtractedMetadata();
         var tags = new List<string>();
@@ -522,7 +608,7 @@ public class EpubBookProcessor : IBookProcessor
 public interface ICompositeBookProcessor
 {
     IBookProcessor? GetProcessor(string path);
-    Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default);
+    Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false);
     Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
 }
 
@@ -541,7 +627,7 @@ public class CompositeBookProcessor : ICompositeBookProcessor
         return _processors.FirstOrDefault(p => p.CanProcess(ext));
     }
 
-    public async Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default)
+    public async Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false)
     {
         var processor = GetProcessor(path);
         if (processor is null)
@@ -556,7 +642,7 @@ public class CompositeBookProcessor : ICompositeBookProcessor
             };
         }
 
-        return await processor.AnalyzeBookAsync(path, includeCover, cancellationToken);
+        return await processor.AnalyzeBookAsync(path, includeCover, cancellationToken, measurePages);
     }
 
     public Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)

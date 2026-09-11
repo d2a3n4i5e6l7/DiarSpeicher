@@ -226,6 +226,39 @@ public static class StumpV2Endpoints
             return result == null ? Results.BadRequest("Could not create library") : Results.Created($"/api/v2/libraries/{result.Id}", result);
         });
 
+        group.MapPut("/libraries/{id}", async (
+            string id,
+            [FromBody] StumpUpdateLibraryInput input,
+            HttpContext httpContext,
+            [FromServices] IStumpV2Service service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            if (!user.HasPermission(Permissions.ManageLibrary))
+            {
+                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            var result = await service.UpdateLibraryAsync(user, id, input, ct);
+            return result == null ? Results.NotFound() : Results.Ok(result);
+        });
+
+        group.MapDelete("/libraries/{id}", async (
+            string id,
+            HttpContext httpContext,
+            [FromServices] IStumpV2Service service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            if (!user.HasPermission(Permissions.ManageLibrary))
+            {
+                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            var deleted = await service.DeleteLibraryAsync(user, id, ct);
+            return deleted ? Results.NoContent() : Results.NotFound();
+        });
+
         group.MapPost("/libraries/{id}/upload", HandleLibraryUpload).DisableAntiforgery();
 
         group.MapPost("/libraries/{id}/scan", async (

@@ -180,35 +180,34 @@ public sealed class StumpV2Service : IStumpV2Service
     {
         var libraries = await _db.Libraries.ForUser(user)
             .Include(l => l.Series)
+            .Include(l => l.Config)
             .OrderBy(l => l.Name)
             .ToListAsync(ct);
 
-        return libraries.Select(l => new StumpLibraryDto
-        {
-            Id = l.Id,
-            Name = l.Name,
-            Path = l.Path,
-            Status = l.Status.ToString(),
-            SeriesCount = l.Series.Count
-        }).ToList();
+        var mediaCounts = await _db.Media
+            .Where(m => m.Series != null && m.Series.LibraryId != null)
+            .GroupBy(m => m.Series!.LibraryId!)
+            .Select(g => new { LibraryId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.LibraryId, x => x.Count, ct);
+
+        return libraries
+            .Select(l => ToLibraryDto(l, mediaCounts.GetValueOrDefault(l.Id)))
+            .ToList();
     }
 
     public async Task<StumpLibraryDto?> GetLibraryByIdAsync(AuthUser user, string id, CancellationToken ct = default)
     {
         var lib = await _db.Libraries.ForUser(user)
             .Include(l => l.Series)
+            .Include(l => l.Config)
             .FirstOrDefaultAsync(l => l.Id == id, ct);
 
         if (lib == null) return null;
 
-        return new StumpLibraryDto
-        {
-            Id = lib.Id,
-            Name = lib.Name,
-            Path = lib.Path,
-            Status = lib.Status.ToString(),
-            SeriesCount = lib.Series.Count
-        };
+        var mediaCount = await _db.Media
+            .CountAsync(m => m.Series != null && m.Series.LibraryId == lib.Id, ct);
+
+        return ToLibraryDto(lib, mediaCount);
     }
 
     public async Task<bool> TriggerLibraryScanAsync(AuthUser user, string libraryId, CancellationToken ct = default)
@@ -416,25 +415,136 @@ public sealed class StumpV2Service : IStumpV2Service
             Name = input.Name.Trim(),
             Path = fullPath,
             Description = input.Description?.Trim(),
+            Emoji = input.Emoji?.Trim(),
             Status = FileStatus.Ready,
-            Config = new LibraryConfig
-            {
-                LibraryPattern = LibraryPattern.SeriesBased
-            }
+            Config = BuildConfig(input.Config)
         };
 
         _db.Libraries.Add(library);
         await _db.SaveChangesAsync(ct);
 
-        return new StumpLibraryDto
-        {
-            Id = library.Id,
-            Name = library.Name,
-            Path = library.Path,
-            Status = library.Status.ToString().ToUpperInvariant(),
-            SeriesCount = 0
-        };
+        return ToLibraryDto(library, 0);
     }
+
+    public async Task<StumpLibraryDto?> UpdateLibraryAsync(AuthUser user, string id, StumpUpdateLibraryInput input, CancellationToken ct = default)
+    {
+        var library = await _db.Libraries.ForUser(user)
+            .Include(l => l.Series)
+            .Include(l => l.Config)
+            .FirstOrDefaultAsync(l => l.Id == id, ct);
+
+        if (library == null) return null;
+
+        if (!string.IsNullOrWhiteSpace(input.Name))
+        {
+            library.Name = input.Name.Trim();
+        }
+
+        if (input.Description != null)
+        {
+            library.Description = input.Description.Trim();
+        }
+
+        if (input.Emoji != null)
+        {
+            library.Emoji = input.Emoji.Trim();
+        }
+
+        if (input.Config != null)
+        {
+            ApplyConfig(library.Config, input.Config);
+        }
+
+        library.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        var mediaCount = await _db.Media
+            .CountAsync(m => m.Series != null && m.Series.LibraryId == library.Id, ct);
+
+        return ToLibraryDto(library, mediaCount);
+    }
+
+    /// <summary>
+    /// Borra el registro de la biblioteca, nunca los ficheros del disco: DiarSpeicher indexa
+    /// carpetas que no son suyas y que pueden estar compartidas con otros programas.
+    /// </summary>
+    public async Task<bool> DeleteLibraryAsync(AuthUser user, string id, CancellationToken ct = default)
+    {
+        var library = await _db.Libraries.ForUser(user)
+            .FirstOrDefaultAsync(l => l.Id == id, ct);
+
+        if (library == null) return false;
+
+        _db.Libraries.Remove(library);
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    private static LibraryConfig BuildConfig(StumpLibraryConfigDto? dto)
+    {
+        var config = new LibraryConfig { LibraryPattern = LibraryPattern.SeriesBased };
+        if (dto != null)
+        {
+            ApplyConfig(config, dto);
+        }
+
+        return config;
+    }
+
+    private static void ApplyConfig(LibraryConfig config, StumpLibraryConfigDto dto)
+    {
+        config.LibraryType = ParseEnum(dto.LibraryType, config.LibraryType);
+        config.LibraryPattern = ParseEnum(dto.LibraryPattern, config.LibraryPattern);
+        config.DefaultReadingDir = ParseEnum(dto.DefaultReadingDir, config.DefaultReadingDir);
+        config.DefaultReadingMode = ParseEnum(dto.DefaultReadingMode, config.DefaultReadingMode);
+        config.DefaultLibraryViewMode = ParseEnum(dto.DefaultLibraryViewMode, config.DefaultLibraryViewMode);
+        config.ConvertRarToZip = dto.ConvertRarToZip;
+        config.HardDeleteConversions = dto.HardDeleteConversions;
+        config.GenerateFileHashes = dto.GenerateFileHashes;
+        config.GenerateKoreaderHashes = dto.GenerateKoreaderHashes;
+        config.ProcessMetadata = dto.ProcessMetadata;
+        config.Watch = dto.Watch;
+        config.HideSeriesView = dto.HideSeriesView;
+        config.ThumbnailWidth = dto.ThumbnailWidth > 0 ? dto.ThumbnailWidth : config.ThumbnailWidth;
+        config.ThumbnailHeight = dto.ThumbnailHeight > 0 ? dto.ThumbnailHeight : config.ThumbnailHeight;
+        config.IgnoreRules = string.IsNullOrWhiteSpace(dto.IgnoreRules) ? null : dto.IgnoreRules.Trim();
+    }
+
+    private static TEnum ParseEnum<TEnum>(string? raw, TEnum fallback) where TEnum : struct, Enum =>
+        Enum.TryParse<TEnum>(raw, ignoreCase: true, out var parsed) ? parsed : fallback;
+
+    private static StumpLibraryDto ToLibraryDto(Library library, int mediaCount) => new()
+    {
+        Id = library.Id,
+        Name = library.Name,
+        Path = library.Path,
+        Status = library.Status.ToString().ToUpperInvariant(),
+        SeriesCount = library.Series?.Count ?? 0,
+        MediaCount = mediaCount,
+        Description = library.Description,
+        Emoji = library.Emoji,
+        CreatedAt = library.CreatedAt,
+        UpdatedAt = library.UpdatedAt,
+        LastScannedAt = library.LastScannedAt,
+        Config = library.Config == null ? null : new StumpLibraryConfigDto
+        {
+            LibraryType = library.Config.LibraryType.ToString(),
+            LibraryPattern = library.Config.LibraryPattern.ToString(),
+            DefaultReadingDir = library.Config.DefaultReadingDir.ToString(),
+            DefaultReadingMode = library.Config.DefaultReadingMode.ToString(),
+            DefaultLibraryViewMode = library.Config.DefaultLibraryViewMode.ToString(),
+            ConvertRarToZip = library.Config.ConvertRarToZip,
+            HardDeleteConversions = library.Config.HardDeleteConversions,
+            GenerateFileHashes = library.Config.GenerateFileHashes,
+            GenerateKoreaderHashes = library.Config.GenerateKoreaderHashes,
+            ProcessMetadata = library.Config.ProcessMetadata,
+            Watch = library.Config.Watch,
+            HideSeriesView = library.Config.HideSeriesView,
+            ThumbnailWidth = library.Config.ThumbnailWidth,
+            ThumbnailHeight = library.Config.ThumbnailHeight,
+            IgnoreRules = library.Config.IgnoreRules
+        }
+    };
 
     public Task<UploadResult> UploadToLibraryAsync(
         AuthUser user,

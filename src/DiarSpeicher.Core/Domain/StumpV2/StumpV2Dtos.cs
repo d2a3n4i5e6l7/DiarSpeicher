@@ -1,4 +1,5 @@
 ﻿using System.Text.Json.Serialization;
+using DiarSpeicher.Core.Domain.Enums;
 
 namespace DiarSpeicher.Core.Domain.StumpV2;
 
@@ -142,6 +143,81 @@ public sealed class StumpLibraryDto
 
     [JsonPropertyName("seriesCount")]
     public int SeriesCount { get; set; }
+
+    [JsonPropertyName("mediaCount")]
+    public int MediaCount { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("emoji")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Emoji { get; set; }
+
+    [JsonPropertyName("createdAt")]
+    public DateTimeOffset CreatedAt { get; set; }
+
+    [JsonPropertyName("updatedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? UpdatedAt { get; set; }
+
+    [JsonPropertyName("lastScannedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? LastScannedAt { get; set; }
+
+    [JsonPropertyName("config")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public StumpLibraryConfigDto? Config { get; set; }
+}
+
+public sealed class StumpLibraryConfigDto
+{
+    [JsonPropertyName("libraryType")]
+    public string LibraryType { get; set; } = nameof(Enums.LibraryType.Mixed);
+
+    [JsonPropertyName("libraryPattern")]
+    public string LibraryPattern { get; set; } = nameof(Enums.LibraryPattern.SeriesBased);
+
+    [JsonPropertyName("defaultReadingDir")]
+    public string DefaultReadingDir { get; set; } = nameof(ReadingDirection.LeftToRight);
+
+    [JsonPropertyName("defaultReadingMode")]
+    public string DefaultReadingMode { get; set; } = nameof(ReadingMode.Paged);
+
+    [JsonPropertyName("defaultLibraryViewMode")]
+    public string DefaultLibraryViewMode { get; set; } = nameof(LibraryViewMode.Grid);
+
+    [JsonPropertyName("convertRarToZip")]
+    public bool ConvertRarToZip { get; set; }
+
+    [JsonPropertyName("hardDeleteConversions")]
+    public bool HardDeleteConversions { get; set; }
+
+    [JsonPropertyName("generateFileHashes")]
+    public bool GenerateFileHashes { get; set; } = true;
+
+    [JsonPropertyName("generateKoreaderHashes")]
+    public bool GenerateKoreaderHashes { get; set; } = true;
+
+    [JsonPropertyName("processMetadata")]
+    public bool ProcessMetadata { get; set; } = true;
+
+    [JsonPropertyName("watch")]
+    public bool Watch { get; set; }
+
+    [JsonPropertyName("hideSeriesView")]
+    public bool HideSeriesView { get; set; }
+
+    [JsonPropertyName("thumbnailWidth")]
+    public int ThumbnailWidth { get; set; } = 400;
+
+    [JsonPropertyName("thumbnailHeight")]
+    public int ThumbnailHeight { get; set; } = 600;
+
+    [JsonPropertyName("ignoreRules")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? IgnoreRules { get; set; }
 }
 
 public sealed class StumpEpubTocDto
@@ -204,6 +280,31 @@ public sealed class StumpCreateLibraryInput
 
     [JsonPropertyName("description")]
     public string? Description { get; set; }
+
+    [JsonPropertyName("emoji")]
+    public string? Emoji { get; set; }
+
+    [JsonPropertyName("config")]
+    public StumpLibraryConfigDto? Config { get; set; }
+}
+
+/// <summary>
+/// Cuerpo de PUT /api/v2/libraries/{id}. Un campo nulo significa "no tocar", de modo que el
+/// cliente puede enviar solo lo que cambia sin arrastrar el resto del recurso.
+/// </summary>
+public sealed class StumpUpdateLibraryInput
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("emoji")]
+    public string? Emoji { get; set; }
+
+    [JsonPropertyName("config")]
+    public StumpLibraryConfigDto? Config { get; set; }
 }
 
 public sealed class StumpUploadResponseDto

@@ -17,6 +17,20 @@ pasa el usuario ya autenticado en cabeceras.
 
 El índice propio del backend está en [backend/README.md](backend/README.md).
 
+## Frontend
+
+SPA en React 19 + MUI 9. Hoy cubre login, usuarios, roles y subida TUS; el plan por fases
+para convertirla en cliente de lectura está en
+[frontEnd/README.md](frontEnd/README.md).
+
+| Documento                                                                  | Contenido                                    |
+| -------------------------------------------------------------------------- | -------------------------------------------- |
+| [fase-1-gestion-bibliotecas.md](frontEnd/fase-1-gestion-bibliotecas.md)    | Bibliotecas como sección propia y escaneo    |
+| [fase-2-navegacion.md](frontEnd/fase-2-navegacion.md)                      | Home por secciones, biblioteca como filtro   |
+| [fase-3-detalle-serie.md](frontEnd/fase-3-detalle-serie.md)                | Ficha de serie con pestañas                  |
+| [fase-4-lector.md](frontEnd/fase-4-lector.md)                              | Lector de páginas y progreso                 |
+| [fase-5-metadata-externa.md](frontEnd/fase-5-metadata-externa.md)          | Servicio MangaBaka en contenedor aparte      |
+
 ## Pendiente
 
 [PENDIENTE.md](PENDIENTE.md) recoge lo que falta, verificado contra el código: en el backend

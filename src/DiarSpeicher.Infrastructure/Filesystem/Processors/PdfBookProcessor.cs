@@ -15,7 +15,7 @@ public class PdfBookProcessor : IBookProcessor
     public bool CanProcess(string extension) =>
         extension.TrimStart('.').Equals("pdf", StringComparison.OrdinalIgnoreCase);
 
-    public Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default)
+    public Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false)
     {
         var pageCount = 0;
         ExtractedMetadata? metadata = null;

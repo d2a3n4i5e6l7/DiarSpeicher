@@ -18,6 +18,7 @@ import {
 import PeopleIcon from "@mui/icons-material/People";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
+import LibraryBooksIcon from "@mui/icons-material/LibraryBooks";
 import LogoutIcon from "@mui/icons-material/Logout";
 import MenuIcon from "@mui/icons-material/Menu";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
@@ -35,6 +36,7 @@ const ICONS: Record<string, typeof PeopleIcon> = {
 	People: PeopleIcon,
 	AdminPanelSettings: AdminPanelSettingsIcon,
 	CloudUpload: CloudUploadIcon,
+	LibraryBooks: LibraryBooksIcon,
 };
 
 export default function AppLayout() {

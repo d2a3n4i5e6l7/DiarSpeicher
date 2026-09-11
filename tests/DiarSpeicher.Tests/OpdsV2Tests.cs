@@ -92,7 +92,7 @@ public sealed class OpdsV2Tests : IDisposable
         var authDoc = service.GetAuthenticationDoc(null);
 
         Assert.NotNull(authDoc);
-        Assert.Equal("http://opds-spec.org/auth/basic", authDoc.Type);
+        Assert.Contains(authDoc.Authentication, flow => flow.Type == "http://opds-spec.org/auth/basic");
         Assert.NotEmpty(authDoc.Links);
     }
 

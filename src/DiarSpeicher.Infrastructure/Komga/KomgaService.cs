@@ -230,6 +230,9 @@ public class KomgaService : IKomgaService
             .OrderBy(p => p.Number)
             .ToListAsync(ct);
 
+        // Fallback para libros indexados antes de que el scan midiera las paginas. El scan
+        // las persiste desde entonces, asi que esta rama solo cubre lo heredado y deja de
+        // ejecutarse tras el primer rescan.
         if (measured.Count == 0)
         {
             measured = await MeasurePagesAsync(book, ct);

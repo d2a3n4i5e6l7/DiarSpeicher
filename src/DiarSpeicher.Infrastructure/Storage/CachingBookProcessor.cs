@@ -22,8 +22,8 @@ public class CachingBookProcessor : ICompositeBookProcessor
 
     public IBookProcessor? GetProcessor(string path) => _inner.GetProcessor(path);
 
-    public Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default) =>
-        _inner.AnalyzeAsync(path, includeCover, cancellationToken);
+    public Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false) =>
+        _inner.AnalyzeAsync(path, includeCover, cancellationToken, measurePages);
 
     public async Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
     {

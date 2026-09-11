@@ -12,6 +12,7 @@ import AppLayout from "./layout/AppLayout";
 import UsersPage from "./pages/UsersPage";
 import RolesPage from "./pages/RolesPage";
 import UploadPage from "./pages/UploadPage";
+import LibrariesPage from "./pages/LibrariesPage";
 
 const THEME_KEY = "diarspeicher-theme-mode";
 
@@ -172,6 +173,7 @@ export default function App() {
 					<Route index element={<Navigate to="/users" replace />} />
 					<Route path="/users" element={<UsersPage />} />
 					<Route path="/roles" element={<RolesPage />} />
+					<Route path="/libraries" element={<LibrariesPage />} />
 					<Route path="/upload" element={<UploadPage />} />
 					<Route path="*" element={<Navigate to="/users" replace />} />
 				</Route>

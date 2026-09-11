@@ -8,7 +8,7 @@ using Xunit;
 
 namespace DiarSpeicher.Tests;
 
-public class PageCacheTests : IDisposable
+public sealed class PageCacheTests : IDisposable
 {
     private readonly string _tempDir;
 
@@ -188,10 +188,10 @@ public class PageCacheTests : IDisposable
 
         public CountingProcessor(ICompositeBookProcessor inner) => _inner = inner;
 
-        public IBookProcessor? GetProcessor(string path) => _inner.GetProcessor(path);
+        IBookProcessor? ICompositeBookProcessor.GetProcessor(string path) => _inner.GetProcessor(path);
 
-        public Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default) =>
-            _inner.AnalyzeAsync(path, includeCover, cancellationToken);
+        Task<ProcessedBook> ICompositeBookProcessor.AnalyzeAsync(string path, bool includeCover, CancellationToken cancellationToken, bool measurePages) =>
+            _inner.AnalyzeAsync(path, includeCover, cancellationToken, measurePages);
 
         public Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
         {
