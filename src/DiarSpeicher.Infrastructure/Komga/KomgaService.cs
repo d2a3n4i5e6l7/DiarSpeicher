@@ -5,6 +5,8 @@ using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Data.Extensions;
+using DiarSpeicher.Infrastructure.Filesystem.Processors;
+using SkiaSharp;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -16,10 +18,21 @@ public class KomgaService : IKomgaService
     private readonly DiarSpeicherDbContext _db;
     private readonly ILogger<KomgaService> _logger;
 
-    public KomgaService(DiarSpeicherDbContext db, ILogger<KomgaService> logger)
+    private readonly ICompositeBookProcessor? _pageProcessor;
+
+    /// <summary>
+    /// El procesador es opcional: sin el, la lista de paginas sale sin dimensiones, que es
+    /// como se comportaba antes. Asi los tests que construyen el servicio a mano siguen
+    /// valiendo y solo produccion paga el coste de medir.
+    /// </summary>
+    public KomgaService(
+        DiarSpeicherDbContext db,
+        ILogger<KomgaService> logger,
+        ICompositeBookProcessor? pageProcessor = null)
     {
         _db = db;
         _logger = logger;
+        _pageProcessor = pageProcessor;
     }
 
     public async Task<List<KomgaLibraryDto>> GetLibrariesAsync(AuthUser user, CancellationToken ct = default)
@@ -212,6 +225,31 @@ public class KomgaService : IKomgaService
         var book = await _db.Media.ForUser(user).FirstOrDefaultAsync(m => m.Id == id, ct);
         if (book == null || book.Pages <= 0) return [];
 
+        var measured = await _db.MediaPages
+            .Where(p => p.MediaId == book.Id)
+            .OrderBy(p => p.Number)
+            .ToListAsync(ct);
+
+        if (measured.Count == 0)
+        {
+            measured = await MeasurePagesAsync(book, ct);
+        }
+
+        if (measured.Count > 0)
+        {
+            return measured.Select(p => new KomgaBookPageDto
+            {
+                Number = p.Number,
+                FileName = p.FileName,
+                MediaType = p.MediaType,
+                Width = p.Width,
+                Height = p.Height,
+                SizeBytes = p.SizeBytes
+            }).ToList();
+        }
+
+        // Sin procesador o con el archivo ilegible: la lista sintetizada de siempre. Los
+        // clientes de Komga no abriran el libro, pero el resto de la API sigue respondiendo.
         var pages = new List<KomgaBookPageDto>();
         for (var i = 1; i <= book.Pages; i++)
         {
@@ -223,6 +261,85 @@ public class KomgaService : IKomgaService
             });
         }
         return pages;
+    }
+
+    /// <summary>
+    /// Abre el libro una sola vez en su vida y guarda las dimensiones de cada pagina. Es
+    /// caro —descomprime el archivo entero— y por eso el resultado se persiste: la segunda
+    /// llamada y siguientes salen de la base.
+    /// </summary>
+    private async Task<List<MediaPage>> MeasurePagesAsync(Media book, CancellationToken ct)
+    {
+        if (_pageProcessor is null) return [];
+
+        _logger.LogInformation(
+            "Midiendo {Pages} paginas de {BookId}; la primera apertura de un libro es lenta",
+            book.Pages, book.Id);
+
+        var rows = new List<MediaPage>(book.Pages);
+        for (var i = 1; i <= book.Pages; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var row = new MediaPage
+            {
+                MediaId = book.Id,
+                Number = i,
+                FileName = $"page_{i:D4}.jpg",
+                MediaType = "image/jpeg"
+            };
+
+            try
+            {
+                var page = await _pageProcessor.ExtractPageAsync(book.Path, i, ct);
+                if (page is not null && page.Data.Length > 0)
+                {
+                    row.MediaType = page.ContentType.ToMimeType();
+                    row.SizeBytes = page.Data.Length;
+
+                    // SKCodec lee solo la cabecera: no decodifica la imagen entera para
+                    // averiguar cuanto mide.
+                    using var data = SKData.CreateCopy(page.Data);
+                    using var codec = SKCodec.Create(data);
+                    if (codec is not null)
+                    {
+                        row.Width = codec.Info.Width;
+                        row.Height = codec.Info.Height;
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Una pagina corrupta no puede tumbar el listado entero: se guarda sin
+                // dimensiones y las demas siguen.
+                _logger.LogWarning(ex, "No se pudo medir la pagina {Page} de {BookId}", i, book.Id);
+            }
+
+            rows.Add(row);
+        }
+
+        try
+        {
+            _db.MediaPages.AddRange(rows);
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            // Dos peticiones simultaneas sobre el mismo libro miden a la vez y la segunda
+            // choca con la clave compuesta. El trabajo ya esta hecho: se lee lo guardado.
+            _logger.LogDebug(ex, "Otra peticion ya guardo las paginas de {BookId}", book.Id);
+            foreach (var row in rows)
+            {
+                _db.Entry(row).State = EntityState.Detached;
+            }
+
+            return await _db.MediaPages
+                .Where(p => p.MediaId == book.Id)
+                .OrderBy(p => p.Number)
+                .ToListAsync(ct);
+        }
+
+        return rows;
     }
 
     public async Task<bool> UpdateReadProgressAsync(

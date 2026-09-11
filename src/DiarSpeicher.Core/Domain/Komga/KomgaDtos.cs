@@ -302,6 +302,32 @@ public class KomgaBookPageDto
 
     [JsonPropertyName("sizeBytes")]
     public long? SizeBytes { get; set; }
+
+    /// <summary>
+    /// Komga manda siempre este campo y nunca nulo: cadena vacia cuando no hay
+    /// <see cref="SizeBytes"/>. Un cliente que lo espere obligatorio no puede deserializar
+    /// la lista de paginas si falta, y sin lista no abre ninguna.
+    /// </summary>
+    [JsonPropertyName("size")]
+    public string Size => SizeBytes.HasValue ? FormatBinary(SizeBytes.Value) : string.Empty;
+
+    /// <summary>Unidades binarias, como el BinaryByteUnit que usa Komga.</summary>
+    private static string FormatBinary(long bytes)
+    {
+        string[] units = ["B", "KiB", "MiB", "GiB"];
+        double value = bytes;
+        var unit = 0;
+
+        while (value >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+
+        return unit == 0
+            ? $"{bytes} B"
+            : $"{value:0.#} {units[unit]}";
+    }
 }
 
 public class KomgaReadProgressUpdateDto

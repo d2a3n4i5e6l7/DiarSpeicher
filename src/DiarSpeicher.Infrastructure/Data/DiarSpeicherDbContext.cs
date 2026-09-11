@@ -17,6 +17,7 @@ public class DiarSpeicherDbContext : DbContext
     public DbSet<SeriesMetadata> SeriesMetadata => Set<SeriesMetadata>();
     public DbSet<Media> Media => Set<Media>();
     public DbSet<MediaMetadata> MediaMetadata => Set<MediaMetadata>();
+    public DbSet<MediaPage> MediaPages => Set<MediaPage>();
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<MediaTag> MediaTags => Set<MediaTag>();
     public DbSet<SeriesTag> SeriesTags => Set<SeriesTag>();
@@ -124,6 +125,21 @@ public class DiarSpeicherDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.MediaId).HasMaxLength(32);
             entity.HasIndex(e => e.MediaId).IsUnique();
+        });
+
+        modelBuilder.Entity<MediaPage>(entity =>
+        {
+            // Clave compuesta: una pagina se identifica por su libro y su numero, no tiene
+            // identidad propia, y asi el upsert de la primera medicion no puede duplicar filas.
+            entity.HasKey(e => new { e.MediaId, e.Number });
+            entity.Property(e => e.MediaId).HasMaxLength(32);
+            entity.Property(e => e.FileName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.MediaType).HasMaxLength(64).IsRequired();
+
+            entity.HasOne(e => e.Media)
+                .WithMany()
+                .HasForeignKey(e => e.MediaId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Tags & Relations

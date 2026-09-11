@@ -6,20 +6,18 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11">
-      <!-- Sin "runtime": Design y Tools solo hacen falta para "dotnet ef migrations add".
-           Incluyendolo se copian sus ensamblados al publish y arrastran Roslyn entero,
-           22 MB de compilador de C# que en produccion no ejecuta nada. Aplicar las
-           migraciones al arrancar lo hace EntityFrameworkCore.Relational, que se queda. -->
-      <IncludeAssets>build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <!-- "runtime" es obligatorio aunque arrastre Roslyn al publish: dotnet ef necesita
+           el ensamblado de Design en la salida del proyecto de arranque para construir el
+           modelo. Quitarlo ahorra 22 MB y rompe "dotnet ef migrations add". -->
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.11">
-      <!-- Sin "runtime": Design y Tools solo hacen falta para "dotnet ef migrations add".
-           Incluyendolo se copian sus ensamblados al publish y arrastran Roslyn entero,
-           22 MB de compilador de C# que en produccion no ejecuta nada. Aplicar las
-           migraciones al arrancar lo hace EntityFrameworkCore.Relational, que se queda. -->
-      <IncludeAssets>build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <!-- "runtime" es obligatorio aunque arrastre Roslyn al publish: dotnet ef necesita
+           el ensamblado de Design en la salida del proyecto de arranque para construir el
+           modelo. Quitarlo ahorra 22 MB y rompe "dotnet ef migrations add". -->
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
