@@ -2,6 +2,7 @@ using DiarSpeicher.Core.Domain.StumpV2;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Infrastructure.Filesystem;
+using DiarSpeicher.Infrastructure.StumpV2;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -110,20 +111,32 @@ public static class FilesystemEndpoints
                 : Results.Json(new { error = NotDeletable }, statusCode: StatusCodes.Status403Forbidden);
         });
 
-        group.MapDelete("/entry", (
+        group.MapDelete("/entry", async (
             [FromQuery] string? path,
             HttpContext httpContext,
-            [FromServices] ITrashService trash) =>
+            [FromServices] ITrashService trash,
+            [FromServices] IStumpV2Service catalog,
+            CancellationToken ct) =>
         {
             if (!IsAllowed(httpContext)) return Forbidden();
 
-            return trash.TryMoveToTrash(path ?? string.Empty, out var entry) switch
+            var outcome = trash.TryMoveToTrash(path ?? string.Empty, out var entry);
+            if (outcome != TrashOutcome.Moved)
             {
-                TrashOutcome.Moved => Results.Ok(ToTrashDto(entry!, trashOptions: null)),
-                TrashOutcome.NotFound => Results.NotFound(new { error = "Eso ya no esta en el disco." }),
-                TrashOutcome.NotAllowed => Results.Json(new { error = NotDeletable }, statusCode: StatusCodes.Status403Forbidden),
-                _ => Results.Json(new { error = "No se pudo mover a la papelera." }, statusCode: StatusCodes.Status500InternalServerError)
-            };
+                return outcome switch
+                {
+                    TrashOutcome.NotFound => Results.NotFound(new { error = "Eso ya no esta en el disco." }),
+                    TrashOutcome.NotAllowed => Results.Json(new { error = NotDeletable }, statusCode: StatusCodes.Status403Forbidden),
+                    _ => Results.Json(new { error = "No se pudo mover a la papelera." }, statusCode: StatusCodes.Status500InternalServerError)
+                };
+            }
+
+            // Sin esto las filas se quedan apuntando a una ruta muerta: el tomo sigue
+            // saliendo en "anadido reciente" y su miniatura se sigue sirviendo.
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            await catalog.PurgeIndexUnderPathAsync(user, entry!.OriginalPath, ct);
+
+            return Results.Ok(ToTrashDto(entry, trashOptions: null));
         });
 
         group.MapGet("/preview", (
@@ -265,7 +278,7 @@ public static class FilesystemEndpoints
 
         foreach (var seriesPath in paths)
         {
-            var walkedSeries = scanner.WalkSeries(seriesPath, new Dictionary<string, long>(), []);
+            var walkedSeries = scanner.WalkSeries(seriesPath, new Dictionary<string, long>(), [], paths);
             var count = walkedSeries.MediaToCreate.Count;
 
             preview.Series.Add(new PreviewSeriesDto
@@ -273,10 +286,7 @@ public static class FilesystemEndpoints
                 Name = Path.GetFileName(seriesPath) is { Length: > 0 } name ? name : seriesPath,
                 Path = seriesPath,
                 VolumeCount = count,
-                IsRoot = string.Equals(seriesPath, resolved, StringComparison.OrdinalIgnoreCase),
-                OverlapsParent = paths.Any(other =>
-                    !string.Equals(other, seriesPath, StringComparison.OrdinalIgnoreCase)
-                    && seriesPath.StartsWith(other + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                IsRoot = string.Equals(seriesPath, resolved, StringComparison.OrdinalIgnoreCase)
             });
 
             preview.TotalVolumes += count;

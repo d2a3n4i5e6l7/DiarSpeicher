@@ -11,40 +11,74 @@ import { librariesApi, type ScanStatus } from "../api/endpoints";
  * Se pide primero el estado actual, porque quien entra a mitad del escaneo se quedaria en
  * blanco hasta el siguiente evento.
  */
-export function useScanProgress(libraryId: string, enabled: boolean): ScanStatus | null {
+/**
+ * Progreso del escaneo.
+ *
+ * Primero se pregunta el estado, que es una consulta barata, y **solo si hay un escaneo sin
+ * terminar** se abre el flujo SSE. Tener una conexion abierta en cada ficha de biblioteca
+ * sin que nadie escanee no aporta nada, y es la que se quedaba reconectando en bucle.
+ *
+ * `trigger` sirve para volver a preguntar tras lanzar un escaneo: la cola marca la
+ * biblioteca al encolarla, asi que el estado ya viene sin terminar y el flujo se abre.
+ */
+export function useScanProgress(libraryId: string, trigger = 0): ScanStatus | null {
 	const [status, setStatus] = useState<{ key: string; value: ScanStatus | null } | null>(null);
 
+	const snapshotKey = `${libraryId}#${String(trigger)}`;
+
 	useEffect(() => {
-		if (!enabled || !libraryId) return;
+		// Sin biblioteca no hay nada que preguntar: la ficha de serie monta el hook antes de
+		// saber a que biblioteca pertenece, y preguntarlo con el id vacio es un 404 seguro.
+		if (libraryId.length === 0) {
+			setStatus({ key: libraryId, value: null });
+			return;
+		}
 
 		let cancelled = false;
-
 		librariesApi.scanStatus(libraryId).then(
 			(current) => {
-				if (!cancelled && current) setStatus({ key: libraryId, value: current });
+				if (!cancelled) setStatus({ key: libraryId, value: current });
 			},
 			() => {
-				/* sin estado previo: se espera al primer evento */
+				if (!cancelled) setStatus({ key: libraryId, value: null });
 			},
 		);
 
+		return () => {
+			cancelled = true;
+		};
+	}, [snapshotKey, libraryId]);
+
+	const current = status?.key === libraryId ? status.value : null;
+	const live = current !== null && !current.finished;
+
+	useEffect(() => {
+		if (!live) return;
+
+		let cancelled = false;
 		const source = new EventSource(librariesApi.scanStreamUrl(libraryId), { withCredentials: true });
 
 		source.onmessage = (event) => {
 			const parsed = JSON.parse(event.data as string) as ScanStatus;
-			if (!cancelled) setStatus({ key: libraryId, value: parsed });
+			if (cancelled) return;
+
+			setStatus({ key: libraryId, value: parsed });
+
+			// El servidor corta el flujo al terminar, y EventSource lee ese cierre como caida
+			// y reconecta cada 3 s. Cerrarlo aqui es lo que rompe ese ciclo.
+			if (parsed.finished) source.close();
 		};
 
-		// Un error de red lo reintenta EventSource solo; cerrarlo aqui rompería esa reconexión.
+		// Un corte de red lo reintenta EventSource solo; cerrarlo aqui rompería esa reconexión.
 		source.onerror = () => undefined;
 
 		return () => {
 			cancelled = true;
 			source.close();
 		};
-	}, [libraryId, enabled]);
+	}, [libraryId, live]);
 
-	return status?.key === libraryId ? status.value : null;
+	return current;
 }
 
 /** "2 min 10 s". Sin decimales: una estimacion con segundos exactos finge una precision que no tiene. */

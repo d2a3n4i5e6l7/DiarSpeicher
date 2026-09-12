@@ -505,12 +505,9 @@ public class OpdsService : IOpdsService
             return (bytes, mime);
         }
 
-        var page = await _bookProcessor.ExtractPageAsync(book.Path, 1, ct);
-        if (page != null)
-        {
-            return (page.Data, page.ContentType.MimeType());
-        }
-
+        // Sin miniatura no se sirve la pagina entera: una portada de manga son 1,5 MB, y una
+        // rejilla de treinta tarjetas descargaria 45 MB creyendo que pide miniaturas. Que
+        // falte se ve, y se arregla reescaneando.
         return (null, "image/jpeg");
     }
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -17,7 +17,6 @@ namespace DiarSpeicher.Infrastructure.Migrations
                 {
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    LibraryId = table.Column<string>(type: "TEXT", nullable: true),
                     ConvertRarToZip = table.Column<bool>(type: "INTEGER", nullable: false),
                     HardDeleteConversions = table.Column<bool>(type: "INTEGER", nullable: false),
                     DefaultReadingDir = table.Column<string>(type: "TEXT", nullable: false),

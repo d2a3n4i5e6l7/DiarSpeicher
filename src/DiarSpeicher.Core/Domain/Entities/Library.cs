@@ -26,7 +26,6 @@ public class Library
 public class LibraryConfig
 {
     public int Id { get; set; }
-    public string? LibraryId { get; set; }
     public Library? Library { get; set; }
 
     public bool ConvertRarToZip { get; set; }

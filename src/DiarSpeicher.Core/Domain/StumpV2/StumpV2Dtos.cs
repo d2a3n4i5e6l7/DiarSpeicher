@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 using DiarSpeicher.Core.Domain.Enums;
 
 namespace DiarSpeicher.Core.Domain.StumpV2;
@@ -214,6 +214,14 @@ public sealed class StumpLibraryDto
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
+
+    /// <summary>Series del indice cuya carpeta ya no esta en el disco.</summary>
+    [JsonPropertyName("missingSeries")]
+    public int MissingSeries { get; set; }
+
+    /// <summary>Tomos del indice cuyo fichero ya no esta en el disco.</summary>
+    [JsonPropertyName("missingVolumes")]
+    public int MissingVolumes { get; set; }
 
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
@@ -495,6 +503,19 @@ public sealed class StumpScanStatusDto
 
     [JsonPropertyName("currentSeries")]
     public string? CurrentSeries { get; set; }
+
+    /// <summary>Avance dentro de la serie en curso, para dibujar un hueco por tomo.</summary>
+    [JsonPropertyName("completedMedia")]
+    public int CompletedMedia { get; set; }
+
+    [JsonPropertyName("totalMedia")]
+    public int TotalMedia { get; set; }
+
+    [JsonPropertyName("currentMedia")]
+    public string? CurrentMedia { get; set; }
+
+    [JsonPropertyName("currentSeriesId")]
+    public string? CurrentSeriesId { get; set; }
 
     [JsonPropertyName("message")]
     public string? Message { get; set; }

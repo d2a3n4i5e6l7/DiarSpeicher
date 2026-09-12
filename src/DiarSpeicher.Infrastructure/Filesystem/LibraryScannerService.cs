@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
@@ -36,6 +36,13 @@ public class LibraryScannerService : ILibraryScannerService
     private static readonly int AnalysisParallelism = Math.Max(1, Environment.ProcessorCount - 1);
 
     private sealed record PreparedMedia(string MediaId, string Path, ProcessedBook Analysis, string? ThumbnailPath);
+
+    /// <summary>
+    /// Lo que hace falta para situar un tomo dentro del escaneo completo. Viaja hacia abajo
+    /// porque quien conoce el avance por tomos es el bucle de creacion, y quien conoce el
+    /// avance por series esta tres niveles mas arriba.
+    /// </summary>
+    private sealed record SeriesProgress(string LibraryId, string SeriesId, string SeriesName, int CompletedSeries, int TotalSeries);
 
     /// <summary>
     /// Lo que la configuracion de la biblioteca le pide a este escaneo. Se resuelve una vez
@@ -99,7 +106,11 @@ public class LibraryScannerService : ILibraryScannerService
         int completedSeries = 0,
         int totalSeries = 0,
         string? currentSeries = null,
-        string? message = null)
+        string? message = null,
+        int completedMedia = 0,
+        int totalMedia = 0,
+        string? currentMedia = null,
+        string? currentSeriesId = null)
     {
         if (_progressPublisher is null)
         {
@@ -114,6 +125,10 @@ public class LibraryScannerService : ILibraryScannerService
             CompletedSeries = completedSeries,
             TotalSeries = totalSeries,
             CurrentSeries = currentSeries,
+            CompletedMedia = completedMedia,
+            TotalMedia = totalMedia,
+            CurrentMedia = currentMedia,
+            CurrentSeriesId = currentSeriesId,
             Message = message
         }, cancellationToken);
     }
@@ -167,10 +182,7 @@ public class LibraryScannerService : ILibraryScannerService
         await PublishProgressAsync(
             libraryId, ScanPhase.Started, cancellationToken, message: "Leyendo el indice anterior");
 
-        var storedMtimes = await _dbContext.ScannedDirectories
-            .Where(sd => sd.Path.StartsWith(libraryPath))
-            .AsNoTracking()
-            .ToDictionaryAsync(sd => sd.Path, sd => sd.LastMTime, StringComparer.OrdinalIgnoreCase, cancellationToken);
+        var storedMtimes = await LoadDirectoryMtimeCacheAsync(libraryPath, cancellationToken);
 
         var existingSeries = await _dbContext.Series
             .Where(s => s.LibraryId == libraryId)
@@ -194,9 +206,16 @@ public class LibraryScannerService : ILibraryScannerService
         await ProcessRecoveredSeriesAsync(walkedLibrary.RecoveredSeries, report, cancellationToken);
         var newlyCreatedSeries = await CreateNewSeriesAsync(libraryId, libraryPath, walkedLibrary.SeriesToCreate, report, cancellationToken);
 
+        var allSeriesPaths = walkedLibrary.SeriesToVisit
+            .Concat(newlyCreatedSeries.Select(s => s.Path))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        await ReconcileMediaOwnershipAsync(libraryId, report, cancellationToken);
+
         var allObservedDirMtimes = await ProcessAllSeriesAsync(
             libraryId,
-            walkedLibrary.SeriesToVisit.Concat(newlyCreatedSeries.Select(s => s.Path)),
+            allSeriesPaths,
             storedMtimes,
             thumbnailsDir,
             settings,
@@ -231,6 +250,132 @@ public class LibraryScannerService : ILibraryScannerService
             report.SkippedFiles);
 
         return report;
+    }
+
+    /// <summary>
+    /// Devuelve cada tomo a la serie que le corresponde por ruta y borra las filas repetidas.
+    /// <para>
+    /// Hasta que el recorrido dejo de cruzar fronteras de serie, un fichero dentro de una
+    /// subcarpeta quedaba indexado dos veces: una colgando de la serie padre y otra de la suya.
+    /// Arreglar el recorrido no limpia lo que ya esta en la base, asi que esto se ejecuta en
+    /// cada escaneo. Cuando no hay nada que arreglar no escribe.
+    /// </para>
+    /// </summary>
+    private async Task ReconcileMediaOwnershipAsync(
+        string libraryId,
+        LibraryScanReport report,
+        CancellationToken cancellationToken)
+    {
+        var seriesOfLibrary = await _dbContext.Series
+            .Where(s => s.LibraryId == libraryId)
+            .Select(s => new { s.Id, s.Path })
+            .ToListAsync(cancellationToken);
+
+        if (seriesOfLibrary.Count == 0) return;
+
+        // De mas profunda a menos: el dueño de un fichero es la serie mas cercana por encima.
+        var owners = seriesOfLibrary
+            .Select(s => new
+            {
+                s.Id,
+                Path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(s.Path))
+            })
+            .OrderByDescending(s => s.Path.Length)
+            .ToList();
+
+        var seriesIds = seriesOfLibrary.Select(s => s.Id).ToList();
+        var media = await _dbContext.Media
+            .Where(m => m.SeriesId != null && seriesIds.Contains(m.SeriesId!))
+            .ToListAsync(cancellationToken);
+
+        if (media.Count == 0) return;
+
+        var repointed = 0;
+        foreach (var item in media)
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(item.Path));
+            if (string.IsNullOrEmpty(dir)) continue;
+
+            var owner = owners.FirstOrDefault(o =>
+                string.Equals(dir, o.Path, StringComparison.Ordinal)
+                || dir.StartsWith(o.Path + Path.DirectorySeparatorChar, StringComparison.Ordinal));
+
+            if (owner is null || string.Equals(owner.Id, item.SeriesId, StringComparison.Ordinal)) continue;
+
+            item.SeriesId = owner.Id;
+            repointed++;
+        }
+
+        var removed = await RemoveDuplicateMediaRowsAsync(media, cancellationToken);
+
+        if (repointed == 0 && removed == 0) return;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        report.UpdatedMedia += (ulong)repointed;
+
+        _logger.LogInformation(
+            "Reconciled media for library {LibraryId}: {Repointed} repointed, {Removed} duplicate rows removed.",
+            libraryId,
+            repointed,
+            removed);
+    }
+
+    /// <summary>
+    /// De cada grupo de filas que apuntan al mismo fichero sobrevive la que tiene progreso de
+    /// lectura, y a igualdad la mas antigua. Borrar la que el usuario venia leyendo le costaria
+    /// la posicion y las sesiones, que es justo lo que no se puede recuperar de un reescaneo.
+    /// </summary>
+    private async Task<int> RemoveDuplicateMediaRowsAsync(
+        IReadOnlyList<Media> media,
+        CancellationToken cancellationToken)
+    {
+        var duplicates = media
+            .GroupBy(m => Path.GetFullPath(m.Path), StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .ToList();
+
+        if (duplicates.Count == 0) return 0;
+
+        var duplicateIds = duplicates.SelectMany(g => g.Select(m => m.Id)).ToList();
+        var sessionCounts = await _dbContext.ReadingSessions
+            .Where(rs => duplicateIds.Contains(rs.MediaId))
+            .GroupBy(rs => rs.MediaId)
+            .Select(g => new { MediaId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.MediaId, x => x.Count, cancellationToken);
+
+        var removed = 0;
+        foreach (var group in duplicates)
+        {
+            var survivor = group
+                .OrderByDescending(m => sessionCounts.TryGetValue(m.Id, out var count) ? count : 0)
+                .ThenBy(m => m.CreatedAt)
+                .First();
+
+            foreach (var loser in group.Where(m => !ReferenceEquals(m, survivor)))
+            {
+                // La miniatura lleva el id del tomo en el nombre, asi que la del descarte no es
+                // la del superviviente y se puede borrar sin dejarle sin portada.
+                TryDeleteThumbnail(loser.ThumbnailPath);
+                _dbContext.Media.Remove(loser);
+                removed++;
+            }
+        }
+
+        return removed;
+    }
+
+    private void TryDeleteThumbnail(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "No se pudo borrar la miniatura {Path}", path);
+        }
     }
 
     private async Task ProcessMissingSeriesAsync(string libraryId, List<string> missingPaths, LibraryScanReport report, CancellationToken cancellationToken)
@@ -325,12 +470,12 @@ public class LibraryScannerService : ILibraryScannerService
         LibraryScanReport report,
         CancellationToken cancellationToken)
     {
-        var distinctPaths = seriesPaths.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var distinctPaths = seriesPaths.Distinct(StringComparer.Ordinal).ToList();
         var seriesEntities = await _dbContext.Series
             .Where(s => s.LibraryId == libraryId && distinctPaths.Contains(s.Path))
             .ToListAsync(cancellationToken);
 
-        var allObservedDirMtimes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var allObservedDirMtimes = new Dictionary<string, long>(StringComparer.Ordinal);
         var completed = 0;
 
         foreach (var series in seriesEntities)
@@ -343,7 +488,16 @@ public class LibraryScannerService : ILibraryScannerService
                 totalSeries: seriesEntities.Count,
                 currentSeries: series.Name);
 
-            await ProcessSingleSeriesAsync(series, storedMtimes, thumbnailsDir, allObservedDirMtimes, settings, report, cancellationToken);
+            await ProcessSingleSeriesAsync(
+                series,
+                distinctPaths,
+                storedMtimes,
+                thumbnailsDir,
+                allObservedDirMtimes,
+                settings,
+                report,
+                new SeriesProgress(libraryId, series.Id, series.Name, completed, seriesEntities.Count),
+                cancellationToken);
             completed++;
         }
 
@@ -352,11 +506,13 @@ public class LibraryScannerService : ILibraryScannerService
 
     private async Task ProcessSingleSeriesAsync(
         Series series,
+        IReadOnlyCollection<string> allSeriesPaths,
         IReadOnlyDictionary<string, long> storedMtimes,
         string thumbnailsDir,
         Dictionary<string, long> allObservedDirMtimes,
         ScanSettings settings,
         LibraryScanReport report,
+        SeriesProgress progress,
         CancellationToken cancellationToken)
     {
         // La conversion va antes de mirar el disco: si no, el recorrido veria el CBR que
@@ -376,7 +532,7 @@ public class LibraryScannerService : ILibraryScannerService
             .Select(m => new ExistingMediaInfo(m.Id, m.Path, m.Status, m.ModifiedAt))
             .ToListAsync(cancellationToken);
 
-        var walkedSeries = _directoryScanner.WalkSeries(series.Path, storedMtimes, existingMedia);
+        var walkedSeries = _directoryScanner.WalkSeries(series.Path, storedMtimes, existingMedia, allSeriesPaths);
 
         report.TotalFiles += walkedSeries.SeenFiles;
         report.IgnoredFiles += walkedSeries.IgnoredFiles;
@@ -391,7 +547,7 @@ public class LibraryScannerService : ILibraryScannerService
 
         await MarkMissingMediaAsync(series.Id, walkedSeries.MissingMedia, report, cancellationToken);
         await MarkRecoveredMediaAsync(walkedSeries.RecoveredMedia, report, cancellationToken);
-        await CreateNewMediaAsync(series.Id, mediaToCreate, thumbnailsDir, settings, report, cancellationToken);
+        await CreateNewMediaAsync(series.Id, mediaToCreate, thumbnailsDir, settings, report, progress, cancellationToken);
         await UpdateVisitedMediaAsync(series.Id, walkedSeries.MediaToVisit, thumbnailsDir, settings, report, cancellationToken);
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -417,7 +573,7 @@ public class LibraryScannerService : ILibraryScannerService
 
         if (affected.Count == 0) return;
 
-        var bySource = conversions.ToDictionary(c => c.SourcePath, StringComparer.OrdinalIgnoreCase);
+        var bySource = conversions.ToDictionary(c => c.SourcePath, StringComparer.Ordinal);
 
         foreach (var media in affected)
         {
@@ -503,55 +659,103 @@ public class LibraryScannerService : ILibraryScannerService
         return results.OfType<PreparedMedia>().ToList();
     }
 
+    /// <summary>
+    /// Crea los tomos nuevos de una serie por lotes.
+    /// <para>
+    /// Antes se analizaban los treinta y dos de golpe y se escribia una sola vez al final:
+    /// las medidas de pagina de los treinta y dos —miles de filas— se quedaban en el
+    /// rastreador de cambios hasta la ultima, y la ficha no tenia nada que enseñar mientras
+    /// tanto. Un lote por vuelta acota esa memoria y deja avance visible tomo a tomo.
+    /// </para>
+    /// </summary>
     private async Task CreateNewMediaAsync(
         string seriesId,
         List<string> mediaToCreate,
         string thumbnailsDir,
         ScanSettings settings,
         LibraryScanReport report,
+        SeriesProgress progress,
         CancellationToken cancellationToken)
     {
         if (mediaToCreate.Count == 0) return;
 
-        var prepared = await PrepareMediaAsync(
-            mediaToCreate.Select(path => (Ulid.NewUlid().ToString(), path)).ToList(),
-            thumbnailsDir,
-            settings.Analysis,
-            cancellationToken);
+        // Se anuncia el total antes de tocar el disco: el cliente puede dibujar los huecos
+        // de los tomos que vienen en cuanto empieza, no cuando ya estan hechos.
+        await PublishProgressAsync(
+            progress.LibraryId,
+            ScanPhase.ProcessingSeries,
+            cancellationToken,
+            completedSeries: progress.CompletedSeries,
+            totalSeries: progress.TotalSeries,
+            currentSeries: progress.SeriesName,
+            totalMedia: mediaToCreate.Count,
+            currentSeriesId: progress.SeriesId);
 
-        // Sequential phase: the change tracker must only ever be touched by one thread.
-        foreach (var (newMediaId, mediaPath, analyzed, thumbPath) in prepared)
+        var done = 0;
+
+        foreach (var chunk in mediaToCreate.Chunk(AnalysisParallelism))
         {
-            var fileInfo = new FileInfo(mediaPath);
-            var ext = fileInfo.Extension.TrimStart('.').ToLowerInvariant();
-            var name = Path.GetFileNameWithoutExtension(mediaPath);
+            var prepared = await PrepareMediaAsync(
+                chunk.Select(path => (Ulid.NewUlid().ToString(), path)).ToList(),
+                thumbnailsDir,
+                settings.Analysis,
+                cancellationToken);
 
-            var newMedia = new Media
-            {
-                Id = newMediaId,
-                Name = analyzed.Metadata?.Title ?? name,
-                Path = mediaPath,
-                Extension = ext,
-                Size = fileInfo.Exists ? fileInfo.Length : 0,
-                Pages = analyzed.Pages,
-                Hash = analyzed.Hash,
-                KoreaderHash = analyzed.KoreaderHash,
-                ThumbnailPath = thumbPath,
-                Status = FileStatus.Ready,
-                SeriesId = seriesId,
-                ModifiedAt = fileInfo.Exists ? new DateTimeOffset(fileInfo.LastWriteTimeUtc) : null,
-                CreatedAt = DateTimeOffset.UtcNow,
-                UpdatedAt = DateTimeOffset.UtcNow
-            };
+            string? lastName = null;
 
-            if (analyzed.Metadata is not null)
+            // Sequential phase: the change tracker must only ever be touched by one thread.
+            foreach (var (newMediaId, mediaPath, analyzed, thumbPath) in prepared)
             {
-                newMedia.Metadata = MapMediaMetadata(analyzed.Metadata);
+                var fileInfo = new FileInfo(mediaPath);
+                var ext = fileInfo.Extension.TrimStart('.').ToLowerInvariant();
+                var name = Path.GetFileNameWithoutExtension(mediaPath);
+
+                var newMedia = new Media
+                {
+                    Id = newMediaId,
+                    Name = analyzed.Metadata?.Title ?? name,
+                    Path = mediaPath,
+                    Extension = ext,
+                    Size = fileInfo.Exists ? fileInfo.Length : 0,
+                    Pages = analyzed.Pages,
+                    Hash = analyzed.Hash,
+                    KoreaderHash = analyzed.KoreaderHash,
+                    ThumbnailPath = thumbPath,
+                    Status = FileStatus.Ready,
+                    SeriesId = seriesId,
+                    ModifiedAt = fileInfo.Exists ? new DateTimeOffset(fileInfo.LastWriteTimeUtc) : null,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                };
+
+                if (analyzed.Metadata is not null)
+                {
+                    newMedia.Metadata = MapMediaMetadata(analyzed.Metadata);
+                }
+
+                _dbContext.Media.Add(newMedia);
+                AddPageDimensions(newMediaId, analyzed);
+                report.CreatedMedia++;
+
+                lastName = newMedia.Name;
+                done++;
             }
 
-            _dbContext.Media.Add(newMedia);
-            AddPageDimensions(newMediaId, analyzed);
-            report.CreatedMedia++;
+            // Guardar aqui es lo que suelta el lote: hasta que no se escribe, el rastreador
+            // sigue sujetando cada fila de pagina del lote entero.
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            await PublishProgressAsync(
+                progress.LibraryId,
+                ScanPhase.ProcessingSeries,
+                cancellationToken,
+                completedSeries: progress.CompletedSeries,
+                totalSeries: progress.TotalSeries,
+                currentSeries: progress.SeriesName,
+                completedMedia: done,
+                totalMedia: mediaToCreate.Count,
+                currentMedia: lastName,
+                currentSeriesId: progress.SeriesId);
         }
     }
 
@@ -663,6 +867,53 @@ public class LibraryScannerService : ILibraryScannerService
         };
     }
 
+    /// <summary>
+    /// Caché de mtimes por carpeta. Se compara byte a byte, igual que la clave primaria de la
+    /// tabla y que el propio sistema de ficheros: en Linux "parte 2" y "Parte 2" son carpetas
+    /// distintas y la tabla tiene una fila para cada una. Metiéndolas en un diccionario que
+    /// ignoraba mayusculas, la segunda reventaba el escaneo con ArgumentException.
+    /// <para>
+    /// De paso se van las filas cuya carpeta ya no esta en el disco. Nadie las borraba, asi
+    /// que cada carpeta renombrada o eliminada dejaba la suya en la tabla para siempre.
+    /// </para>
+    /// </summary>
+    private async Task<Dictionary<string, long>> LoadDirectoryMtimeCacheAsync(
+        string libraryPath,
+        CancellationToken cancellationToken)
+    {
+        var stored = await _dbContext.ScannedDirectories
+            .Where(sd => sd.Path.StartsWith(libraryPath))
+            .ToListAsync(cancellationToken);
+
+        var cache = new Dictionary<string, long>(StringComparer.Ordinal);
+        var stale = new List<ScannedDirectory>();
+
+        foreach (var entry in stored)
+        {
+            if (Directory.Exists(entry.Path))
+            {
+                cache[entry.Path] = entry.LastMTime;
+            }
+            else
+            {
+                stale.Add(entry);
+            }
+        }
+
+        if (stale.Count > 0)
+        {
+            _dbContext.ScannedDirectories.RemoveRange(stale);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Dropped {Count} cached directory entries with no folder on disk under {Path}.",
+                stale.Count,
+                libraryPath);
+        }
+
+        return cache;
+    }
+
     private async Task UpsertScannedDirMtimesAsync(Dictionary<string, long> allObservedDirMtimes, CancellationToken cancellationToken)
     {
         if (allObservedDirMtimes.Count == 0) return;
@@ -670,7 +921,7 @@ public class LibraryScannerService : ILibraryScannerService
         var observedPaths = allObservedDirMtimes.Keys.ToList();
         var existingScannedDirs = await _dbContext.ScannedDirectories
             .Where(sd => observedPaths.Contains(sd.Path))
-            .ToDictionaryAsync(sd => sd.Path, sd => sd, StringComparer.OrdinalIgnoreCase, cancellationToken);
+            .ToDictionaryAsync(sd => sd.Path, sd => sd, StringComparer.Ordinal, cancellationToken);
 
         foreach (var (dirPath, mtime) in allObservedDirMtimes)
         {

@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Box, Button, LinearProgress, Stack, Typography } from "@mui/material";
+import {
+	Alert,
+	Box,
+	Button,
+	Dialog,
+	DialogActions,
+	DialogContent,
+	DialogTitle,
+	LinearProgress,
+	Stack,
+	Typography,
+} from "@mui/material";
 import RestoreIcon from "@mui/icons-material/Restore";
+import DeleteForeverIcon from "@mui/icons-material/DeleteForever";
 import FolderIcon from "@mui/icons-material/Folder";
 import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
 import PageHeader from "../components/PageHeader";
@@ -15,6 +27,7 @@ export default function TrashPage() {
 	const [entries, setEntries] = useState<TrashEntry[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [working, setWorking] = useState<string | null>(null);
+	const [confirm, setConfirm] = useState<TrashEntry | null>(null);
 
 	const load = useCallback(async () => {
 		try {
@@ -130,6 +143,17 @@ export default function TrashPage() {
 					</Box>
 
 					<Button
+						startIcon={<DeleteForeverIcon />}
+						disabled={working === entry.id}
+						onClick={() => {
+							setConfirm(entry);
+						}}
+						sx={{ flexShrink: 0, color: DS.muted, "&:hover": { color: DS.redGlow } }}
+					>
+						Borrar ya
+					</Button>
+
+					<Button
 						variant="outlined"
 						startIcon={<RestoreIcon />}
 						disabled={working === entry.id || entry.expiresInSeconds <= 0}
@@ -151,6 +175,48 @@ export default function TrashPage() {
 					</Button>
 				</Box>
 			))}
+			{confirm && (
+				<Dialog open onClose={() => { setConfirm(null); }} maxWidth="xs" fullWidth>
+					<HudFrame />
+					<DialogTitle>// Borrar definitivamente</DialogTitle>
+					<DialogContent sx={{ p: 3 }}>
+						<Typography sx={{ color: DS.platinum, mb: 2 }}>
+							<strong>{confirm.name}</strong> se borrará del disco ahora mismo.
+						</Typography>
+						<Alert severity="error">
+							{confirm.fileCount} {confirm.fileCount === 1 ? "fichero" : "ficheros"} ·{" "}
+							{formatBytes(confirm.bytes)}. Esto no se puede deshacer.
+						</Alert>
+					</DialogContent>
+					<DialogActions>
+						<Button onClick={() => { setConfirm(null); }} sx={{ color: DS.muted }}>
+							CANCELAR
+						</Button>
+						<Button
+							variant="contained"
+							disabled={working === confirm.id}
+							onClick={() => {
+								const id = confirm.id;
+								setWorking(id);
+								trashApi
+									.purge(id)
+									.then(() => {
+										setConfirm(null);
+										setTick((prev) => prev + 1);
+									})
+									.catch((e: unknown) => {
+										setError(e instanceof Error ? e.message : "No se pudo borrar.");
+									})
+									.finally(() => {
+										setWorking(null);
+									});
+							}}
+						>
+							BORRAR YA
+						</Button>
+					</DialogActions>
+				</Dialog>
+			)}
 		</Box>
 	);
 }

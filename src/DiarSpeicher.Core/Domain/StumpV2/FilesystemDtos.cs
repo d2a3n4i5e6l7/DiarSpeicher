@@ -105,14 +105,6 @@ public sealed class PreviewSeriesDto
     /// <summary>La carpeta es la raiz de la biblioteca, no una subcarpeta.</summary>
     [JsonPropertyName("isRoot")]
     public bool IsRoot { get; set; }
-
-    /// <summary>
-    /// Sus ficheros los reclama tambien una serie de mas arriba. Ocurre cuando una carpeta
-    /// tiene tomos sueltos y ademas subcarpetas con tomos: las dos salen como serie y los
-    /// mismos ficheros entran dos veces, porque Media.Path no tiene indice unico.
-    /// </summary>
-    [JsonPropertyName("overlapsParent")]
-    public bool OverlapsParent { get; set; }
 }
 
 public sealed class ScanPreviewDto

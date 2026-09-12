@@ -10,7 +10,11 @@ public record ExistingMediaInfo(string Id, string Path, FileStatus Status, DateT
 public interface IDirectoryScanner
 {
     WalkedLibrary WalkLibrary(string libraryPath, bool isCollectionBased, IReadOnlyList<ExistingSeriesInfo> existingSeries);
-    WalkedSeries WalkSeries(string seriesPath, IReadOnlyDictionary<string, long> cachedDirMtimes, IReadOnlyList<ExistingMediaInfo> existingMedia);
+    WalkedSeries WalkSeries(
+        string seriesPath,
+        IReadOnlyDictionary<string, long> cachedDirMtimes,
+        IReadOnlyList<ExistingMediaInfo> existingMedia,
+        IReadOnlyCollection<string>? otherSeriesPaths = null);
 }
 
 public class DirectoryScanner : IDirectoryScanner
@@ -26,7 +30,15 @@ public class DirectoryScanner : IDirectoryScanner
         var dirsToEvaluate = DiscoverDirectories(normalizedLibPath, isCollectionBased);
         var (validEntries, ignoredEntries) = ClassifyDirectories(dirsToEvaluate, normalizedLibPath, isCollectionBased);
 
-        var existingMap = existingSeries.ToDictionary(s => Path.GetFullPath(s.Path), s => s, StringComparer.OrdinalIgnoreCase);
+        // Las rutas se comparan byte a byte, igual que el sistema de ficheros: en Linux
+        // "parte 2" y "Parte 2" son dos carpetas distintas y las dos pueden estar indexadas.
+        // Y se monta con el indexador, no con ToDictionary: Series.Path no es unico, y una
+        // clave repetida tumbaba el escaneo entero con ArgumentException.
+        var existingMap = new Dictionary<string, ExistingSeriesInfo>(StringComparer.Ordinal);
+        foreach (var existing in existingSeries)
+        {
+            existingMap[Path.GetFullPath(existing.Path)] = existing;
+        }
 
         var missingSeries = existingMap.Values
             .Where(s => !Directory.Exists(s.Path))
@@ -43,9 +55,9 @@ public class DirectoryScanner : IDirectoryScanner
             .Where(p => existingMap.ContainsKey(p));
 
         var candidatesToVisitOrAdd = validEntries
-            .Where(p => !missingSeries.Contains(p, StringComparer.OrdinalIgnoreCase))
+            .Where(p => !missingSeries.Contains(p, StringComparer.Ordinal))
             .Concat(existingEmptySeries)
-            .Distinct(StringComparer.OrdinalIgnoreCase);
+            .Distinct(StringComparer.Ordinal);
 
         var seriesToCreate = new List<string>();
         var seriesToVisit = new List<string>();
@@ -77,18 +89,33 @@ public class DirectoryScanner : IDirectoryScanner
     public WalkedSeries WalkSeries(
         string seriesPath,
         IReadOnlyDictionary<string, long> cachedDirMtimes,
-        IReadOnlyList<ExistingMediaInfo> existingMedia)
+        IReadOnlyList<ExistingMediaInfo> existingMedia,
+        IReadOnlyCollection<string>? otherSeriesPaths = null)
     {
         if (!Directory.Exists(seriesPath))
         {
             return WalkedSeries.Missing();
         }
 
-        var normalizedSeriesPath = Path.GetFullPath(seriesPath);
-        var observedDirMtimes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var normalizedSeriesPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(seriesPath));
+        var observedDirMtimes = new Dictionary<string, long>(StringComparer.Ordinal);
 
         var validFiles = new List<string>();
         var ignoredFiles = 0UL;
+
+        // Una carpeta que ya es serie por si misma no aporta tomos a la de arriba. Sin este
+        // corte, un libro suelto en la raiz la convierte en serie y el recorrido se lleva
+        // ademas cuanto cuelga de las series hijas: el mismo fichero acaba con dos filas
+        // y dos dueños, y los contadores de la biblioteca suman de mas.
+        var boundaries = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var other in otherSeriesPaths ?? [])
+        {
+            var normalizedOther = Path.TrimEndingDirectorySeparator(Path.GetFullPath(other));
+            if (!string.Equals(normalizedOther, normalizedSeriesPath, StringComparison.Ordinal))
+            {
+                boundaries.Add(normalizedOther);
+            }
+        }
 
         // Custom directory traversal that short-circuits unchanged subdirectories via mtime
         TraverseSeriesDirectories(
@@ -97,12 +124,14 @@ public class DirectoryScanner : IDirectoryScanner
             cachedDirMtimes,
             observedDirMtimes,
             validFiles,
+            boundaries,
             ref ignoredFiles);
 
-        var existingMediaMap = existingMedia.ToDictionary(
-            m => Path.GetFullPath(m.Path),
-            m => m,
-            StringComparer.OrdinalIgnoreCase);
+        var existingMediaMap = new Dictionary<string, ExistingMediaInfo>(StringComparer.Ordinal);
+        foreach (var existing in existingMedia)
+        {
+            existingMediaMap[Path.GetFullPath(existing.Path)] = existing;
+        }
 
         var mediaToCreate = new List<string>();
         var mediaToVisit = new List<string>();
@@ -157,6 +186,7 @@ public class DirectoryScanner : IDirectoryScanner
         IReadOnlyDictionary<string, long> cachedMtimes,
         Dictionary<string, long> observedMtimes,
         List<string> validFiles,
+        IReadOnlySet<string> boundaries,
         ref ulong ignoredFiles)
     {
         var normalizedCurrent = Path.GetFullPath(currentDir);
@@ -164,7 +194,7 @@ public class DirectoryScanner : IDirectoryScanner
         if (!dirInfo.Exists)
             return;
 
-        var isRoot = string.Equals(normalizedCurrent, rootDir, StringComparison.OrdinalIgnoreCase);
+        var isRoot = string.Equals(normalizedCurrent, rootDir, StringComparison.Ordinal);
         var currentMtime = new DateTimeOffset(dirInfo.LastWriteTimeUtc).ToUnixTimeSeconds();
 
         var didChange = !cachedMtimes.TryGetValue(normalizedCurrent, out var prevMtime) || prevMtime != currentMtime;
@@ -209,12 +239,18 @@ public class DirectoryScanner : IDirectoryScanner
                     continue;
                 }
 
+                if (boundaries.Contains(Path.TrimEndingDirectorySeparator(Path.GetFullPath(subDirFullName))))
+                {
+                    continue;
+                }
+
                 TraverseSeriesDirectories(
                     subDirFullName,
                     rootDir,
                     cachedMtimes,
                     observedMtimes,
                     validFiles,
+                    boundaries,
                     ref ignoredFiles);
             }
         }
@@ -259,7 +295,7 @@ public class DirectoryScanner : IDirectoryScanner
                 continue;
             }
 
-            var isRoot = string.Equals(normalizedDir, normalizedLibPath, StringComparison.OrdinalIgnoreCase);
+            var isRoot = string.Equals(normalizedDir, normalizedLibPath, StringComparison.Ordinal);
             var checkDeep = isCollectionBased && !isRoot;
 
             bool isValid = checkDeep

@@ -53,18 +53,47 @@ public class MangaBakaCatalog : IMangaBakaCatalog
     {
         if (!IsAvailable) return 0;
 
+        var path = _options.ResolveSqlitePath();
+        var stamp = ReadStamp(path);
+        if (_countCache is { } cached && cached.Stamp == stamp) return cached.Total;
+
         try
         {
             await using var connection = OpenReadOnly();
             await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT COUNT(*) FROM series";
+            command.CommandText = await HasSearchIndexAsync(connection, cancellationToken)
+                ? "SELECT COUNT(*) FROM series_fts_docsize"
+                : "SELECT COALESCE(MAX(rowid), 0) FROM series";
+
             var result = await command.ExecuteScalarAsync(cancellationToken);
-            return result is long count ? count : 0;
+            var total = result is long value ? value : 0;
+
+            _countCache = (stamp, total);
+            return total;
         }
         catch (SqliteException ex)
         {
             _logger.LogWarning(ex, "Could not count the MangaBaka dump");
             return 0;
+        }
+    }
+
+    /// <summary>
+    /// El volcado no cambia mientras no se vuelva a ingerir, asi que el recuento se guarda.
+    /// La marca es tamaño y fecha del fichero: si entra un volcado nuevo, deja de valer.
+    /// </summary>
+    private static (string Stamp, long Total)? _countCache;
+
+    private static string ReadStamp(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return $"{info.Length}:{info.LastWriteTimeUtc.Ticks}";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return string.Empty;
         }
     }
 
@@ -153,7 +182,7 @@ public class MangaBakaCatalog : IMangaBakaCatalog
             Status = candidate.Status,
             CoverUrl = candidate.CoverUrl,
             Rating = candidate.Rating,
-            Description = candidate.Description,
+            Description = ReadString(reader, 9),
             Authors = candidate.Authors,
             Genres = candidate.Genres,
             Artists = ReadString(reader, 12),

@@ -39,6 +39,16 @@ public static class TrashEndpoints
                 : Results.BadRequest(new { error = "No se pudo restaurar: caduco, o ya existe algo con ese nombre." });
         });
 
+        group.MapDelete("/{id}", (
+            string id,
+            HttpContext httpContext,
+            [FromServices] ITrashService trash) =>
+        {
+            if (!IsAllowed(httpContext)) return Forbidden();
+
+            return trash.PurgeNow(id) ? Results.NoContent() : Results.NotFound();
+        });
+
         return group;
     }
 

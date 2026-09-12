@@ -55,6 +55,14 @@ export default function ReaderPage() {
 	const step = settings.mode === "Double" ? 2 : 1;
 	const rtl = settings.direction === "RightToLeft";
 
+	/**
+	 * Refleja la página sobre la barra. Leyendo de derecha a izquierda la página 1 esta a la
+	 * derecha, y MUI no invierte el Slider por la propiedad CSS `direction`: coloca el pulgar
+	 * calculando un porcentaje desde la izquierda. Se invierte el valor, que ademas mantiene
+	 * el arrastre coherente con lo que se ve.
+	 */
+	const mirrorPage = (value: number) => (rtl ? Math.max(1, totalPages) + 1 - value : value);
+
 	// Proporción real de cada página ya cargada. Sin endpoint que exponga `MediaPages`,
 	// se aprende de las imágenes que ya llegaron y se reserva el hueco con la última
 	// conocida: es lo que evita el salto de maquetación al pasar de página. Va en estado
@@ -274,15 +282,30 @@ export default function ReaderPage() {
 		setLastRatio(ratio);
 	};
 
-	const imageSx = useMemo(() => {
+	// El marco es quien fija el tamaño y la imagen solo lo rellena. Antes el marco se
+	// dimensionaba por la imagen y la imagen por el marco, asi que la medida acababa
+	// saliendo de la altura disponible y las tres opciones daban lo mismo en pantalla.
+	const strip = settings.mode === "ContinuousVertical";
+
+	const frameSx = useMemo(() => {
+		if (strip) return { width: "100%", height: "auto" };
 		if (settings.fit === "width") {
+			// En doble pagina el ancho se reparte entre las dos hojas.
+			return { width: settings.mode === "Double" ? "50%" : "100%", height: "auto" };
+		}
+		if (settings.fit === "original") return { width: "auto", height: "auto" };
+		return { height: "100%", width: "auto", maxHeight: "100%" };
+	}, [settings.fit, settings.mode, strip]);
+
+	const imageSx = useMemo(() => {
+		if (strip || settings.fit === "width") {
 			return { width: "100%", height: "auto", maxWidth: "100%" };
 		}
 		if (settings.fit === "original") {
-			return { width: "auto", height: "auto", maxWidth: "none" };
+			return { width: "auto", height: "auto", maxWidth: "none", maxHeight: "none" };
 		}
-		return { height: "100%", width: "auto", maxHeight: "100%", objectFit: "contain" as const };
-	}, [settings.fit]);
+		return { height: "100%", width: "auto", maxHeight: "100%", maxWidth: "100%", objectFit: "contain" as const };
+	}, [settings.fit, strip]);
 
 	const renderPage = (pageNumber: number, key: string) => {
 		if (!media || pageNumber > totalPages || pageNumber < 1) return null;
@@ -296,8 +319,9 @@ export default function ReaderPage() {
 					display: "flex",
 					alignItems: "center",
 					justifyContent: "center",
-					maxHeight: settings.mode === "ContinuousVertical" ? "none" : "100%",
 					flexShrink: 0,
+					minWidth: 0,
+					...frameSx,
 				}}
 			>
 				<Box
@@ -423,7 +447,9 @@ export default function ReaderPage() {
 				position: "fixed",
 				inset: 0,
 				backgroundColor: settings.background,
-				overflow: settings.mode === "ContinuousVertical" || settings.fit === "original" ? "auto" : "hidden",
+				// Ajustando a lo alto siempre cabe; en los otros dos modos la pagina puede
+				// sobresalir y sin desplazamiento no habria forma de llegar al final.
+				overflow: strip || settings.fit !== "height" ? "auto" : "hidden",
 				cursor: uiVisible ? "default" : "none",
 			}}
 		>
@@ -538,7 +564,7 @@ export default function ReaderPage() {
 								sx={{
 									position: "absolute",
 									bottom: 28,
-									left: `${String(((sliderValue - 1) / Math.max(1, totalPages - 1)) * 100)}%`,
+									left: `${String(((mirrorPage(sliderValue) - 1) / Math.max(1, totalPages - 1)) * 100)}%`,
 									transform: "translateX(-50%)",
 									width: 80,
 									border: `1px solid ${DS.red}`,
@@ -556,14 +582,13 @@ export default function ReaderPage() {
 						)}
 
 						<Slider
-							value={sliderValue}
+							value={mirrorPage(sliderValue)}
 							min={1}
 							max={Math.max(1, totalPages)}
-							onChange={(_, value) => setSliderValue(value)}
-							onChangeCommitted={(_, value) => goTo(value)}
+							onChange={(_, value) => setSliderValue(mirrorPage(value))}
+							onChangeCommitted={(_, value) => goTo(mirrorPage(value))}
 							sx={{
 								color: DS.red,
-								direction: rtl ? "rtl" : "ltr",
 								"& .MuiSlider-thumb": { borderRadius: 0, width: 10, height: 18 },
 								"& .MuiSlider-rail": { backgroundColor: DS.border },
 							}}

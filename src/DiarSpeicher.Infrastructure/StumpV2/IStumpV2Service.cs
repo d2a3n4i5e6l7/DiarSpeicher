@@ -7,7 +7,7 @@ namespace DiarSpeicher.Infrastructure.StumpV2;
 
 public interface IStumpV2Service
 {
-    Task<StumpPageResponse<StumpMediaDto>> GetMediaAsync(AuthUser user, int page, int pageSize, CancellationToken ct = default);
+    Task<StumpPageResponse<StumpMediaDto>> GetMediaAsync(AuthUser user, int page, int pageSize, bool newestFirst = false, CancellationToken ct = default);
     Task<StumpMediaDto?> GetMediaByIdAsync(AuthUser user, string id, CancellationToken ct = default);
     Task<List<StumpMediaDto>> GetKeepReadingAsync(AuthUser user, CancellationToken ct = default);
     Task<StumpPageResponse<StumpSeriesDto>> GetSeriesAsync(AuthUser user, string? libraryId, int page, int pageSize, CancellationToken ct = default);
@@ -37,6 +37,8 @@ public interface IStumpV2Service
     Task<StumpMissingReportDto> GetMissingAsync(AuthUser user, string libraryId, CancellationToken ct = default);
 
     Task<int> PurgeMissingAsync(AuthUser user, string libraryId, CancellationToken ct = default);
+
+    Task<int> PurgeIndexUnderPathAsync(AuthUser user, string path, CancellationToken ct = default);
     Task<UploadResult> UploadToLibraryAsync(AuthUser user, string libraryId, string? subpath, IEnumerable<StumpUploadFileInput> files, CancellationToken ct = default);
     Task<UploadResult> UploadToLibraryAsync(AuthUser user, string libraryId, string? subpath, IAsyncEnumerable<StumpUploadFileInput> files, CancellationToken ct = default);
     Task<StumpSystemStatusDto> GetSystemStatusAsync(CancellationToken ct = default);

@@ -338,6 +338,14 @@ function getCssBaselineStyles(mode: PaletteMode) {
 				animation: "none",
 				top: 0,
 			},
+			".ds-attention": {
+				animation: "none",
+				borderColor: "var(--ds-warn)",
+			},
+			".ds-dots span": {
+				animation: "none",
+				opacity: 1,
+			},
 		},
 
 		/* Puntos suspensivos de terminal de fosforo: verde fijo, no el rojo de la marca,
@@ -358,6 +366,21 @@ function getCssBaselineStyles(mode: PaletteMode) {
 			"34%, 100%": { opacity: 0.15 },
 		},
 
+		/* Llamada de atencion en ambar: algo pide revision y no es un error todavia.
+		 * Parpadea el borde y el halo, nunca el texto, que se vuelve ilegible. */
+		".ds-attention": {
+			animation: "ds-attention 1.6s ease-in-out infinite",
+		},
+		"@keyframes ds-attention": {
+			"0%, 100%": {
+				borderColor: "var(--ds-warn-dark)",
+				boxShadow: "0 0 0 0 rgba(var(--ds-warn-rgb), 0)",
+			},
+			"50%": {
+				borderColor: "var(--ds-warn)",
+				boxShadow: "0 0 8px 0 rgba(var(--ds-warn-rgb), 0.55)",
+			},
+		},
 		/* --- Pastilla monoespaciada para IDs, hashes y contadores --- */
 		".ds-pill-mono": {
 			display: "inline-flex",

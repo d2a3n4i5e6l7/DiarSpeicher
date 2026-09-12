@@ -26,7 +26,8 @@ import LinkOffIcon from "@mui/icons-material/LinkOff";
 import EditIcon from "@mui/icons-material/Edit";
 import ImageIcon from "@mui/icons-material/Image";
 import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useScanProgress } from "../catalog/useScanProgress";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import HudFrame from "../components/HudFrame";
 import MediaCard from "../components/MediaCard";
@@ -162,8 +163,10 @@ export default function SeriesDetailPage() {
 		};
 	}, [id, requestKey]);
 
-	const fresh = result?.key === requestKey ? result : null;
-	const loading = fresh === null;
+	// Lo anterior se queda en pantalla mientras llega la recarga: vaciarla en cada lote del
+	// escaneo dejaba la rejilla parpadeando. El giro solo en la primera carga.
+	const fresh = result;
+	const loading = result === null;
 	const series = fresh?.series ?? null;
 	const volumes = fresh?.volumes ?? EMPTY_VOLUMES;
 	const error = fresh?.error ?? null;
@@ -177,6 +180,34 @@ export default function SeriesDetailPage() {
 		const nextVolume = volumes.find((v) => !v.isCompleted) ?? volumes[0];
 		return { totalPages, totalSize, readCount, percent, nextVolume };
 	}, [volumes]);
+
+	// Mientras el escáner está en esta serie, la pestaña de tomos pinta un hueco por cada
+	// volumen que viene. El identificador lo manda el propio evento: por nombre no valdría,
+	// dos bibliotecas pueden tener series que se llaman igual.
+	const scan = useScanProgress(series?.libraryId ?? "");
+	const indexing =
+		scan !== null && !scan.finished && scan.totalMedia > 0 && scan.currentSeriesId === series?.id
+			? scan
+			: null;
+
+	// Cada lote deja tomos ya escritos en la base, así que se relee cuando el contador avanza:
+	// sin esto el hueco se queda diciendo LISTO y nunca llega a enseñar su portada. Se apoya
+	// en que la recarga ya no vacía la pantalla, o esto sería un parpadeo por lote.
+	const completedMedia = indexing?.completedMedia ?? null;
+	const wasIndexing = useRef(false);
+	useEffect(() => {
+		if (completedMedia !== null) {
+			wasIndexing.current = true;
+			setReloadToken((token) => token + 1);
+			return;
+		}
+
+		if (wasIndexing.current) {
+			wasIndexing.current = false;
+			setReloadToken((token) => token + 1);
+		}
+	}, [completedMedia]);
+
 
 	if (loading) {
 		return (
@@ -487,6 +518,45 @@ export default function SeriesDetailPage() {
 							width="100%"
 						/>
 					))}
+
+					{indexing !== null &&
+						Array.from({ length: indexing.totalMedia }, (_, slot) => {
+							const done = slot < indexing.completedMedia;
+							const active = slot === indexing.completedMedia;
+
+							return (
+								<Box
+									key={`hueco-${String(slot)}`}
+									sx={{
+										position: "relative",
+										overflow: "hidden",
+										aspectRatio: "2 / 3",
+										display: "flex",
+										alignItems: "center",
+										justifyContent: "center",
+										backgroundColor: DS.bgSunken,
+										border: `1px solid ${done ? DS.red : DS.borderSoft}`,
+										opacity: done ? 1 : 0.6,
+										transition: "opacity 0.3s ease, border-color 0.3s ease",
+									}}
+								>
+									<Typography
+										sx={{
+											fontFamily: "'Rajdhani', sans-serif",
+											fontSize: "12px",
+											letterSpacing: "1px",
+											color: active ? DS.redGlow : DS.muted,
+										}}
+									>
+										{done ? "LISTO" : active ? "INDEXANDO" : String(slot + 1).padStart(2, "0")}
+									</Typography>
+
+									{/* Capa aparte: .ds-scanline se coloca en absoluto sobre su padre, asi que
+									    puesta en la propia tarjeta la sacaria de la rejilla. */}
+									{active && <Box className="ds-scanline" />}
+								</Box>
+							);
+						})}
 				</Box>
 			)}
 

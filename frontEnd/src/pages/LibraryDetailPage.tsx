@@ -84,7 +84,9 @@ export default function LibraryDetailPage() {
 	const [mediaDir, setMediaDir] = useState<SortDirection>("desc");
 	const [reloadToken, setReloadToken] = useState(0);
 
-	const progress = useScanProgress(id, true);
+	// El token sube al lanzar un escaneo: es lo que hace que se vuelva a preguntar y,
+	// si hay algo en marcha, se abra el flujo.
+	const progress = useScanProgress(id, reloadToken);
 
 	// La clave lleva el numero de series ya hechas. El progreso baja por SSE, pero las
 	// series y los tomos se leen de la base de datos, asi que la recarga se engancha a que
@@ -94,6 +96,7 @@ export default function LibraryDetailPage() {
 		id,
 		String(reloadToken),
 		String(progress?.completedSeries ?? 0),
+		String(progress?.completedMedia ?? 0),
 		progress?.finished ? "done" : "live",
 	].join("#");
 
@@ -136,11 +139,14 @@ export default function LibraryDetailPage() {
 		};
 	}, [id, requestKey]);
 
-	const fresh = loaded?.key === requestKey ? loaded : null;
-	const loading = fresh === null;
-	const library = fresh?.library ?? null;
-	const series = fresh?.series ?? EMPTY_SERIES;
-	const volumes = fresh?.volumes ?? EMPTY_VOLUMES;
+	// Mientras llega la recarga se sigue enseñando lo anterior. Vaciar la pantalla en cada
+	// lote del escaneo la dejaba parpadeando: la rejilla desaparecia y volvia varias veces
+	// por serie. Solo la primera carga, cuando no hay nada que enseñar, muestra el giro.
+	const shown = loaded;
+	const loading = loaded === null;
+	const library = shown?.library ?? null;
+	const series = shown?.series ?? EMPTY_SERIES;
+	const volumes = shown?.volumes ?? EMPTY_VOLUMES;
 	// El estado de escaneo vive en memoria, no en la base de datos: si el proceso muere,
 	// la verdad es que ya no escanea nada, y una fila persistida mentiria para siempre.
 	const scanning = progress !== null && !progress.finished;
@@ -177,10 +183,10 @@ export default function LibraryDetailPage() {
 		);
 	}
 
-	if (fresh.error || !library) {
+	if (shown?.error !== undefined || !library) {
 		return (
 			<Box sx={{ maxWidth: 800, mx: "auto" }}>
-				<Alert severity="error">{fresh.error ?? "La biblioteca no existe o no es accesible."}</Alert>
+				<Alert severity="error">{shown?.error ?? "La biblioteca no existe o no es accesible."}</Alert>
 				<Button component={RouterLink} to="/libraries" startIcon={<ArrowBackIcon />} sx={{ mt: 2 }}>
 					VOLVER A BIBLIOTECAS
 				</Button>
@@ -190,6 +196,14 @@ export default function LibraryDetailPage() {
 
 	const visibleSeries = filterAndSortSeries(series, query, seriesSort, seriesDir);
 	const visibleVolumes = filterAndSortMedia(volumes, query, mediaSort, mediaDir);
+
+	// Mientras se indexa, la rejilla de tomos enseña tantos huecos como falten para el total
+	// que anuncia el escaner, y el barrido va en el primero: el que se esta midiendo ahora.
+	const indexingMedia = scanning ? progress?.currentMedia : undefined;
+	const pendingVolumes =
+		scanning && progress !== null && progress.totalMedia > 0
+			? Math.max(0, progress.totalMedia - visibleVolumes.length)
+			: 0;
 	const totalPagesCount = volumes.reduce((sum, v) => sum + v.pages, 0);
 	const totalSize = volumes.reduce((sum, v) => sum + v.size, 0);
 
@@ -442,6 +456,15 @@ export default function LibraryDetailPage() {
 								coverUrl={mediaApi.thumbnailUrl(item.id)}
 								progress={readProgress(item)}
 								width="100%"
+								scanning={item.name === indexingMedia}
+							/>
+						))}
+
+						{Array.from({ length: pendingVolumes }, (_, slot) => (
+							<PendingVolume
+								key={`tomo-pendiente-${String(slot)}`}
+								label={`TOMO ${String(visibleVolumes.length + slot + 1).padStart(2, "0")}`}
+								active={slot === 0}
 							/>
 						))}
 					</Box>
@@ -534,6 +557,42 @@ function usePendingSeries(library: LibraryItem | null, scanning: boolean, existi
 const EMPTY_PENDING: PreviewSeries[] = [];
 
 /** Hueco de una serie aun sin indexar: sin portada porque todavia no se ha abierto ningun tomo. */
+/**
+ * Hueco de un tomo que el escaner aun no ha creado. El barrido solo va en el que se esta
+ * midiendo: encendidos todos, la rejilla no diria por donde va.
+ */
+function PendingVolume({ label, active }: Readonly<{ label: string; active: boolean }>) {
+	return (
+		<Box sx={{ opacity: active ? 0.9 : 0.45 }}>
+			<Box
+				sx={{
+					position: "relative",
+					aspectRatio: "2 / 3",
+					backgroundImage: DS.gradientCard,
+					border: `1px dashed ${active ? DS.borderRed : DS.border}`,
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "center",
+				}}
+			>
+				{active && <Box className="ds-scanline" />}
+				<LibraryBooksIcon sx={{ fontSize: 26, color: active ? DS.borderRed : DS.border }} />
+			</Box>
+			<Typography
+				noWrap
+				sx={{
+					mt: 1,
+					fontFamily: "'JetBrains Mono', monospace",
+					fontSize: "11px",
+					color: active ? DS.redGlow : DS.subtle,
+				}}
+			>
+				{label}
+			</Typography>
+		</Box>
+	);
+}
+
 function PendingCard({ name, volumeCount }: Readonly<{ name: string; volumeCount: number }>) {
 	return (
 		<Box sx={{ opacity: 0.55 }}>

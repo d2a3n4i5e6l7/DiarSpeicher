@@ -49,6 +49,10 @@ public static class StumpV2Endpoints
         CompletedSeries = snapshot.Progress.CompletedSeries,
         TotalSeries = snapshot.Progress.TotalSeries,
         CurrentSeries = snapshot.Progress.CurrentSeries,
+        CompletedMedia = snapshot.Progress.CompletedMedia,
+        TotalMedia = snapshot.Progress.TotalMedia,
+        CurrentMedia = snapshot.Progress.CurrentMedia,
+        CurrentSeriesId = snapshot.Progress.CurrentSeriesId,
         Message = snapshot.Progress.Message,
         Percentage = snapshot.Progress.Percentage,
         ElapsedSeconds = (int)snapshot.Elapsed.TotalSeconds,
@@ -105,10 +109,11 @@ public static class StumpV2Endpoints
             [FromServices] IStumpV2Service service,
             [FromQuery] int page = 0,
             [FromQuery] int pageSize = 20,
+            [FromQuery] bool newestFirst = false,
             CancellationToken ct = default) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            var result = await service.GetMediaAsync(user, page, pageSize, ct);
+            var result = await service.GetMediaAsync(user, page, pageSize, newestFirst, ct);
             return Results.Ok(result);
         });
 
@@ -172,7 +177,11 @@ public static class StumpV2Endpoints
             var file = await service.GetMediaFileAsync(user, id, ct);
             if (file == null) return Results.NotFound();
 
-            return Results.File(file.Value.Path, file.Value.ContentType, enableRangeProcessing: true);
+            return Results.File(
+                file.Value.Path,
+                contentType: file.Value.ContentType,
+                fileDownloadName: Path.GetFileName(file.Value.Path),
+                enableRangeProcessing: true);
         });
 
         group.MapPut("/media/{id}/progress", async (

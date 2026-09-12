@@ -13,6 +13,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="$ROOT/dist"
 IMAGE="diarspeicher:latest"
+BUILDER="diarspeicher"
 
 cd "$ROOT"
 
@@ -21,6 +22,65 @@ ARCHITECTURE="$(grep -E '^ARCHITECTURE=' .env | tail -n 1 | cut -d= -f2- | tr -d
 : "${ARCHITECTURE:?Falta ARCHITECTURE en .env}"
 
 log() { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
+
+# La etapa que arma el rootfs corre en la plataforma de destino: recolecta las librerias
+# nativas del binario y para eso tiene que ejecutarlo. Compilar arm64 desde x86 exige
+# emulacion, y sin ella el build muere con "exec /bin/sh: exec format error" sin decir
+# por que. Esto lo prepara solo, y no toca nada si ya esta puesto.
+ensure_emulation() {
+    local target="$1"
+    local target_arch host_arch handler
+
+    target_arch="${target#*/}"
+
+    case "$(uname -m)" in
+        x86_64 | amd64) host_arch="amd64" ;;
+        aarch64 | arm64) host_arch="arm64" ;;
+        *) host_arch="$(uname -m)" ;;
+    esac
+
+    if [ "$target_arch" = "$host_arch" ]; then
+        return 0
+    fi
+
+    case "$target_arch" in
+        arm64) handler="qemu-aarch64" ;;
+        arm | arm/v7 | armv7) handler="qemu-arm" ;;
+        amd64) handler="qemu-x86_64" ;;
+        *) handler="" ;;
+    esac
+
+    if [ -n "$handler" ] && [ -e "/proc/sys/fs/binfmt_misc/$handler" ]; then
+        log "Emulacion para $target_arch ya registrada ($handler)"
+    else
+        log "Registrando emulacion para $target_arch (pide sudo de Docker: --privileged)"
+        docker run --privileged --rm tonistiigi/binfmt --install "$target_arch"
+    fi
+
+    # El driver por defecto solo anuncia las plataformas que sabe ejecutar. Si tras
+    # registrar qemu sigue sin listar la de destino, hace falta un builder aparte.
+    if docker buildx inspect 2>/dev/null | grep -q "$target"; then
+        log "El builder actual ya sirve $target"
+        return 0
+    fi
+
+    if ! docker buildx inspect "$BUILDER" >/dev/null 2>&1; then
+        log "Creando el builder '$BUILDER' (driver docker-container)"
+        docker buildx create --name "$BUILDER" --driver docker-container >/dev/null
+    fi
+
+    docker buildx use "$BUILDER"
+    docker buildx inspect --bootstrap >/dev/null
+
+    if ! docker buildx inspect | grep -q "$target"; then
+        echo "El builder '$BUILDER' sigue sin ofrecer $target. Revisa la emulacion." >&2
+        exit 1
+    fi
+
+    log "Builder '$BUILDER' listo para $target"
+}
+
+ensure_emulation "$ARCHITECTURE"
 
 log "Construyendo la imagen ($ARCHITECTURE)"
 docker buildx build \

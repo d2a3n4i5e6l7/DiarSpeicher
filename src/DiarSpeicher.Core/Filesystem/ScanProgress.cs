@@ -21,6 +21,19 @@ public record ScanProgressEvent
     public int CompletedSeries { get; init; }
     public int TotalSeries { get; init; }
     public string? CurrentSeries { get; init; }
+
+    /// <summary>
+    /// Grano de tomo dentro de la serie en curso. Con solo el grano de serie, una biblioteca
+    /// de una sola carpeta con treinta tomos se pasa el escaneo entero diciendo "0 de 1", y
+    /// el cliente no tiene con que dibujar por donde va.
+    /// </summary>
+    public int CompletedMedia { get; init; }
+    public int TotalMedia { get; init; }
+    public string? CurrentMedia { get; init; }
+
+    /// <summary>Identifica la serie sin depender del nombre, que no es unico.</summary>
+    public string? CurrentSeriesId { get; init; }
+
     public string? Message { get; init; }
     public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
 

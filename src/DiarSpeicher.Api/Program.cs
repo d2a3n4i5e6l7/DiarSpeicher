@@ -21,8 +21,17 @@ using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+var configuredConnection = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Data Source=diarspeicher.db;Cache=Shared;Mode=ReadWriteCreate;";
+
+// Las claves ajenas se exigen aqui y no en la cadena de conexion, que llega por variable de
+// entorno y puede venir de cualquier sitio. De ellas depende, por ejemplo, que las filas de
+// MediaPages se vayan con su tomo: nadie las borra a mano, las seis rutas que quitan un
+// medio confian en el ON DELETE CASCADE de la tabla.
+var connectionString = new SqliteConnectionStringBuilder(configuredConnection)
+{
+    ForeignKeys = true
+}.ToString();
 
 const int SqliteMaxBatchSize = 200;
 

@@ -37,6 +37,9 @@ public interface ITrashService
     TrashOutcome TryMoveToTrash(string path, out TrashEntry? entry);
     IReadOnlyList<TrashEntry> List();
     bool Restore(string id);
+
+    /// <summary>Lo vacia ya, sin esperar al plazo.</summary>
+    bool PurgeNow(string id);
     void PurgeExpired();
 }
 
@@ -230,6 +233,24 @@ public sealed class TrashService : ITrashService
 
                     return false;
                 }
+            }
+        }
+
+        return false;
+    }
+
+    public bool PurgeNow(string id)
+    {
+        lock (_gate)
+        {
+            foreach (var slot in EnumerateSlots())
+            {
+                if (ReadEntry(slot)?.Id != id) continue;
+
+                TryRemoveDirectory(slot);
+                _logger.LogInformation("Papelera vaciada a mano: {Id}", id);
+
+                return true;
             }
         }
 

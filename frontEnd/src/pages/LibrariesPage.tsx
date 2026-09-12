@@ -31,6 +31,7 @@ import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import FolderIcon from "@mui/icons-material/Folder";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import AutoStoriesIcon from "@mui/icons-material/AutoStories";
 import CollectionsBookmarkIcon from "@mui/icons-material/CollectionsBookmark";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -54,7 +55,7 @@ import LibraryConfigForm from "../components/LibraryConfigForm";
 import FolderPickerDialog from "../components/FolderPickerDialog";
 import UploadPanel from "../components/UploadPanel";
 import DeleteScopeNotice from "../components/DeleteScopeNotice";
-import { scanLabel } from "../catalog/useScanProgress";
+import { scanLabel, formatDuration } from "../catalog/useScanProgress";
 
 const SCAN_POLL_MS = 3000;
 
@@ -80,6 +81,19 @@ export default function LibrariesPage() {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
+
+	// Los avisos se van solos: se quedaban en pantalla hasta recargar la pagina.
+	useEffect(() => {
+		if (!notice) return;
+
+		const timer = window.setTimeout(() => {
+			setNotice(null);
+		}, 10000);
+
+		return () => {
+			window.clearTimeout(timer);
+		};
+	}, [notice]);
 	const [scanningIds, setScanningIds] = useState<string[]>([]);
 
 	const [query, setQuery] = useState("");
@@ -117,6 +131,9 @@ export default function LibrariesPage() {
 			]);
 			setLibraries(list ?? []);
 			setActiveScans(scans);
+			// Un escaneo diminuto termina antes del primer sondeo: el id se suelta cuando ya
+			// no aparece en la cola del servidor, no con un temporizador a ojo.
+			setScanningIds((prev) => prev.filter((id) => scans.some((scan) => scan.libraryId === id)));
 			if (!silent) setError(null);
 		} catch (err: unknown) {
 			setError(err instanceof Error ? err.message : "Error cargando las bibliotecas.");
@@ -152,7 +169,7 @@ export default function LibrariesPage() {
 	}, []);
 
 	useEffect(() => {
-		const anyScanning = activeScans.length > 0;
+		const anyScanning = activeScans.length > 0 || scanningIds.length > 0;
 		if (!anyScanning) {
 			if (pollRef.current !== null) {
 				window.clearInterval(pollRef.current);
@@ -173,7 +190,7 @@ export default function LibrariesPage() {
 				pollRef.current = null;
 			}
 		};
-	}, [activeScans.length, load]);
+	}, [activeScans.length, scanningIds.length, load]);
 
 	const openForCreate = () => {
 		setEditing(null);
@@ -268,7 +285,6 @@ export default function LibrariesPage() {
 			await load(true);
 		} catch (err: unknown) {
 			setError(err instanceof Error ? err.message : "No se pudo encolar el escaneo.");
-		} finally {
 			setScanningIds((prev) => prev.filter((id) => id !== library.id));
 		}
 	};
@@ -367,7 +383,11 @@ export default function LibrariesPage() {
 					const active = activeScans.find((scan) => scan.libraryId === library.id);
 					const queued = active?.queued ?? false;
 					const scanning = active !== undefined && !queued;
-					const busy = scanning || scanningIds.includes(library.id);
+					const missing = library.missingSeries + library.missingVolumes;
+					// Desde que entra en la cola hasta que acaba. Antes solo cubria la fase de
+					// escaneo, asi que el engranaje se paraba mientras esperaba turno y entre
+					// una serie y la siguiente, justo cuando mas falta hace saber que sigue vivo.
+					const busy = active !== undefined || scanningIds.includes(library.id);
 
 					let statusDotColor = "var(--ds-ok)";
 					let statusText = "READY";
@@ -419,6 +439,21 @@ export default function LibrariesPage() {
 								>
 									EN COLA
 								</Box>
+							)}
+
+							{missing > 0 && !scanning && (
+								<Tooltip title={`${String(missing)} entradas del índice ya no están en el disco`}>
+									<InfoOutlinedIcon
+										sx={{
+											position: "absolute",
+											top: 8,
+											right: 8,
+											zIndex: 3,
+											fontSize: 18,
+											color: "var(--ds-warn)",
+										}}
+									/>
+								</Tooltip>
 							)}
 
 							{active && !queued && (
@@ -487,13 +522,20 @@ export default function LibrariesPage() {
 									</Box>
 
 								<Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap", gap: 0.5 }}>
-									<Tooltip title="Ver series y tomos">
+									<Tooltip
+										title={
+											missing > 0
+												? `${String(missing)} entradas sin carpeta: entra y pulsa REVISAR`
+												: "Ver series y tomos"
+										}
+									>
 										<IconButton
 											size="small"
 											component={RouterLink}
 											to={`/libraries/${library.id}`}
+											className={missing > 0 ? "ds-attention" : undefined}
 											sx={{
-												color: "var(--ds-text-2)",
+												color: missing > 0 ? "var(--ds-warn)" : "var(--ds-text-2)",
 												border: "1px solid var(--ds-border)",
 												borderRadius: "2px",
 												p: 0.6,
@@ -529,6 +571,9 @@ export default function LibrariesPage() {
 												<SyncIcon
 													fontSize="small"
 													sx={{
+														// Ambar mientras trabaja: el rojo es el color de todo lo
+														// demas en la tarjeta y ahi no se distinguiria.
+														color: busy ? "var(--ds-warn)" : "inherit",
 														animation: busy ? "spin 1.2s linear infinite" : "none",
 														"@keyframes spin": {
 															"0%": { transform: "rotate(0deg)" },
@@ -806,10 +851,22 @@ export default function LibrariesPage() {
 										sx={{
 											fontFamily: "'JetBrains Mono', monospace",
 											fontSize: "10px",
-											color: "var(--ds-subtle)",
+											color: busy ? "var(--ds-warn)" : "var(--ds-subtle)",
 										}}
 									>
-										{formatDate(library.lastScannedAt)}
+										{!busy && formatDate(library.lastScannedAt)}
+										{busy && queued && "en cola"}
+										{busy && !queued && active?.etaSeconds !== undefined && `quedan ~${formatDuration(active.etaSeconds)}`}
+										{busy && !queued && active?.etaSeconds === undefined && (
+											<>
+												{"calculando ETA"}
+												<Box component="span" className="ds-dots">
+													<span>.</span>
+													<span>.</span>
+													<span>.</span>
+												</Box>
+											</>
+										)}
 									</Typography>
 								</Box>
 							</CardContent>
@@ -1378,7 +1435,6 @@ function ScanPreview({
 
 	const fresh = preview?.key === key ? preview : null;
 	const stale = typedPath.length > 0 && typedPath !== path;
-	const duplicated = fresh?.data?.series.some((serie) => serie.overlapsParent) ?? false;
 
 	return (
 		<Box
@@ -1455,9 +1511,7 @@ function ScanPreview({
 									borderBottom: "1px solid var(--ds-border-soft)",
 								}}
 							>
-								<CollectionsBookmarkIcon
-									sx={{ fontSize: 15, color: serie.overlapsParent ? "var(--ds-warn)" : "var(--ds-red-light)", flexShrink: 0 }}
-								/>
+								<CollectionsBookmarkIcon sx={{ fontSize: 15, color: "var(--ds-red-light)", flexShrink: 0 }} />
 								<Box sx={{ minWidth: 0, flexGrow: 1 }}>
 									<Typography
 										noWrap
@@ -1479,13 +1533,6 @@ function ScanPreview({
 							</Box>
 						))}
 					</Box>
-
-					{duplicated && (
-						<Alert severity="warning" sx={{ mt: 1.5 }}>
-							Hay carpetas con tomos sueltos que además contienen subcarpetas con tomos. Las dos salen como
-							serie y los mismos ficheros se indexan dos veces. Prueba con «Por colecciones».
-						</Alert>
-					)}
 				</>
 			)}
 		</Box>
