@@ -125,6 +125,89 @@ public sealed class StumpSeriesDto
     [JsonPropertyName("description")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Description { get; set; }
+
+    /// <summary>
+    /// Marca del ultimo cambio de portada. El cliente la cuelga de la URL de la miniatura
+    /// para que el navegador no siga sirviendo la anterior desde su cache.
+    /// </summary>
+    [JsonPropertyName("coverUpdatedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CoverUpdatedAt { get; set; }
+
+    /// <summary>
+    /// Ficha externa, si la serie esta emparejada. Ausente mientras nadie la haya
+    /// emparejado, que es como el frontend distingue una serie sin identificar.
+    /// </summary>
+    [JsonPropertyName("metadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public StumpSeriesMetadataDto? Metadata { get; set; }
+}
+
+/// <summary>
+/// Lo que aporta el catalogo externo sobre una serie. <c>source</c> dice de donde salio,
+/// para que la interfaz pueda marcarlo y ofrecer revertirlo.
+/// </summary>
+public sealed class StumpSeriesMetadataDto
+{
+    [JsonPropertyName("source")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; set; }
+
+    /// <summary>Id en el catalogo externo, para reabrir la ficha de origen.</summary>
+    [JsonPropertyName("externalId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ExternalId { get; set; }
+
+    [JsonPropertyName("title")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Title { get; set; }
+
+    [JsonPropertyName("summary")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Summary { get; set; }
+
+    [JsonPropertyName("publisher")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Publisher { get; set; }
+
+    [JsonPropertyName("writers")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Writers { get; set; }
+
+    [JsonPropertyName("genres")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Genres { get; set; }
+
+    [JsonPropertyName("status")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Status { get; set; }
+
+    [JsonPropertyName("year")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Year { get; set; }
+
+    [JsonPropertyName("coverUrl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CoverUrl { get; set; }
+
+    [JsonPropertyName("link")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Link { get; set; }
+
+    /// <summary>Ultimo volumen publicado: con el se dice "3 de 12".</summary>
+    [JsonPropertyName("finalVolume")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? FinalVolume { get; set; }
+
+    /// <summary>Manga, novela, manhwa... tal como lo clasifica el catalogo externo.</summary>
+    [JsonPropertyName("type")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Type { get; set; }
+
+    /// <summary>Capitulos publicados en total.</summary>
+    [JsonPropertyName("totalChapters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TotalChapters { get; set; }
 }
 
 public sealed class StumpLibraryDto
@@ -305,6 +388,31 @@ public sealed class StumpUpdateLibraryInput
 
     [JsonPropertyName("config")]
     public StumpLibraryConfigDto? Config { get; set; }
+}
+
+/// <summary>
+/// Cuerpo de PUT /api/v2/series/{id}. Un campo nulo significa "no tocar".
+/// <para>
+/// El nombre de una serie sale del nombre de su carpeta, y ahi acaban cosas como
+/// "Accel World Tomos [01-08][Completo]" o, si la serie cuelga de la raiz de la
+/// biblioteca, el nombre de la propia biblioteca. El escaner solo lo escribe al crear la
+/// serie, nunca despues, asi que un renombrado a mano sobrevive a los rescaneos.
+/// </para>
+/// </summary>
+public sealed class StumpUpdateSeriesInput
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+}
+
+/// <summary>Cuerpo de PUT /api/v2/series/{id}/thumbnail: el tomo cuya portada se adopta.</summary>
+public sealed class StumpSeriesThumbnailInput
+{
+    [JsonPropertyName("mediaId")]
+    public string MediaId { get; set; } = string.Empty;
 }
 
 public sealed class StumpUploadResponseDto

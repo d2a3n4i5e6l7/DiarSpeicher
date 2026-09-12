@@ -13,6 +13,14 @@ import UsersPage from "./pages/UsersPage";
 import RolesPage from "./pages/RolesPage";
 import UploadPage from "./pages/UploadPage";
 import LibrariesPage from "./pages/LibrariesPage";
+import HomePage from "./pages/HomePage";
+import SeriesGridPage from "./pages/SeriesGridPage";
+import SeriesDetailPage from "./pages/SeriesDetailPage";
+import MediaDetailPage from "./pages/MediaDetailPage";
+import LibraryDetailPage from "./pages/LibraryDetailPage";
+import MetadataPage from "./pages/MetadataPage";
+import ReaderPage from "./pages/ReaderPage";
+import { LibraryFilterContext, LIBRARY_FILTER_KEY } from "./catalog/LibraryFilterContext";
 
 const THEME_KEY = "diarspeicher-theme-mode";
 
@@ -27,6 +35,27 @@ export default function App() {
 
 	const [user, setUser] = useState<SessionUser | null>(null);
 	const [loading, setLoading] = useState(true);
+
+	const [libraryId, setLibraryIdState] = useState<string | null>(() => {
+		try {
+			return localStorage.getItem(LIBRARY_FILTER_KEY);
+		} catch {
+			return null;
+		}
+	});
+
+	const setLibraryId = useCallback((next: string | null) => {
+		setLibraryIdState(next);
+		try {
+			if (next === null) {
+				localStorage.removeItem(LIBRARY_FILTER_KEY);
+			} else {
+				localStorage.setItem(LIBRARY_FILTER_KEY, next);
+			}
+		} catch {
+			/* sin almacenamiento el filtro dura lo que la sesión */
+		}
+	}, []);
 
 	const toggleTheme = useCallback(() => {
 		setMode((prev) => {
@@ -134,8 +163,10 @@ export default function App() {
 		void initSession();
 	}, [refreshUser]);
 
-	const theme = useMemo(() => buildTheme(mode), [mode]);
+	const theme = useMemo(() => buildTheme(), []);
 	const colorMode = useMemo(() => ({ mode, toggle: toggleTheme }), [mode, toggleTheme]);
+
+	const libraryFilter = useMemo(() => ({ libraryId, setLibraryId }), [libraryId, setLibraryId]);
 
 	const sessionValue = useMemo(
 		() => ({
@@ -169,13 +200,20 @@ export default function App() {
 	} else {
 		mainContent = (
 			<Routes>
+				{/* El lector vive fuera de AppLayout: sin drawer ni barra superior. */}
+				<Route path="/read/:mediaId" element={<ReaderPage />} />
 				<Route element={<AppLayout />}>
-					<Route index element={<Navigate to="/users" replace />} />
+					<Route index element={<HomePage />} />
+					<Route path="/series" element={<SeriesGridPage />} />
+					<Route path="/series/:id" element={<SeriesDetailPage />} />
+					<Route path="/media/:id" element={<MediaDetailPage />} />
 					<Route path="/users" element={<UsersPage />} />
 					<Route path="/roles" element={<RolesPage />} />
+					<Route path="/metadata" element={<MetadataPage />} />
 					<Route path="/libraries" element={<LibrariesPage />} />
+					<Route path="/libraries/:id" element={<LibraryDetailPage />} />
 					<Route path="/upload" element={<UploadPage />} />
-					<Route path="*" element={<Navigate to="/users" replace />} />
+					<Route path="*" element={<Navigate to="/" replace />} />
 				</Route>
 			</Routes>
 		);
@@ -186,7 +224,7 @@ export default function App() {
 			<ThemeProvider theme={theme}>
 				<CssBaseline />
 				<SessionContext.Provider value={sessionValue}>
-					{mainContent}
+					<LibraryFilterContext.Provider value={libraryFilter}>{mainContent}</LibraryFilterContext.Provider>
 				</SessionContext.Provider>
 			</ThemeProvider>
 		</ColorModeContext.Provider>

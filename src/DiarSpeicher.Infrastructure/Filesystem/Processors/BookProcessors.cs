@@ -7,6 +7,29 @@ using SharpCompress.Archives.Rar;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Processors;
 
+/// <summary>
+/// Qué debe calcular un análisis, tal como lo pide la configuración de la biblioteca.
+/// <para>
+/// Los hashes son lo caro: obligan a leer el fichero entero, y en una biblioteca de miles
+/// de tomos eso es la diferencia entre un escaneo de minutos y uno de horas. Por eso el
+/// interruptor llega hasta aquí en vez de limitarse a descartar el resultado: apagarlo
+/// tiene que ahorrar el trabajo, no solo el campo.
+/// </para>
+/// </summary>
+public sealed record BookAnalysisOptions
+{
+    /// <summary>Hash de contenido que identifica el fichero al margen de su ruta.</summary>
+    public bool ComputeFileHash { get; init; } = true;
+
+    /// <summary>Hash que KOReader necesita para sincronizar el progreso.</summary>
+    public bool ComputeKoreaderHash { get; init; } = true;
+
+    /// <summary>Leer ComicInfo.xml y los metadatos del OPF de un EPUB.</summary>
+    public bool ReadEmbeddedMetadata { get; init; } = true;
+
+    public static readonly BookAnalysisOptions Default = new();
+}
+
 public interface IBookProcessor
 {
     bool CanProcess(string extension);
@@ -16,7 +39,7 @@ public interface IBookProcessor
     /// returned in <see cref="ProcessedBook.Cover"/>, so callers that need both metadata
     /// and a thumbnail only open and decompress the archive once.
     /// </summary>
-    Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false);
+    Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null);
 
     Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
 }
@@ -45,8 +68,9 @@ public class ZipBookProcessor : IBookProcessor
         return clean is "cbz" or "zip";
     }
 
-    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false)
+    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null)
     {
+        var analysis = options ?? BookAnalysisOptions.Default;
         ExtractedMetadata? metadata = null;
         List<string> tags = [];
         var pageCount = 0;
@@ -70,7 +94,7 @@ public class ZipBookProcessor : IBookProcessor
 
                 var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entryName));
 
-                if (string.Equals(Path.GetFileName(entryName), "ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
+                if (analysis.ReadEmbeddedMetadata && string.Equals(Path.GetFileName(entryName), "ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
                 {
                     await using var stream = await entry.OpenAsync(cancellationToken);
                     using var reader = new StreamReader(stream);
@@ -103,7 +127,9 @@ public class ZipBookProcessor : IBookProcessor
 
         var fileInfo = new FileInfo(path);
         var length = fileInfo.Exists ? fileInfo.Length : 0;
-        var stumpHash = await MediaHasher.ComputeStumpHashAsync(path, length, cancellationToken);
+        var stumpHash = analysis.ComputeFileHash
+            ? await MediaHasher.ComputeStumpHashAsync(path, length, cancellationToken)
+            : null;
 
         return new ProcessedBook
         {
@@ -211,8 +237,9 @@ public class RarBookProcessor : IBookProcessor
         return clean is "cbr" or "rar";
     }
 
-    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false)
+    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null)
     {
+        var analysis = options ?? BookAnalysisOptions.Default;
         ExtractedMetadata? metadata = null;
         List<string> tags = [];
         var pageCount = 0;
@@ -230,7 +257,7 @@ public class RarBookProcessor : IBookProcessor
                 var key = entry.Key;
                 if (string.IsNullOrEmpty(key) || PathUtils.IsHiddenFile(key)) continue;
 
-                if (string.Equals(Path.GetFileName(key), "ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
+                if (analysis.ReadEmbeddedMetadata && string.Equals(Path.GetFileName(key), "ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
                 {
                     await using var entryStream = await entry.OpenEntryStreamAsync(cancellationToken);
                     using var streamReader = new StreamReader(entryStream);
@@ -263,7 +290,9 @@ public class RarBookProcessor : IBookProcessor
 
         var fileInfo = new FileInfo(path);
         var length = fileInfo.Exists ? fileInfo.Length : 0;
-        var stumpHash = await MediaHasher.ComputeStumpHashAsync(path, length, cancellationToken);
+        var stumpHash = analysis.ComputeFileHash
+            ? await MediaHasher.ComputeStumpHashAsync(path, length, cancellationToken)
+            : null;
 
         return new ProcessedBook
         {
@@ -369,8 +398,9 @@ public class EpubBookProcessor : IBookProcessor
         return clean == "epub";
     }
 
-    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false)
+    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null)
     {
+        var analysis = options ?? BookAnalysisOptions.Default;
         var metadata = new ExtractedMetadata();
         var tags = new List<string>();
         int chapterCount = 0;
@@ -384,6 +414,9 @@ public class EpubBookProcessor : IBookProcessor
                 var opfEntry = archive.GetEntry(opfPath);
                 if (opfEntry is not null)
                 {
+                    // El OPF trae a la vez el recuento de capitulos y los metadatos. Se lee
+                    // siempre, pero lo extraido solo se conserva si la biblioteca lo pide:
+                    // sin el recuento el EPUB se quedaria sin paginas.
                     chapterCount = await ReadOpfDataAsync(opfEntry, metadata, tags, cancellationToken);
                 }
             }
@@ -405,16 +438,20 @@ public class EpubBookProcessor : IBookProcessor
 
         var fileInfo = new FileInfo(path);
         var length = fileInfo.Exists ? fileInfo.Length : 0;
-        var stumpHash = await MediaHasher.ComputeStumpHashAsync(path, length, cancellationToken);
-        var koreaderHash = await MediaHasher.ComputeKoreaderHashAsync(path, cancellationToken);
+        var stumpHash = analysis.ComputeFileHash
+            ? await MediaHasher.ComputeStumpHashAsync(path, length, cancellationToken)
+            : null;
+        var koreaderHash = analysis.ComputeKoreaderHash
+            ? await MediaHasher.ComputeKoreaderHashAsync(path, cancellationToken)
+            : null;
 
         return new ProcessedBook
         {
             Pages = Math.Max(1, chapterCount),
             Hash = stumpHash,
             KoreaderHash = koreaderHash,
-            Metadata = metadata,
-            Tags = tags.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            Metadata = analysis.ReadEmbeddedMetadata ? metadata : null,
+            Tags = analysis.ReadEmbeddedMetadata ? tags.Distinct(StringComparer.OrdinalIgnoreCase).ToList() : [],
             Cover = cover
         };
     }
@@ -608,7 +645,7 @@ public class EpubBookProcessor : IBookProcessor
 public interface ICompositeBookProcessor
 {
     IBookProcessor? GetProcessor(string path);
-    Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false);
+    Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null);
     Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
 }
 
@@ -627,8 +664,9 @@ public class CompositeBookProcessor : ICompositeBookProcessor
         return _processors.FirstOrDefault(p => p.CanProcess(ext));
     }
 
-    public async Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false)
+    public async Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null)
     {
+        var analysis = options ?? BookAnalysisOptions.Default;
         var processor = GetProcessor(path);
         if (processor is null)
         {
@@ -637,12 +675,12 @@ public class CompositeBookProcessor : ICompositeBookProcessor
             return new ProcessedBook
             {
                 Pages = 0,
-                Hash = await MediaHasher.ComputeStumpHashAsync(path, len, cancellationToken),
-                KoreaderHash = await MediaHasher.ComputeKoreaderHashAsync(path, cancellationToken)
+                Hash = analysis.ComputeFileHash ? await MediaHasher.ComputeStumpHashAsync(path, len, cancellationToken) : null,
+                KoreaderHash = analysis.ComputeKoreaderHash ? await MediaHasher.ComputeKoreaderHashAsync(path, cancellationToken) : null
             };
         }
 
-        return await processor.AnalyzeBookAsync(path, includeCover, cancellationToken, measurePages);
+        return await processor.AnalyzeBookAsync(path, includeCover, cancellationToken, measurePages, analysis);
     }
 
     public Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)

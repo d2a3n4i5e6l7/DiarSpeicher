@@ -13,6 +13,11 @@ public interface IStumpV2Service
     Task<StumpPageResponse<StumpSeriesDto>> GetSeriesAsync(AuthUser user, string? libraryId, int page, int pageSize, CancellationToken ct = default);
     Task<StumpSeriesDto?> GetSeriesByIdAsync(AuthUser user, string id, CancellationToken ct = default);
     Task<StumpPageResponse<StumpMediaDto>> GetSeriesMediaAsync(AuthUser user, string seriesId, int page, int pageSize, CancellationToken ct = default);
+    Task<StumpSeriesDto?> UpdateSeriesAsync(AuthUser user, string id, StumpUpdateSeriesInput input, CancellationToken ct = default);
+    Task<(byte[] Data, string ContentType)?> GetSeriesThumbnailAsync(AuthUser user, string seriesId, CancellationToken ct = default);
+    Task<bool> SetSeriesThumbnailFromMediaAsync(AuthUser user, string seriesId, string mediaId, CancellationToken ct = default);
+    Task<bool> SetSeriesThumbnailAsync(AuthUser user, string seriesId, Stream image, string fileName, CancellationToken ct = default);
+    Task<bool> ClearSeriesThumbnailAsync(AuthUser user, string seriesId, CancellationToken ct = default);
     Task<List<StumpLibraryDto>> GetLibrariesAsync(AuthUser user, CancellationToken ct = default);
     Task<StumpLibraryDto?> GetLibraryByIdAsync(AuthUser user, string id, CancellationToken ct = default);
     Task<bool> TriggerLibraryScanAsync(AuthUser user, string libraryId, CancellationToken ct = default);

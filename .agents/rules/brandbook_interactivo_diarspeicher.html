@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DIARSPEICHER — Brandbook Oficial (Iron Blood Edition)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,400;0,600;0,700;1,700&family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <style>
+    :root {
+      --bg-dark: #050508;
+      --bg-card: #0F1015;
+      --bg-surface: #161821;
+      --ds-red: #C21818;
+      --ds-red-glow: #FF2E2E;
+      --ds-red-dark: #660B0B;
+      --ds-gradient: linear-gradient(135deg, #C21818 0%, #1A0202 50%, #050508 100%);
+      --ds-platinum: #F0F2F6;
+      --ds-muted: #8E95A5;
+      --font-display: 'Orbitron', 'Chakra Petch', sans-serif;
+      --font-tactical: 'Rajdhani', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+      --font-body: 'Inter', sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: radial-gradient(circle at 50% 10%, rgba(194, 24, 24, 0.08) 0%, transparent 60%);
+      color: var(--ds-platinum);
+      font-family: var(--font-body);
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .top-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      width: 100%;
+      background: rgba(9, 10, 13, 0.95);
+      backdrop-filter: blur(14px);
+      border-bottom: 2px solid #232733;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 24px;
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.8);
+    }
+
+    .toolbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: var(--font-display);
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
+    }
+
+    .toolbar-badge {
+      background: var(--ds-red);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 2px;
+      letter-spacing: 1px;
+    }
+
+    .toolbar-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-tactical {
+      background: #151821;
+      color: var(--ds-platinum);
+      border: 1px solid #383E4C;
+      font-family: var(--font-tactical);
+      font-weight: 700;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 6px 14px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      clip-path: polygon(6px 0%, 100% 0%, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0% 100%, 0% 6px);
+    }
+
+    .btn-tactical:hover {
+      background: var(--ds-red);
+      border-color: var(--ds-red-glow);
+      color: #fff;
+      box-shadow: 0 0 14px rgba(229, 9, 20, 0.5);
+    }
+
+    .btn-tactical.active {
+      background: var(--ds-red);
+      border-color: var(--ds-red-glow);
+      color: #fff;
+    }
+
+    .page-indicator {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--ds-muted);
+      min-width: 90px;
+      text-align: center;
+    }
+
+    .viewport-container {
+      width: 100%;
+      max-width: 1200px;
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .deck-view {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+
+    .brand-slide {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      min-height: 600px;
+      background: linear-gradient(145deg, #0D0F14 0%, #060709 100%);
+      border: 1px solid #282C38;
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 12px 50px rgba(0, 0, 0, 0.9);
+      transition: opacity 0.3s ease;
+    }
+
+    .slide-header {
+      height: 48px;
+      background: #0A0B0E;
+      border-bottom: 1px solid #232733;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+    }
+
+    .slide-meta-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .slide-num-pill {
+      background: #1B1E26;
+      color: var(--ds-red-glow);
+      border: 1px solid var(--ds-red-dark);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 2px 8px;
+    }
+
+    .slide-section-title {
+      font-family: var(--font-tactical);
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 2px;
+      color: var(--ds-muted);
+      text-transform: uppercase;
+    }
+
+    .slide-meta-right {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: #636B7C;
+      letter-spacing: 1px;
+    }
+
+    .slide-body {
+      flex: 1;
+      padding: 28px 36px;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .slide-footer {
+      height: 32px;
+      background: #07080A;
+      border-top: 1px solid #1C1F28;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: #555D6E;
+    }
+
+    .hud-corner-tl {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 16px;
+      height: 16px;
+      border-top: 2px solid var(--ds-red);
+      border-left: 2px solid var(--ds-red);
+    }
+    .hud-corner-br {
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      width: 16px;
+      height: 16px;
+      border-bottom: 2px solid var(--ds-red);
+      border-right: 2px solid var(--ds-red);
+    }
+
+    .grid-lines-bg {
+      position: absolute;
+      inset: 0;
+      background-image: 
+        linear-gradient(to right, rgba(194, 24, 24, 0.03) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(194, 24, 24, 0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+
+    h1.hero-title {
+      font-family: var(--font-display);
+      font-size: 44px;
+      font-weight: 900;
+      letter-spacing: 3px;
+      line-height: 1.1;
+      text-transform: uppercase;
+    }
+
+    h2.section-heading {
+      font-family: var(--font-tactical);
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: #FFFFFF;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    h2.section-heading::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(to right, var(--ds-red), transparent);
+    }
+
+    p.lead-text {
+      font-size: 13px;
+      line-height: 1.6;
+      color: #A6AFBF;
+      max-width: 800px;
+      margin-bottom: 16px;
+    }
+
+    .two-col-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 28px;
+      flex: 1;
+      align-items: center;
+    }
+
+    .three-col-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      flex: 1;
+    }
+
+    .four-col-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      flex: 1;
+    }
+
+    .color-card {
+      background: #11131C;
+      border: 1px solid #282C38;
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .color-swatch-box {
+      height: 110px;
+      width: 100%;
+      position: relative;
+      display: flex;
+      align-items: flex-end;
+      padding: 8px;
+    }
+
+    .color-swatch-name {
+      font-family: var(--font-tactical);
+      font-size: 16px;
+      font-weight: 700;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+
+    .color-info-body {
+      padding: 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: #A3ABB8;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .color-prop-row {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px dashed #242834;
+      padding-bottom: 2px;
+    }
+
+    .wrong-use-card {
+      background: #12141C;
+      border: 1px solid #2B2F3D;
+      border-radius: 4px;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .wrong-use-preview {
+      height: 140px;
+      background: #08090D;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .wrong-cross-mark {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: 
+        linear-gradient(to top right, transparent calc(50% - 1.5px), #C21818 calc(50% - 1px), #C21818 calc(50% + 1px), transparent calc(50% + 1.5px));
+      opacity: 0.85;
+    }
+
+    .wrong-use-desc {
+      padding: 10px 12px;
+      font-size: 11px;
+      line-height: 1.4;
+      color: #9CA3AF;
+      border-top: 1px solid #232733;
+      min-height: 60px;
+    }
+
+    .mockup-slate {
+      background: radial-gradient(circle at center, #161922 0%, #0A0B0F 100%);
+      border: 1px solid #2A2E3B;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      position: relative;
+    }
+
+    @media print {
+      body {
+        background: #fff !important;
+        color: #000 !important;
+      }
+      .top-toolbar {
+        display: none !important;
+      }
+      .viewport-container {
+        max-width: 100% !important;
+        padding: 0 !important;
+      }
+      .brand-slide {
+        page-break-after: always;
+        break-after: page;
+        box-shadow: none !important;
+        border: none !important;
+        aspect-ratio: 16 / 9;
+        height: 100vh !important;
+        max-height: 100vh !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="top-toolbar">
+    <div class="toolbar-brand">
+      <span style="color: var(--ds-red-glow);">DIARSPEICHER</span>
+      <span class="toolbar-badge">ARCHIVE &amp; READER SPEC</span>
+      <span style="font-size: 13px; color: var(--ds-muted); font-weight: 500;">BRAND MANUAL</span>
+    </div>
+
+    <div class="toolbar-controls">
+      <button class="btn-tactical" id="btn-prev" onclick="prevSlide()">◀ Anterior</button>
+      <span class="page-indicator" id="page-display">PÁG 01 / 17</span>
+      <button class="btn-tactical" id="btn-next" onclick="nextSlide()">Siguiente ▶</button>
+      <div style="width: 1px; height: 24px; background: #282C38; margin: 0 4px;"></div>
+      <button class="btn-tactical" id="btn-view-mode" onclick="toggleViewMode()">Modo: Presentación</button>
+      <button class="btn-tactical active" onclick="window.print()">🖨 Guardar / Imprimir PDF</button>
+    </div>
+  </header>
+
+  <main class="viewport-container">
+    <div class="deck-view" id="deck-container">
+
+      <!-- SLIDE 01: PORTADA -->
+      <section class="brand-slide" id="slide-1" data-page="1">
+        <div class="grid-lines-bg"></div>
+        <div class="hud-corner-tl"></div>
+        <div class="hud-corner-br"></div>
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">01</span>
+            <span class="slide-section-title">PORTADA // MASTER IDENTITY</span>
+          </div>
+          <div class="slide-meta-right">DOC-REF: DS-SPEC-2026 // SEC-01</div>
+        </div>
+
+        <div class="slide-body" style="display: flex; align-items: center; justify-content: center; text-align: center;">
+          <div style="max-width: 700px; z-index: 2;">
+            <!-- Isotipo D exacto de Iron Blood -->
+            <svg viewBox="0 0 200 200" width="130" height="130" style="margin-bottom: 20px; filter: drop-shadow(0 0 25px rgba(229,9,20,0.45));">
+              <defs>
+                <linearGradient id="p1Metal" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#4B5160"/>
+                  <stop offset="50%" stop-color="#262933"/>
+                  <stop offset="100%" stop-color="#121318"/>
+                </linearGradient>
+                <linearGradient id="p1Crimson" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stop-color="#80060A"/>
+                  <stop offset="50%" stop-color="#C21818"/>
+                  <stop offset="100%" stop-color="#FF3E3E"/>
+                </linearGradient>
+              </defs>
+              <polygon points="40,20 135,20 185,75 185,125 135,180 40,180 40,150 55,135 55,65 40,50" fill="url(#p1Metal)" stroke="#8F96A3" stroke-width="3"/>
+              <polygon points="135,20 155,5 142,20" fill="#C21818"/>
+              <polygon points="185,75 200,68 185,87" fill="#C21818"/>
+              <polygon points="185,125 200,132 185,113" fill="#C21818"/>
+              <polygon points="135,180 155,195 142,180" fill="#C21818"/>
+              <polygon points="80,55 115,55 150,90 150,110 115,145 80,145" fill="#0D0E11" stroke="#B80D18" stroke-width="2"/>
+              <g transform="translate(118, 100)">
+                <polygon points="0,-42 7,-18 0,-10 -7,-18" fill="url(#p1Crimson)"/>
+                <polygon points="0,42 7,18 0,10 -7,18" fill="url(#p1Crimson)"/>
+                <polygon points="-35,0 -14,6 -8,0 -14,-6" fill="url(#p1Crimson)"/>
+                <polygon points="35,0 14,6 8,0 14,-6" fill="url(#p1Crimson)"/>
+                <polygon points="0,-7 7,0 0,7 -7,0" fill="#FFF" stroke="#FF2E2E" stroke-width="1.5"/>
+              </g>
+            </svg>
+
+            <h1 class="hero-title" style="background: linear-gradient(90deg, #FFFFFF 60%, #C21818 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+              DIAR<span style="color: var(--ds-red-glow);">SPEICHER</span>
+            </h1>
+            <p style="font-family: var(--font-tactical); font-size: 18px; font-weight: 700; letter-spacing: 6px; color: #A3ABB8; margin-top: 8px;">
+              MANGA &amp; EBOOK SELF-HOSTED ARCHIVE SERVER
+            </p>
+            <div style="display: inline-flex; align-items: center; gap: 10px; margin-top: 24px; padding: 6px 18px; background: #12141D; border: 1px solid #2B303E; border-left: 4px solid var(--ds-red);">
+              <span style="font-family: var(--font-mono); font-size: 12px; color: #FF3E3E; font-weight: bold;">DIARMUND ARCHIVE PROTOCOL</span>
+              <span style="color: #636B7C;">|</span>
+              <span style="font-family: var(--font-tactical); font-size: 13px; color: #D1D5DB; letter-spacing: 2px;">MANUAL DE IDENTIDAD Y LIBRERÍA</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>CLASSIFICATION: RESTRICTED ARCHIVE</span>
+          <span>© 2026 DIARMUND SPEICHER SYSTEMS</span>
+          <span>PAGE 01</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 02: INTRODUCCIÓN Y CONCEPTUALIZACIÓN -->
+      <section class="brand-slide" id="slide-2" data-page="2">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">02</span>
+            <span class="slide-section-title">INTRODUCCIÓN Y ARQUITECTURA</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 02</div>
+        </div>
+
+        <div class="slide-body">
+          <div class="two-col-grid">
+            <div>
+              <h2 class="section-heading">Concepto y Ecosistema</h2>
+              <p class="lead-text">
+                <strong>DiarSpeicher</strong> (compuesto por <em>Diarmund</em> y <em>Speicher</em> [almacén en alemán]) fusiona la estética de alta ingeniería naval de <em>Iron Blood</em> con un servidor y visor web autohospedado de manga y ebooks de alto rendimiento (estilo Komga / Kavita).
+              </p>
+
+              <div style="background: #11131C; border-left: 3px solid var(--ds-red); padding: 10px 14px; margin-bottom: 12px;">
+                <div style="font-family: var(--font-tactical); font-weight: 700; color: #F0F2F6; font-size: 13px; letter-spacing: 1px;">MISIÓN DEL SERVIDOR</div>
+                <div style="font-size: 11px; color: #9CA3AF; margin-top: 2px;">Centralizar, indexar y renderizar volúmenes de manga y literatura digital con velocidad implacable y diseño búnker.</div>
+              </div>
+
+              <div style="display: flex; gap: 8px; font-family: var(--font-mono); font-size: 10px; margin-top: 14px;">
+                <span style="background:#181B26; padding: 4px 8px; border: 1px solid #333847;">[D] DIARMUND</span>
+                <span style="background:#181B26; padding: 4px 8px; border: 1px solid #333847;">[S] SPEICHER</span>
+                <span style="background:#181B26; padding: 4px 8px; border: 1px solid #333847;">[K] KAVITA-COMPATIBLE</span>
+                <span style="background:#181B26; padding: 4px 8px; border: 1px solid #333847;">[R] READER</span>
+              </div>
+            </div>
+
+            <!-- Estructura de Versiones de Logo -->
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <div style="background: #0B0C10; border: 1px solid #2A2E3B; padding: 10px 16px; border-radius: 4px;">
+                <span style="font-family: var(--font-tactical); font-size: 11px; color: var(--ds-red-glow); font-weight: 700; letter-spacing: 1px;">1. LOGOTIPO PRINCIPAL (HORIZONTAL)</span>
+                <div style="display: flex; align-items: center; gap: 14px; margin-top: 6px;">
+                  <span style="font-family: var(--font-display); font-size: 15px; font-weight: 900; letter-spacing: 1px;">DIAR<span style="color:var(--ds-red);">SPEICHER</span></span>
+                  <span style="font-family: var(--font-mono); font-size: 9px; color: #64748B;">[ARCHIVE NODE]</span>
+                </div>
+              </div>
+
+              <div style="background: #0B0C10; border: 1px solid #2A2E3B; padding: 10px 16px; border-radius: 4px;">
+                <span style="font-family: var(--font-tactical); font-size: 11px; color: #A3ABB8; font-weight: 700; letter-spacing: 1px;">2. ISOTIPO PURO (FAVICON / WEB APP ICON)</span>
+                <div style="font-size: 11px; color: #94A3B8; margin-top: 4px;">Monograma «D» facetado con cruz de hierro para la interfaz del lector web.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>DIARSPEICHER ARCHIVE IDENTITY</span>
+          <span>ANATOMY &amp; PHILOSOPHY</span>
+          <span>PAGE 02</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 03: TIPOGRAFÍA -->
+      <section class="brand-slide" id="slide-3" data-page="3">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">03</span>
+            <span class="slide-section-title">SISTEMA TIPOGRÁFICO DE LIBRERÍA</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 03</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">Fuentes Oficiales del Ecosistema Web</h2>
+          <div class="two-col-grid">
+            <div>
+              <div style="background: #11131C; border: 1px solid #282D3B; padding: 14px; margin-bottom: 12px; border-radius: 4px;">
+                <span style="font-family: var(--font-mono); font-size: 10px; color: var(--ds-red-glow);">TIPOGRAFÍA DE LOGOTEXTO</span>
+                <div style="font-family: var(--font-display); font-size: 20px; font-weight: 900; margin: 6px 0; color: #FFFFFF;">
+                  ORBITRON BLACK 900
+                </div>
+                <div style="font-family: var(--font-mono); font-size: 11px; color: #7B8496;">
+                  DIARSPEICHER ARCHIVE SYSTEM 0123456789
+                </div>
+              </div>
+
+              <div style="background: #11131C; border: 1px solid #282D3B; padding: 14px; border-radius: 4px;">
+                <span style="font-family: var(--font-mono); font-size: 10px; color: var(--ds-red-glow);">FAMILIA DE TÍTULOS Y METADATOS (MANGA)</span>
+                <div style="font-family: var(--font-tactical); font-size: 22px; font-weight: 700; margin: 6px 0; color: #FFFFFF; letter-spacing: 1px;">
+                  RAJDHANI BOLD
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div style="background: #11131C; border: 1px solid #282D3B; padding: 14px; margin-bottom: 12px; border-radius: 4px;">
+                <span style="font-family: var(--font-mono); font-size: 10px; color: #60A5FA;">INTERFAZ DE LECTURA (WEB READER UI)</span>
+                <div style="font-family: 'Chakra Petch', sans-serif; font-size: 18px; font-weight: 700; margin: 6px 0; color: #FFFFFF;">
+                  CHAKRA PETCH / INTER
+                </div>
+                <p style="font-size: 11px; color: #8F98A8; line-height: 1.4;">
+                  Optimizado para la lectura continua de capítulos, metadatos de capítulos y paneles de control.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>TYPOGRAPHIC SPECIFICATIONS</span>
+          <span>HI-TECH READER MATRIX</span>
+          <span>PAGE 03</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 04: CÓDIGO CROMÁTICO (DEGRADADOS NEGRO-ROJO) -->
+      <section class="brand-slide" id="slide-4" data-page="4">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">04</span>
+            <span class="slide-section-title">CÓDIGO CROMÁTICO Y DEGRADADOS DE Tinta</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 04</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">Paleta Oficial y Gradientes Web Dark Mode</h2>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; flex: 1;">
+            <!-- Degrades de Negro a Rojo -->
+            <div style="background: linear-gradient(135deg, #1C0303 0%, #08090D 100%); border: 1px solid #381010; padding: 20px; border-radius: 4px; display: flex; flex-direction: column; justify-content: center;">
+              <span style="font-family: var(--font-tactical); font-size: 14px; color: var(--ds-red-glow); font-weight: 700; letter-spacing: 2px;">GRADIENTE OFICIAL DE INTERFAZ</span>
+              <div style="font-family: var(--font-mono); font-size: 11px; color: #A3ABB8; margin-top: 8px;">
+                <code>linear-gradient(135deg, #C21818 0%, #050508 80%)</code>
+              </div>
+              <p style="font-size: 11px; color: #8F96A8; margin-top: 10px;">
+                Utilizado en barras de navegación del lector web, tarjetas de tomos de manga y contenedores de capítulos activos.
+              </p>
+            </div>
+
+            <!-- Valores de Color -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div class="color-card">
+                <div class="color-swatch-box" style="background: #050508;">
+                  <span class="color-swatch-name" style="color: #FFF;">SCHWARZ CORE</span>
+                </div>
+                <div class="color-info-body">
+                  <div class="color-prop-row"><span>HEX</span><strong style="color:#FFF;">#050508</strong></div>
+                  <div class="color-prop-row"><span>RGB</span><span>5, 5, 8</span></div>
+                </div>
+              </div>
+
+              <div class="color-card">
+                <div class="color-swatch-box" style="background: #C21818;">
+                  <span class="color-swatch-name" style="color: #FFF;">BLUTROT</span>
+                </div>
+                <div class="color-info-body">
+                  <div class="color-prop-row"><span>HEX</span><strong style="color:#FF3E3E;">#C21818</strong></div>
+                  <div class="color-prop-row"><span>RGB</span><span>194, 24, 24</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>COLOR CODE &amp; DARK GRADIENTS</span>
+          <span>PAGE 04</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 05: TRAMAS -->
+      <section class="brand-slide" id="slide-5" data-page="5">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">05</span>
+            <span class="slide-section-title">CONTRASTE Y COMPORTAMIENTO WEB</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 05</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">Dinamismo de Fondo en el Lector Web</h2>
+          <div class="two-col-grid">
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <div style="background: linear-gradient(90deg, #1C0303, #050508); border: 1px solid #331010; padding: 12px 16px; border-radius: 4px;">
+                <span style="font-family: var(--font-tactical); font-size: 12px; color: #FFF;">HEADER DE BIBLIOTECA (GRADIENT ACTIVE)</span>
+              </div>
+              <div style="background: #050508; border: 1px solid #222530; padding: 12px 16px; border-radius: 4px;">
+                <span style="font-family: var(--font-tactical); font-size: 12px; color: #A3ABB8;">PÁGINA DE LECTURA (PURE BLACK BG)</span>
+              </div>
+            </div>
+            <div>
+              <p class="lead-text">
+                Para el visor de mangas y cómics, el fondo cambia a negro absoluto para evitar fatiga visual, mientras que los menús y paneles laterales utilizan gradientes sutiles de negro a rojo carmesí oscuro.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>CONTRAST &amp; VIEWER MODES</span>
+          <span>PAGE 05</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 06: CONSTRUCCIÓN TÉCNICA -->
+      <section class="brand-slide" id="slide-6" data-page="6">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">06</span>
+            <span class="slide-section-title">GEOMETRÍA DEL ISOTIPO «D»</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 06</div>
+        </div>
+
+        <div class="slide-body">
+          <div class="two-col-grid">
+            <div>
+              <h2 class="section-heading">Retícula y Proporciones</h2>
+              <p class="lead-text">
+                El monograma conserva los ángulos de corte balístico a <strong>$45^\circ$</strong> inspirados en el blindaje de Iron Blood, asegurando una presencia imponente en cualquier resolución de pantalla o dispositivo móvil.
+              </p>
+            </div>
+            <div class="mockup-slate" style="height: 220px;">
+              <svg viewBox="0 0 250 200" width="100%" height="100%">
+                <polygon points="40,20 160,20 210,70 210,130 160,180 40,180 40,140 55,125 55,75 40,60" fill="none" stroke="#C21818" stroke-width="2"/>
+                <polygon points="90,60 130,60 170,100 170,120 130,160 90,160" fill="none" stroke="#FFF" stroke-width="1.5" stroke-dasharray="4 2"/>
+                <line x1="40" y1="20" x2="15" y2="45" stroke="#60A5FA" stroke-width="1.5"/>
+                <text x="10" y="60" fill="#60A5FA" font-family="monospace" font-size="10">45°</text>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>BLUEPRINT DIMENSIONS</span>
+          <span>PAGE 06</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 07: ÁREA DE SEGURIDAD -->
+      <section class="brand-slide" id="slide-7" data-page="7">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">07</span>
+            <span class="slide-section-title">ZONA DE EXCLUSIÓN Y UI PADDING</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 07</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">Margen de Seguridad (Módulo X)</h2>
+          <p class="lead-text">
+            En la barra de navegación del servidor de manga, el logotipo debe mantener un respiro perimetral equivalente al 100% de la altura de la letra base.
+          </p>
+        </div>
+
+        <div class="slide-footer">
+          <span>CLEAR SPACE &amp; PADDING</span>
+          <span>PAGE 07</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 08: PROHIBIDOS I -->
+      <section class="brand-slide" id="slide-8" data-page="8">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">08</span>
+            <span class="slide-section-title">NORMATIVA: USOS INCORRECTOS I</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 08</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">Restricciones de Manipulación</h2>
+          <div class="three-col-grid">
+            <div class="wrong-use-card">
+              <div class="wrong-use-preview">
+                <span style="font-family: Orbitron; font-size: 20px; color: #10B981;">DIARSPEICHER</span>
+                <div class="wrong-cross-mark"></div>
+              </div>
+              <div class="wrong-use-desc"><strong>01. Alteración Cromática:</strong> Prohibido usar tonos verdes o azules no autorizados.</div>
+            </div>
+            <div class="wrong-use-card">
+              <div class="wrong-use-preview">
+                <span style="font-family: Orbitron; font-size: 20px; transform: scale(1.5, 0.6); color: #FFF;">DIARSPEICHER</span>
+                <div class="wrong-cross-mark"></div>
+              </div>
+              <div class="wrong-use-desc"><strong>02. Deformación Axial:</strong> No comprimir ni estirar las proporciones del logotipo.</div>
+            </div>
+            <div class="wrong-use-card">
+              <div class="wrong-use-preview">
+                <span style="font-family: Orbitron; font-size: 20px; transform: rotate(-20deg); color: #FFF;">DIARSPEICHER</span>
+                <div class="wrong-cross-mark"></div>
+              </div>
+              <div class="wrong-use-desc"><strong>03. Inclinación:</strong> El isotipo debe permanecer ortogonal a 0°.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>PROHIBITED ALTERATIONS 01-03</span>
+          <span>PAGE 08</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 09: PROHIBIDOS II -->
+      <section class="brand-slide" id="slide-9" data-page="9">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">09</span>
+            <span class="slide-section-title">NORMATIVA: USOS INCORRECTOS II</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 09</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">Invasiones y Efectos Obsoletos</h2>
+          <div class="three-col-grid">
+            <div class="wrong-use-card">
+              <div class="wrong-use-preview" style="background: #0284C7;">
+                <span style="font-family: Orbitron; font-size: 20px; color: #FFF;">DIARSPEICHER</span>
+                <div class="wrong-cross-mark"></div>
+              </div>
+              <div class="wrong-use-desc"><strong>04. Fondos Incompatibles:</strong> Evitar fondos cian o chillones que destruyan la atmósfera oscura.</div>
+            </div>
+            <div class="wrong-use-card">
+              <div class="wrong-use-preview">
+                <span style="font-family: Orbitron; font-size: 20px; color: #FFF; text-shadow: 4px 4px 0 #C21818;">DIARSPEICHER</span>
+                <div class="wrong-cross-mark"></div>
+              </div>
+              <div class="wrong-use-desc"><strong>05. Sombras Excesivas:</strong> No aplicar efectos de relieve o sombras paralelas arcaicas.</div>
+            </div>
+            <div class="wrong-use-card">
+              <div class="wrong-use-preview">
+                <span style="font-family: Orbitron; font-size: 20px; color: #FFF;">DIARSPEICHER <tspan fill="#C21818" font-size="12">SERVER+</tspan></span>
+                <div class="wrong-cross-mark"></div>
+              </div>
+              <div class="wrong-use-desc"><strong>06. Intrusión:</strong> No añadir elementos que invadan el módulo de resguardo X.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>PROHIBITED ALTERATIONS 04-06</span>
+          <span>PAGE 09</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 10: KEY VISUALS -->
+      <section class="brand-slide" id="slide-10" data-page="10">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">10</span>
+            <span class="slide-section-title">KEY VISUALS Y LENGUAJE WEB TÁCTICO</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 10</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">Tarjetas de Tomos y Paneles de Lector</h2>
+          <div class="two-col-grid">
+            <div>
+              <p class="lead-text">
+                Las portadas de los tomos de manga y carpetas en la interfaz del servidor se presentan con esquinas achaflanadas a <strong>$45^\circ$</strong>, bordes iluminados en gradiente carmesí y metadatos limpios en tipografía monoespaciada.
+              </p>
+            </div>
+            <div class="mockup-slate" style="height: 220px; background: #0A0B0E;">
+              <div style="width: 160px; height: 180px; background: linear-gradient(145deg, #161922, #0A0B0E); border: 1px solid #C21818; clip-path: polygon(0% 0%, calc(100% - 15px) 0%, 100% 15px, 100% 100%, 0% 100%); padding: 12px; display: flex; flex-direction: column; justify-content: space-between;">
+                <span style="font-family: monospace; font-size: 9px; color: #FF2E2E;">VOL. 01 // MANGA</span>
+                <div style="font-family: Orbitron; font-size: 14px; font-weight: bold; color: #FFF;">ARCHIVE</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>UI KEY VISUALS // 45° ARCHIVE CARDS</span>
+          <span>PAGE 10</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 11: PAPELERÍA TÉCNICA / DOSSIER -->
+      <section class="brand-slide" id="slide-11" data-page="11">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">11</span>
+            <span class="slide-section-title">DOSSIER TÉCNICO Y DOCUMENTACIÓN</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 11</div>
+        </div>
+
+        <div class="slide-body">
+          <div class="two-col-grid">
+            <div style="display: flex; justify-content: center;">
+              <div style="width: 220px; height: 290px; background: #0A0B0E; color: #FFF; padding: 16px; border: 1px solid #2B2F3E; border-radius: 2px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); display: flex; flex-direction: column; justify-content: space-between; font-size: 8px;">
+                <div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #C21818; padding-bottom: 6px;">
+                    <div>
+                      <strong style="font-family: Orbitron; font-size: 9px;">DIAR<span style="color:#C21818;">SPEICHER</span></strong><br>
+                      <span style="font-size: 6px; color: #6B7280;">MANGA ARCHIVE SERVER</span>
+                    </div>
+                    <span style="font-family: monospace; font-size: 7px; color: #C21818;">NODE-01</span>
+                  </div>
+                  <div style="margin-top: 12px; color: #9CA3AF; font-size: 7px; line-height: 1.4;">
+                    <strong>Indexación:</strong> 4,200 Capítulos<br>
+                    <strong>Formato:</strong> CBZ / EPUB / PDF<br><br>
+                    Servidor autohospedado operativo para la gestión integral de colecciones de manga y novela gráfica personal...
+                  </div>
+                </div>
+                <div style="border-top: 1px solid #222530; padding-top: 6px; font-size: 6px; color: #64748B; display: flex; justify-content: space-between;">
+                  <span>/// DIARMUND PROTOCOL</span>
+                  <span>Speicher Core</span>
+                </div>
+              </div>
+            </div>
+            <div>
+              <h2 class="section-heading">Informes de Servidor y Reportes</h2>
+              <p class="lead-text">
+                Documentación formal en formato PDF con gradiente negro-rojo en cabecera y metadatos de escaneo de volúmenes.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>SERVER DOCUMENTATION // DOSSIER</span>
+          <span>PAGE 11</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 12: TARJETAS DE PRESENTACIÓN -->
+      <section class="brand-slide" id="slide-12" data-page="12">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">12</span>
+            <span class="slide-section-title">CREDENCIALES Y TARJETAS DE ACCESO</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 12</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">Credencial de Administrador de Biblioteca</h2>
+          <div class="two-col-grid" style="justify-items: center;">
+            <div style="width: 260px; height: 150px; background: linear-gradient(135deg, #12141C 0%, #050508 100%); border: 1px solid #C21818; border-radius: 6px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 10px 30px rgba(194,24,24,0.2);">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div>
+                  <div style="font-family: Orbitron; font-size: 13px; font-weight: bold; color: #FFF;">DIAR<span style="color:#C21818;">SPEICHER</span></div>
+                  <div style="font-size: 8px; color: #8F96A8; letter-spacing: 1px;">SYSADMIN // DIARMUND</div>
+                </div>
+                <div style="width: 24px; height: 24px; background: #C21818; clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);"></div>
+              </div>
+              <div style="font-family: monospace; font-size: 9px; color: #A3ABB8; border-top: 1px dashed #2A2E3B; pt: 6px;">
+                NODE: 192.168.1.100:8080 // AUTH_TOKEN_VALID
+              </div>
+            </div>
+            <div>
+              <p class="lead-text">
+                Tarjetas físicas y digitales de acceso al nodo privado de lectura, con código QR encriptado para sincronización instantánea con apps lectoras compatibles (Kavita/Komga API).
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>SYSADMIN CREDENTIALS // ACCESS CARD</span>
+          <span>PAGE 12</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 13: CARPETA DE PROYECTO -->
+      <section class="brand-slide" id="slide-13" data-page="13">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">13</span>
+            <span class="slide-section-title">ESTRUCTURA DE ARCHIVOS Y REPOSITORIO</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 13</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">Organización del Repositorio de Manga</h2>
+          <div class="two-col-grid">
+            <div style="background: #0A0B0E; border: 1px solid #282C38; padding: 16px; border-radius: 4px; font-family: monospace; font-size: 11px; color: #A3ABB8;">
+              <div style="color: #FF2E2E; font-weight: bold;">/mnt/storage/speicher/manga/</div>
+              <div style="padding-left: 12px; margin-top: 4px;">├── [Series_Active]/</div>
+              <div style="padding-left: 24px;">├── Volume_01.cbz</div>
+              <div style="padding-left: 24px;">└── Volume_02.cbz</div>
+              <div style="padding-left: 12px; margin-top: 4px;">├── [Light_Novels]/</div>
+              <div style="padding-left: 12px; margin-top: 4px;">└── metadata.json</div>
+            </div>
+            <div>
+              <p class="lead-text">
+                Estructura jerárquica estandarizada optimizada para la lectura rápida por parte del motor de indexación de DiarSpeicher.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>REPOSITORY STRUCTURE // STORAGE HIERARCHY</span>
+          <span>PAGE 13</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 14: APLICACIÓN: INTERFAZ WEB DEL LECTOR DE MANGA (KOMGA / KAVITA STYLE) -->
+      <section class="brand-slide" id="slide-14" data-page="14">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">14</span>
+            <span class="slide-section-title">APLICACIÓN WEB // VISOR Y LIBRERÍA DE MANGA</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 14</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">Interfaz de Lector Web (Estilo Komga / Kavita)</h2>
+          <div class="two-col-grid">
+            <div>
+              <p class="lead-text">
+                La interfaz web principal de <strong>DiarSpeicher</strong> ofrece un panel de control oscuro con gradientes carmesí, estanterías virtuales de tomos de manga, indicador de progreso de lectura y motor de búsqueda instantáneo.
+              </p>
+              <div style="font-family: var(--font-mono); font-size: 11px; color: #FF3E3E; margin-top: 8px;">
+                • Motor web optimizado para lectura vertical y horizontal de cómics y novelas.
+              </div>
+            </div>
+
+            <!-- Mockup Web UI Lector Manga -->
+            <div class="mockup-slate" style="height: 240px; background: #050508;">
+              <div style="width: 100%; height: 180px; background: #0E1015; border: 1px solid #331010; border-radius: 4px; display: flex; flex-direction: column; overflow: hidden;">
+                <!-- Header Simulador UI -->
+                <div style="height: 30px; background: linear-gradient(90deg, #1C0303, #0A0B0E); border-bottom: 1px solid #282C38; display: flex; align-items: center; justify-content: space-between; padding: 0 10px;">
+                  <span style="font-family: Orbitron; font-size: 10px; font-weight: bold; color: #FFF;">DIAR<span style="color:#C21818;">SPEICHER</span> READER</span>
+                  <span style="font-family: monospace; font-size: 8px; color: #8F96A8;">CHAPTER 14 // 84%</span>
+                </div>
+                <!-- Cuerpo Visor -->
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; position: relative;">
+                  <div style="width: 90px; height: 120px; background: #181B26; border: 1px solid #C21818; border-radius: 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(194,24,24,0.3);">
+                    <span style="font-family: Orbitron; font-size: 16px; font-weight: 900; color: #FFF;">MANGA</span>
+                    <span style="font-family: monospace; font-size: 7px; color: #C21818; margin-top: 2px;">PAGE 01/24</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>WEB APPLICATION // KOMGA &amp; KAVITA ARCHIVE ENGINE</span>
+          <span>PAGE 14</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 15: APLICACIÓN: CUADERNO / PROYECTO MANGA EBOOK -->
+      <section class="brand-slide" id="slide-15" data-page="15">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">15</span>
+            <span class="slide-section-title">APLICACIÓN FÍSICA // CUADERNO DE PROYECTOS Y MANGA</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 15</div>
+        </div>
+
+        <div class="slide-body">
+          <div class="two-col-grid" style="justify-items: center;">
+            <!-- Mockup Cuaderno / Manga Tankobon -->
+            <div class="mockup-slate" style="height: 250px; background: #08090D; width: 100%;">
+              <div style="width: 140px; height: 190px; background: linear-gradient(135deg, #161922 0%, #050508 100%); border: 1px solid #C21818; border-radius: 2px 6px 6px 2px; box-shadow: -8px 8px 25px rgba(0,0,0,0.9); padding: 14px; display: flex; flex-direction: column; justify-content: space-between; position: relative;">
+                <!-- Lomo del cuaderno -->
+                <div style="position: absolute; left: -10px; top: 0; bottom: 0; width: 10px; background: #C21818; border-radius: 2px 0 0 2px;"></div>
+                <div>
+                  <div style="font-family: Orbitron; font-size: 11px; font-weight: bold; color: #FFF;">DIARSPEICHER</div>
+                  <div style="font-family: monospace; font-size: 6px; color: #8F96A8;">MANGA PROJECT // VOL. 01</div>
+                </div>
+                <div style="display: flex; justify-content: center;">
+                  <svg viewBox="0 0 100 100" width="50" height="50">
+                    <polygon points="20,10 80,10 95,30 95,70 80,90 20,90 20,75 30,65 30,35 20,25" fill="#222634" stroke="#C21818" stroke-width="3"/>
+                    <polygon points="50,35 65,50 50,65 35,50" fill="#C21818"/>
+                  </svg>
+                </div>
+                <div style="font-family: monospace; font-size: 6px; color: #64748B; text-align: center;">STORYBOARD &amp; SCRIPT ARCHIVE</div>
+              </div>
+            </div>
+            <div>
+              <h2 class="section-heading">Cuaderno de Trabajo / Manga Tankobon</h2>
+              <p class="lead-text">
+                El soporte físico para el desarrollo de los argumentos del manga y el diseño de arcos argumentales de <strong>DiarSpeicher</strong>. Encuadernación en rústica mate con lomo carmesí y estamping metalizado en la cubierta.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>PHYSICAL ARCHIVE // MANGA TANKOBON &amp; NOTEBOOK</span>
+          <span>PAGE 15</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 16: SEÑALÉTICA Y AMBIENTE -->
+      <section class="brand-slide" id="slide-16" data-page="16">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">16</span>
+            <span class="slide-section-title">SEÑALÉTICA DE SERVIDOR Y NODO FÍSICO</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 16</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">Rack de Almacenamiento y Servidor Local</h2>
+          <div class="two-col-grid">
+            <div>
+              <p class="lead-text">
+                Rotulación y branding para el gabinete NAS / Servidor local que aloja los terabytes de manga y novelas gráficas, con LEDs indicadores en color carmesí e identificación del nodo principal.
+              </p>
+            </div>
+            <div class="mockup-slate" style="height: 220px; background: #050508;">
+              <div style="width: 100%; height: 140px; background: #0E1015; border: 1px solid #282C38; border-radius: 4px; padding: 12px; display: flex; flex-direction: column; justify-content: space-between;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-family: Orbitron; font-size: 11px; font-weight: bold; color: #FFF;">DIARSPEICHER // RACK-01</span>
+                  <div style="width: 8px; height: 8px; background: #FF2E2E; border-radius: 50%; box-shadow: 0 0 8px #FF2E2E;"></div>
+                </div>
+                <div style="font-family: monospace; font-size: 9px; color: #8F96A8;">
+                  STATUS: 42TB RAID STORAGE ACTIVE // KAVITA BACKEND
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>SERVER RACK BRANDING // NAS STORAGE NODE</span>
+          <span>PAGE 16</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 17: CONTRAPORTADA -->
+      <section class="brand-slide" id="slide-17" data-page="17">
+        <div class="grid-lines-bg"></div>
+        <div class="hud-corner-tl"></div>
+        <div class="hud-corner-br"></div>
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">17</span>
+            <span class="slide-section-title">CONTRAPORTADA // CIERRE OFICIAL</span>
+          </div>
+          <div class="slide-meta-right">FINAL DE ESPECIFICACIÓN</div>
+        </div>
+
+        <div class="slide-body" style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
+          <svg viewBox="0 0 100 80" width="80" height="60" style="margin-bottom: 16px;">
+            <polygon points="10,5 60,5 85,35 85,55 60,75 10,75 10,60 20,52 20,30 10,22" fill="#181A22" stroke="#C21818" stroke-width="2"/>
+            <polygon points="35,22 52,22 66,37 66,45 52,60 35,60" fill="#0A0B0E"/>
+            <polygon points="50,28 54,37 50,46 46,37" fill="#FF2E2E"/>
+          </svg>
+
+          <h2 style="font-family: var(--font-display); font-size: 26px; font-weight: 900; letter-spacing: 2px;">
+            DIAR<span style="color: var(--ds-red-glow);">SPEICHER</span>
+          </h2>
+          <p style="font-family: var(--font-tactical); font-size: 13px; font-weight: 700; letter-spacing: 6px; color: #8F96A8; margin-top: 4px;">
+            MANGA &amp; EBOOK ARCHIVE PROTOCOL
+          </p>
+
+          <div style="margin-top: 24px; font-family: var(--font-mono); font-size: 11px; color: #64748B; display: flex; flex-direction: column; gap: 4px;">
+            <span>DOC ID: DS-SPEC-2026 // REV 2.0.0</span>
+            <span>DISEÑADO BAJO EL PROTOCOLO DIARMUND &amp; IRON BLOOD</span>
+            <span style="color: var(--ds-red-glow); margin-top: 8px;">Cajamarca, Perú</span>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>END OF DIARSPEICHER MANUAL</span>
+          <span>© 2026 ALL RIGHTS RESERVED</span>
+          <span>PAGE 17</span>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <script>
+    let currentSlide = 1;
+    const totalSlides = 17;
+    let isContinuousView = false;
+
+    function updateDeckDisplay() {
+      const slides = document.querySelectorAll('.brand-slide');
+      const pageDisplay = document.getElementById('page-display');
+      
+      if (!isContinuousView) {
+        slides.forEach((slide, idx) => {
+          if (idx + 1 === currentSlide) {
+            slide.style.display = 'flex';
+          } else {
+            slide.style.display = 'none';
+          }
+        });
+        pageDisplay.innerText = `PÁG ${String(currentSlide).padStart(2, '0')} / ${totalSlides}`;
+      } else {
+        slides.forEach(slide => slide.style.display = 'flex');
+        pageDisplay.innerText = `TODAS (17)`;
+      }
+    }
+
+    function nextSlide() {
+      if (currentSlide < totalSlides) {
+        currentSlide++;
+        updateDeckDisplay();
+      }
+    }
+
+    function prevSlide() {
+      if (currentSlide > 1) {
+        currentSlide--;
+        updateDeckDisplay();
+      }
+    }
+
+    function toggleViewMode() {
+      isContinuousView = !isContinuousView;
+      const btn = document.getElementById('btn-view-mode');
+      if (isContinuousView) {
+        btn.innerText = 'Modo: Diapositiva';
+        btn.classList.add('active');
+      } else {
+        btn.innerText = 'Modo: Presentación';
+        btn.classList.remove('active');
+      }
+      updateDeckDisplay();
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (!isContinuousView) {
+        if (e.key === 'ArrowRight' || e.key === 'PageDown') nextSlide();
+        if (e.key === 'ArrowLeft' || e.key === 'PageUp') prevSlide();
+      }
+    });
+
+    updateDeckDisplay();
+  </script>
+</body>
+</html>

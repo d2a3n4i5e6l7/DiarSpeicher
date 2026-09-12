@@ -10,6 +10,7 @@ using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Storage;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
 using DiarSpeicher.Infrastructure.Komga;
+using DiarSpeicher.Infrastructure.Metadata;
 using Microsoft.AspNetCore.HttpOverrides;
 using DiarSpeicher.Infrastructure.Opds;
 using DiarSpeicher.Infrastructure.StumpV2;
@@ -49,7 +50,9 @@ builder.Services.AddSingleton<ILinkPrefixProvider, HttpContextLinkPrefixProvider
 
 // Storage locations & page cache
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
+builder.Services.Configure<MangaBakaOptions>(builder.Configuration.GetSection(MangaBakaOptions.SectionName));
 builder.Services.PostConfigure<StorageOptions>(ApplyUploadEnvironmentOverrides);
+builder.Services.AddOptions<MangaBakaOptions>().PostConfigure<IOptions<StorageOptions>>(ApplyMangaBakaStorageRoot);
 builder.Services.AddSingleton<IPageCache, DiskPageCache>();
 
 // Book Processing & Extraction
@@ -80,6 +83,13 @@ builder.Services.AddScoped<IStumpV2Service, StumpV2Service>();
 
 // Filesystem Scanner & Background Worker
 builder.Services.AddSingleton<IDirectoryScanner, DirectoryScanner>();
+builder.Services.AddSingleton<IArchiveConversionService, ArchiveConversionService>();
+
+// Catalogo externo de MangaBaka. El volcado es un fichero de solo lectura en disco, asi que
+// el catalogo es singleton; el emparejador toca la base de datos y va por peticion.
+builder.Services.AddSingleton<IMangaBakaCatalog, MangaBakaCatalog>();
+builder.Services.AddSingleton<IMangaBakaIngestService, MangaBakaIngestService>();
+builder.Services.AddScoped<ISeriesMetadataMatcher, SeriesMetadataMatcher>();
 builder.Services.AddScoped<ILibraryScannerService, LibraryScannerService>();
 builder.Services.AddSingleton<IScannerQueue, ScannerQueue>();
 builder.Services.AddHostedService<ScanBackgroundService>();
@@ -97,6 +107,7 @@ builder.Services
     .AddTypeExtension<SeriesResolvers>()
     .AddTypeExtension<MediaResolvers>()
     .AddTypeExtension<LibraryResolvers>()
+    .AddTypeExtension<MangaBakaQueries>()
     .AddDataLoader<MediaBySeriesDataLoader>()
     .AddDataLoader<SeriesByLibraryDataLoader>()
     .AddDataLoader<SeriesByIdDataLoader>()
@@ -161,6 +172,7 @@ app.MapKomgaEndpoints();
 app.MapKoReaderEndpoints();
 app.MapKoboEndpoints();
 app.MapStumpV2Endpoints();
+app.MapMetadataEndpoints();
 app.MapTusEndpoints();
 
 await app.RunAsync();
@@ -182,6 +194,7 @@ static void EnsureDataDirectories(IServiceProvider services, string connectionSt
         storage.ResolvePageCachePath(),
         storage.ResolveBackupPath(),
         storage.ResolveUploadsPath(),
+        Path.Combine(Path.GetFullPath(storage.RootPath), "manga_database"),
     };
 
     // Una base en memoria no tiene directorio que crear.
@@ -200,6 +213,18 @@ static void EnsureDataDirectories(IServiceProvider services, string connectionSt
     {
         Directory.CreateDirectory(directory);
     }
+}
+
+/// <summary>
+/// Sin ruta configurada, el volcado cuelga del volumen de datos. El directorio de trabajo
+/// del proceso no vale: en el contenedor es /home/nonroot, que ni es escribible ni persiste
+/// entre despliegues, y son 3,5 GB que no se quieren volver a descargar.
+/// </summary>
+static void ApplyMangaBakaStorageRoot(MangaBakaOptions options, IOptions<StorageOptions> storageOptions)
+{
+    if (!string.IsNullOrWhiteSpace(options.DatabasePath)) return;
+
+    options.DatabasePath = Path.Combine(Path.GetFullPath(storageOptions.Value.RootPath), "manga_database");
 }
 
 /// <summary>

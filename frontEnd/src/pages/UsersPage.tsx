@@ -35,6 +35,8 @@ import VpnKeyIcon from "@mui/icons-material/VpnKey";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useCallback, useEffect, useState } from "react";
 import PageHeader from "../components/PageHeader";
+import HudFrame from "../components/HudFrame";
+import { DS } from "../theme";
 import {
 	usersApi,
 	rolesApi,
@@ -156,7 +158,16 @@ function AccessFields({ form, protocols, onChange }: Readonly<AccessFieldsProps>
 			/>
 
 			<Divider textAlign="left">
-				<Typography variant="caption" color="text.secondary">
+				<Typography
+					sx={{
+						fontFamily: "'Rajdhani', sans-serif",
+						fontSize: "12px",
+						fontWeight: 700,
+						letterSpacing: "2px",
+						textTransform: "uppercase",
+						color: DS.redLight,
+					}}
+				>
 					Permisos
 				</Typography>
 			</Divider>
@@ -202,7 +213,16 @@ function AccessFields({ form, protocols, onChange }: Readonly<AccessFieldsProps>
 			))}
 
 			<Divider textAlign="left">
-				<Typography variant="caption" color="text.secondary">
+				<Typography
+					sx={{
+						fontFamily: "'Rajdhani', sans-serif",
+						fontSize: "12px",
+						fontWeight: 700,
+						letterSpacing: "2px",
+						textTransform: "uppercase",
+						color: DS.redLight,
+					}}
+				>
 					Formas de conexión
 				</Typography>
 			</Divider>
@@ -404,14 +424,48 @@ export default function UsersPage() {
 	let tableContent: React.ReactNode;
 	if (loading) {
 		tableContent = (
-			<Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", p: 6 }}>
-				<CircularProgress />
+			<Box
+				sx={{
+					display: "flex",
+					flexDirection: "column",
+					alignItems: "center",
+					justifyContent: "center",
+					gap: 2,
+					p: 6,
+				}}
+			>
+				<CircularProgress size={28} thickness={5} />
+				<Typography
+					sx={{
+						fontFamily: "'JetBrains Mono', monospace",
+						fontSize: "11px",
+						letterSpacing: "1px",
+						color: DS.subtle,
+					}}
+				>
+					SINCRONIZANDO REGISTRO DE CUENTAS...
+				</Typography>
 			</Box>
 		);
 	} else if (users.length === 0) {
 		tableContent = (
 			<Box sx={{ p: 6, textAlign: "center" }}>
-				<Typography color="text.secondary">No hay usuarios registrados.</Typography>
+				<VpnKeyIcon sx={{ fontSize: 40, color: DS.borderRed, mb: 1.5 }} />
+				<Typography
+					sx={{
+						fontFamily: "'Rajdhani', sans-serif",
+						fontSize: "16px",
+						fontWeight: 700,
+						letterSpacing: "1.5px",
+						textTransform: "uppercase",
+						color: DS.platinum,
+					}}
+				>
+					Registro de cuentas vacío
+				</Typography>
+				<Typography sx={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", color: DS.muted, mt: 0.5 }}>
+					Ningún operador tiene acceso a este nodo todavía.
+				</Typography>
 			</Box>
 		);
 	} else {
@@ -420,8 +474,8 @@ export default function UsersPage() {
 				<Table>
 					<TableHead>
 						<TableRow>
-							<TableCell>ID</TableCell>
-							<TableCell>Usuario</TableCell>
+							<TableCell sx={{ width: 96 }}>ID</TableCell>
+							<TableCell>Operador</TableCell>
 							<TableCell>Rol</TableCell>
 							<TableCell>Edad</TableCell>
 							<TableCell>Accesos</TableCell>
@@ -436,45 +490,67 @@ export default function UsersPage() {
 							const hasAge = u.age_restriction !== null && u.age_restriction !== undefined;
 							return (
 								<TableRow key={u.id} hover>
-									<TableCell>{u.id}</TableCell>
 									<TableCell>
-										<Typography sx={{ fontWeight: 600 }}>{u.username}</Typography>
+										<Box component="span" className="ds-pill-mono">
+											{String(u.id).padStart(3, "0")}
+										</Box>
+									</TableCell>
+									<TableCell>
+										<Typography
+											sx={{
+												fontFamily: "'Rajdhani', sans-serif",
+												fontSize: "15px",
+												fontWeight: 700,
+												letterSpacing: "1px",
+												textTransform: "uppercase",
+												color: "#FFFFFF",
+											}}
+										>
+											{u.username}
+										</Typography>
 									</TableCell>
 									<TableCell>
 										<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 											<Chip
-												label={u.role || "Sin rol"}
+												label={(u.role || "sin rol").toUpperCase()}
 												size="small"
 												variant="outlined"
 												color={isAdmin ? "primary" : "default"}
 											/>
-											{isAdmin && <Chip label="Admin" size="small" color="primary" />}
+											{isAdmin && <Chip label="ADMIN" size="small" color="primary" />}
 										</Stack>
 									</TableCell>
 									<TableCell>
-										<Typography variant="body2" color={hasAge ? "text.primary" : "text.secondary"}>
-											{hasAge ? `${String(u.age_restriction)} años` : "Sin límite"}
+										<Typography
+											variant="body2"
+											sx={{
+												fontFamily: "'JetBrains Mono', monospace",
+												fontSize: "12px",
+												color: hasAge ? DS.redLight : DS.subtle,
+											}}
+										>
+											{hasAge ? `+${String(u.age_restriction)}` : "SIN LÍMITE"}
 										</Typography>
 									</TableCell>
 									<TableCell>
 										<Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap", gap: 0.5 }}>
 											{hasPermission(u.permissions, "FileUpload") && (
-												<Chip label="Subir" size="small" variant="outlined" />
+												<Chip label="SUBIR" size="small" variant="outlined" />
 											)}
 											{hasPermission(u.permissions, "CreateFolder") && (
-												<Chip label="Carpetas" size="small" variant="outlined" />
+												<Chip label="CARPETAS" size="small" variant="outlined" />
 											)}
 											{hasProtocol(u.allowed_protocols, PROTOCOL_API_KEY) && (
-												<Chip label="Clave API" size="small" variant="outlined" />
+												<Chip label="CLAVE API" size="small" variant="outlined" />
 											)}
 											{hasProtocol(u.allowed_protocols, PROTOCOL_BASIC) && (
-												<Chip label="OPDS Basic" size="small" color="warning" variant="outlined" />
+												<Chip label="OPDS BASIC" size="small" color="warning" variant="outlined" />
 											)}
 										</Stack>
 									</TableCell>
 									<TableCell>
 										<Chip
-											label={isEnabled ? "Activo" : "Inactivo"}
+											label={isEnabled ? "ACTIVO" : "INACTIVO"}
 											size="small"
 											color={isEnabled ? "success" : "default"}
 											variant={isEnabled ? "filled" : "outlined"}
@@ -533,14 +609,19 @@ export default function UsersPage() {
 				actions={
 					<>
 						<Button
-							variant="outlined"
 							startIcon={<RefreshIcon />}
 							onClick={() => {
 								void loadData();
 							}}
 							disabled={loading}
+							sx={{
+								color: "#A3ABB8",
+								border: `1px solid ${DS.border}`,
+								backgroundColor: DS.bgSunken,
+								"&:hover": { borderColor: "#383E4C", backgroundColor: DS.bgSurface, color: "#FFFFFF" },
+							}}
 						>
-							Refrescar
+							ACTUALIZAR
 						</Button>
 						<Button
 							id="create-user-btn"
@@ -550,8 +631,10 @@ export default function UsersPage() {
 								setCreateForm(EMPTY_FORM);
 								setOpenCreate(true);
 							}}
+							className="btn-tactical"
+							sx={{ background: DS.red, borderColor: DS.redGlow, color: "#FFFFFF" }}
 						>
-							Nuevo Usuario
+							NUEVO USUARIO
 						</Button>
 					</>
 				}
@@ -569,16 +652,20 @@ export default function UsersPage() {
 				</Alert>
 			)}
 
-			<Card>{tableContent}</Card>
+			<Card sx={{ overflow: "hidden" }}>
+				<HudFrame />
+				{tableContent}
+			</Card>
 
 			{/* Modal: Crear Usuario */}
 			<Dialog open={openCreate} onClose={() => setOpenCreate(false)} maxWidth="sm" fullWidth>
+				<HudFrame />
 				<form
 					onSubmit={(e) => {
 						void handleCreateUser(e);
 					}}
 				>
-					<DialogTitle>Crear Nuevo Usuario</DialogTitle>
+					<DialogTitle>Alta de nuevo operador</DialogTitle>
 					<DialogContent dividers>
 						<Stack spacing={2.5} sx={{ mt: 1 }}>
 							<TextField
@@ -630,12 +717,13 @@ export default function UsersPage() {
 
 			{/* Modal: Editar Usuario */}
 			<Dialog open={openEdit} onClose={() => setOpenEdit(false)} maxWidth="sm" fullWidth>
+				<HudFrame />
 				<form
 					onSubmit={(e) => {
 						void handleUpdateUser(e);
 					}}
 				>
-					<DialogTitle>Editar Usuario: {editingUser?.username}</DialogTitle>
+					<DialogTitle>Editar operador: {editingUser?.username}</DialogTitle>
 					<DialogContent dividers>
 						<Stack spacing={2.5} sx={{ mt: 1 }}>
 							<FormControl fullWidth size="small">
@@ -680,12 +768,13 @@ export default function UsersPage() {
 
 			{/* Modal: Cambiar Contraseña */}
 			<Dialog open={openPassword} onClose={() => setOpenPassword(false)} maxWidth="xs" fullWidth>
+				<HudFrame />
 				<form
 					onSubmit={(e) => {
 						void handleChangePassword(e);
 					}}
 				>
-					<DialogTitle>Cambiar Contraseña: {passwordUser?.username}</DialogTitle>
+					<DialogTitle>Rotar credencial: {passwordUser?.username}</DialogTitle>
 					<DialogContent>
 						<Stack spacing={2} sx={{ mt: 1 }}>
 							<TextField
@@ -711,7 +800,12 @@ export default function UsersPage() {
 
 			{/* Modal: Confirmar Eliminación */}
 			<Dialog open={Boolean(deleteUser)} onClose={() => setDeleteUser(null)} maxWidth="xs" fullWidth>
-				<DialogTitle>¿Eliminar Usuario?</DialogTitle>
+				<HudFrame />
+				<DialogTitle
+					sx={{ color: DS.redGlow, backgroundColor: "#160303", borderBottom: `1px solid ${DS.borderRed}` }}
+				>
+					Confirmar baja de operador
+				</DialogTitle>
 				<DialogContent>
 					<Typography variant="body2">
 						¿Estás seguro de que deseas eliminar permanentemente al usuario{" "}

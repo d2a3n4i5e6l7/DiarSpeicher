@@ -180,6 +180,7 @@ public sealed class UploadAndPageExtractionTests : IDisposable
             new DirectoryScanner(),
             compositeProcessor,
             new ThumbnailService(compositeProcessor, NullLogger<ThumbnailService>.Instance),
+            new ArchiveConversionService(NullLogger<ArchiveConversionService>.Instance),
             NullLogger<LibraryScannerService>.Instance);
 
         var owner = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };

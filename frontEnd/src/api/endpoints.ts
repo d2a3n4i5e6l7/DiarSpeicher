@@ -1,4 +1,4 @@
-import { http, gatewayHttp } from "./client";
+import { http, gatewayHttp, API_BASE } from "./client";
 
 export interface LoginPayload {
 	username: string;
@@ -186,6 +186,14 @@ export const READING_DIRECTIONS = ["LeftToRight", "RightToLeft"] as const;
 export const READING_MODES = ["Paged", "ContinuousVertical", "ContinuousHorizontal"] as const;
 
 /** Espejo de StumpLibraryConfigDto. Los enums viajan como el nombre del miembro, no su indice. */
+/**
+ * Solo lo que el motor respeta de verdad.
+ *
+ * `watch`, `hideSeriesView`, `thumbnailWidth/Height` e `ignoreRules` siguen existiendo en
+ * la API pero el backend no los consulta en ningún sitio: el vigilante de disco mira todas
+ * las bibliotecas siempre, y los otros tres solo se guardaban. Enseñarlos en el formulario
+ * prometía un comportamiento que no ocurre, así que no se ofrecen ni se envían.
+ */
 export interface LibraryConfig {
 	libraryType: (typeof LIBRARY_TYPES)[number];
 	libraryPattern: (typeof LIBRARY_PATTERNS)[number];
@@ -197,11 +205,6 @@ export interface LibraryConfig {
 	generateFileHashes: boolean;
 	generateKoreaderHashes: boolean;
 	processMetadata: boolean;
-	watch: boolean;
-	hideSeriesView: boolean;
-	thumbnailWidth: number;
-	thumbnailHeight: number;
-	ignoreRules?: string;
 }
 
 export const DEFAULT_LIBRARY_CONFIG: LibraryConfig = {
@@ -215,10 +218,6 @@ export const DEFAULT_LIBRARY_CONFIG: LibraryConfig = {
 	generateFileHashes: true,
 	generateKoreaderHashes: true,
 	processMetadata: true,
-	watch: false,
-	hideSeriesView: false,
-	thumbnailWidth: 400,
-	thumbnailHeight: 600,
 };
 
 export interface LibraryItem {
@@ -326,3 +325,220 @@ export const systemApi = {
 	getClaimStatus: () => http.get<SystemClaimResponse>("/api/v2/claim"),
 };
 
+
+// ---------------------------------------------------------------------------
+// Catálogo: series y medios (API v2)
+// ---------------------------------------------------------------------------
+
+export interface PageResponse<T> {
+	data: T[];
+	total: number;
+	page: number;
+	pageSize: number;
+	totalPages: number;
+}
+
+export interface MediaMetadataItem {
+	title?: string;
+	summary?: string;
+	writers?: string;
+	genre?: string;
+	publisher?: string;
+	ageRating?: number;
+	number?: number;
+}
+
+export interface MediaItem {
+	id: string;
+	name: string;
+	size: number;
+	extension: string;
+	pages: number;
+	status: string;
+	hash?: string;
+	koreaderHash?: string;
+	path: string;
+	seriesId?: string;
+	createdAt: string;
+	metadata?: MediaMetadataItem;
+	/** Última página leída por el usuario actual; ausente si nunca se abrió. */
+	currentPage?: number;
+	isCompleted: boolean;
+}
+
+export interface SeriesMetadataItem {
+	/** Origen del dato: "mangabaka" si vino del volcado externo. */
+	source?: string;
+	externalId?: number;
+	title?: string;
+	summary?: string;
+	publisher?: string;
+	writers?: string;
+	genres?: string;
+	status?: string;
+	year?: number;
+	coverUrl?: string;
+	link?: string;
+	/** Último volumen publicado: con él se dice "3 de 12". */
+	finalVolume?: number;
+	/** Manga, novela, manhwa... según el catálogo externo. */
+	type?: string;
+	totalChapters?: string;
+}
+
+export interface SeriesItem {
+	id: string;
+	name: string;
+	path: string;
+	status: string;
+	libraryId: string;
+	mediaCount: number;
+	description?: string;
+	/** Marca del último cambio de portada, para romper la caché del navegador. */
+	coverUpdatedAt?: string;
+	/** Ausente mientras nadie haya emparejado la serie con el catálogo externo. */
+	metadata?: SeriesMetadataItem;
+}
+
+export interface ProgressPayload {
+	page: number;
+	percentage?: number;
+	isCompleted?: boolean;
+}
+
+/** Tamaño de página máximo que acepta el backend (`Math.Clamp(pageSize, 1, 100)`). */
+export const MAX_PAGE_SIZE = 100;
+
+function pageQuery(page: number, pageSize: number): string {
+	return `page=${String(page)}&pageSize=${String(Math.min(pageSize, MAX_PAGE_SIZE))}`;
+}
+
+export const mediaApi = {
+	list: (page = 0, pageSize = 20) => http.get<PageResponse<MediaItem>>(`/api/v2/media?${pageQuery(page, pageSize)}`),
+	keepReading: () => http.get<MediaItem[]>("/api/v2/media/keep-reading"),
+	get: (id: string) => http.get<MediaItem>(`/api/v2/media/${id}`),
+	updateProgress: (id: string, payload: ProgressPayload) =>
+		http.put<{ updated: boolean }>(`/api/v2/media/${id}/progress`, payload),
+
+	/**
+	 * Añadido reciente. El backend ordena `/media` por `Id` y el Id es un ULID, que es
+	 * monótono por tiempo de creación: la última página es la más nueva. Sin un
+	 * parámetro de orden en la API, esta es la forma de obtenerla sin traerlo todo.
+	 */
+	latest: async (limit = 20): Promise<MediaItem[]> => {
+		const size = Math.min(limit, MAX_PAGE_SIZE);
+		const first = await http.get<PageResponse<MediaItem>>(`/api/v2/media?${pageQuery(0, size)}`);
+		if (first.totalPages <= 1) {
+			return [...first.data].reverse();
+		}
+		const last = await http.get<PageResponse<MediaItem>>(`/api/v2/media?${pageQuery(first.totalPages - 1, size)}`);
+		return [...last.data].reverse();
+	},
+
+	// URLs directas: las consume <img> y el navegador manda la cookie de sesión, que
+	// es lo que el Gateway resuelve. No pasan por request() porque no llevan prueba DPoP.
+	thumbnailUrl: (id: string) => `${API_BASE}/api/v2/media/${id}/thumbnail`,
+	pageUrl: (id: string, page: number) => `${API_BASE}/api/v2/media/${id}/page/${String(page)}`,
+	fileUrl: (id: string) => `${API_BASE}/api/v2/media/${id}/file`,
+};
+
+export const seriesApi = {
+	list: (libraryId?: string | null, page = 0, pageSize = 24) => {
+		const scope = libraryId ? `&libraryId=${encodeURIComponent(libraryId)}` : "";
+		return http.get<PageResponse<SeriesItem>>(`/api/v2/series?${pageQuery(page, pageSize)}${scope}`);
+	},
+	get: (id: string) => http.get<SeriesItem>(`/api/v2/series/${id}`),
+	media: (id: string, page = 0, pageSize = 50) =>
+		http.get<PageResponse<MediaItem>>(`/api/v2/series/${id}/media?${pageQuery(page, pageSize)}`),
+
+	/**
+	 * El nombre sale de la carpeta, y ahí acaban cosas como "Tomos [01-08][Completo]".
+	 * El escáner solo lo escribe al crear la serie, así que renombrar aquí aguanta los
+	 * rescaneos. Un campo ausente no se toca.
+	 */
+	update: (id: string, payload: { name?: string; description?: string }) =>
+		http.put<SeriesItem>(`/api/v2/series/${id}`, payload),
+
+	/**
+	 * Portada de la serie: la elegida a mano si la hay, y si no la del primer tomo.
+	 *
+	 * El `token` es la marca de tiempo del último cambio (`metadata.coverUpdatedAt`).
+	 * Sin él, el navegador seguiría enseñando la portada vieja desde su caché después de
+	 * cambiarla, porque la URL no habría cambiado.
+	 */
+	thumbnailUrl: (id: string, token?: string | null) =>
+		`${API_BASE}/api/v2/series/${id}/thumbnail${token ? `?v=${encodeURIComponent(token)}` : ""}`,
+
+	/** Adopta como portada la miniatura de un tomo ya indexado. */
+	setCoverFromMedia: (seriesId: string, mediaId: string) =>
+		http.put<{ updated: boolean }>(`/api/v2/series/${seriesId}/thumbnail`, { mediaId }),
+
+	/** Portada subida a mano. JPG, PNG o WebP. */
+	uploadCover: (seriesId: string, file: File) => {
+		const form = new FormData();
+		form.append("file", file);
+		return http.upload<{ updated: boolean }>(`/api/v2/series/${seriesId}/thumbnail`, form);
+	},
+
+	/** Vuelve a la portada automática: la del primer tomo. */
+	clearCover: (seriesId: string) => http.delete<void>(`/api/v2/series/${seriesId}/thumbnail`),
+};
+
+// ---------------------------------------------------------------------------
+// Metadata externa (volcado de MangaBaka)
+// ---------------------------------------------------------------------------
+
+export type MangaBakaState = "Absent" | "Downloading" | "Decompressing" | "Indexing" | "Ready" | "Failed";
+
+export interface MetadataStatus {
+	state: MangaBakaState;
+	percent?: number | null;
+	message?: string | null;
+	seriesCount: number;
+	sizeBytes: number;
+	updatedAt?: string | null;
+	busy: boolean;
+}
+
+export interface MangaBakaCandidate {
+	id: number;
+	title: string;
+	nativeTitle?: string;
+	romanizedTitle?: string;
+	type?: string;
+	year?: number;
+	status?: string;
+	coverUrl?: string;
+	rating?: number;
+	/** Recortada a ~320 caracteres: en la lista solo sirve para reconocer la obra. */
+	description?: string;
+	authors?: string;
+	genres?: string;
+}
+
+/** Formatos que acepta la ingesta del volcado. */
+export const METADATA_ARCHIVE_EXTENSIONS = [".zst", ".tar.gz", ".tgz"] as const;
+
+export const metadataApi = {
+	status: () => http.get<MetadataStatus>("/api/v2/metadata/status"),
+	download: () => http.post<void>("/api/v2/metadata/download"),
+	import: (file: File) => {
+		const form = new FormData();
+		form.append("file", file);
+		return http.upload<void>("/api/v2/metadata/import", form);
+	},
+	candidates: (seriesId: string, limit = 10) =>
+		http.get<MangaBakaCandidate[]>(`/api/v2/metadata/series/${seriesId}/candidates?limit=${String(limit)}`),
+	match: (seriesId: string, mangaBakaId: number) =>
+		http.put<{ matched: boolean }>(`/api/v2/metadata/series/${seriesId}/match/${String(mangaBakaId)}`),
+	unmatch: (seriesId: string) => http.delete<void>(`/api/v2/metadata/series/${seriesId}/match`),
+
+	/**
+	 * Las portadas del catálogo viven en cdn.mangabaka.dev y el navegador las rechaza con
+	 * `NS_ERROR_DOM_CORP_FAILED`: son recursos cross-origin que no autorizan su incrustación.
+	 * El servidor las trae y las sirve desde nuestro propio origen, con lo que además el
+	 * navegador del usuario deja de hablar con un tercero.
+	 */
+	coverUrl: (externalUrl: string) =>
+		`${API_BASE}/api/v2/metadata/cover?url=${encodeURIComponent(externalUrl)}`,
+};

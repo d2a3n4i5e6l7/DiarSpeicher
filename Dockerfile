@@ -43,7 +43,7 @@ COPY entrypoint.sh /rootfs/usr/local/bin/entrypoint.sh
 RUN set -eu; \
     TRIPLET="$([ "$(dpkg --print-architecture)" = "arm64" ] && echo "aarch64-linux-gnu" || echo "x86_64-linux-gnu")"; \
     mkdir -p "/rootfs/usr/lib/$TRIPLET" /rootfs/etc/fonts \
-    /rootfs/data/db /rootfs/data/thumbnails /rootfs/data/cache/pages \
+    /rootfs/data/db /rootfs/data/thumbnails /rootfs/data/cache/pages /rootfs/data/manga_database \
     /rootfs/libraries /rootfs/usr/bin /rootfs/usr/local/bin /rootfs/tmp; \
     chmod +x /rootfs/usr/bin/diarspeicher /rootfs/usr/local/bin/entrypoint.sh; \
     cp -L /bin/dash /rootfs/usr/bin/dash; \

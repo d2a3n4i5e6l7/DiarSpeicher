@@ -17,7 +17,6 @@ import {
 	Stack,
 	TextField,
 	Typography,
-	useTheme,
 } from "@mui/material";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import LibraryBooksIcon from "@mui/icons-material/LibraryBooks";
@@ -30,6 +29,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { librariesApi, type LibraryItem } from "../api/endpoints";
 import { TusUpload, type TusUploadStatus } from "../api/tusClient";
 import { Link as RouterLink } from "react-router-dom";
+import PageHeader from "../components/PageHeader";
+import HudFrame from "../components/HudFrame";
 
 function formatBytes(bytes: number, decimals = 2): string {
 	if (bytes === 0) return "0 Bytes";
@@ -51,7 +52,6 @@ interface UploadQueueItem {
 }
 
 export default function UploadPage() {
-	const theme = useTheme();
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	const [libraries, setLibraries] = useState<LibraryItem[]>([]);
@@ -243,11 +243,8 @@ export default function UploadPage() {
 		}
 	};
 
-	const dropBorderColor = isDragging ? theme.palette.primary.main : theme.palette.divider;
-	let dropBgColor = isDragging ? "action.hover" : "background.paper";
-	if (theme.palette.mode === "dark") {
-		dropBgColor = isDragging ? "rgba(99, 102, 241, 0.12)" : "rgba(30, 41, 59, 0.5)";
-	}
+	const dropBorderColor = isDragging ? "#FF2E2E" : "#282C38";
+	const dropBgColor = isDragging ? "rgba(194, 24, 24, 0.15)" : "#0A0B0E";
 
 	const hasUploading = items.some((it) => it.status === "uploading");
 	const hasPausedOrIdle = items.some(
@@ -255,17 +252,12 @@ export default function UploadPage() {
 	);
 
 	return (
-		<Box sx={{ maxWidth: 1000, mx: "auto", py: 3, px: 2 }}>
+		<Box sx={{ maxWidth: 1100, mx: "auto" }}>
+			<PageHeader
+				title="Subida de Ficheros Reanudable (TUS)"
+				subtitle="Protocolo de ingesta de manga, cómics y novelas digitales con tolerancia a fallos y reanudación automática."
+			/>
 			<Stack spacing={3}>
-				{/* Cabecera */}
-				<Box>
-					<Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
-						Subida de Ficheros Reanudable (TUS)
-					</Typography>
-					<Typography variant="body1" color="text.secondary" sx={{ mt: 0.5 }}>
-						Sube cómics, libros y mangas con soporte de pausa, reanudación y tolerancia a micro-cortes.
-					</Typography>
-				</Box>
 
 				{error && (
 					<Alert severity="error" onClose={() => setError(null)}>
@@ -280,7 +272,8 @@ export default function UploadPage() {
 				)}
 
 				{/* Selección de Biblioteca y Destino */}
-				<Card>
+				<Card sx={{ overflow: "hidden" }}>
+					<HudFrame />
 					<CardContent>
 						<Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
 							1. Seleccionar Biblioteca Destino
@@ -331,7 +324,8 @@ export default function UploadPage() {
 				</Card>
 
 				{/* Zona Drag and Drop */}
-				<Card>
+				<Card sx={{ overflow: "hidden" }}>
+					<HudFrame />
 					<CardContent>
 						<Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
 							2. Seleccionar o Arrastrar Ficheros
@@ -351,11 +345,8 @@ export default function UploadPage() {
 								cursor: "pointer",
 								transition: "all 0.2s ease-in-out",
 								"&:hover": {
-									borderColor: theme.palette.primary.main,
-									backgroundColor:
-										theme.palette.mode === "dark"
-											? "rgba(99, 102, 241, 0.05)"
-											: "rgba(79, 70, 229, 0.02)",
+									borderColor: "#FF2E2E",
+									backgroundColor: "rgba(194, 24, 24, 0.08)",
 								},
 							}}
 						>

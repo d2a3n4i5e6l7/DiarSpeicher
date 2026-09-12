@@ -8,7 +8,6 @@ import {
 	Select,
 	Stack,
 	Switch,
-	TextField,
 	Typography,
 } from "@mui/material";
 import {
@@ -145,44 +144,7 @@ export default function LibraryConfigForm({ value, onChange, disabled }: Readonl
 				{toggle("generateKoreaderHashes", "Calcular hash de KOReader", "Necesario para que KOReader sincronice el progreso.")}
 				{toggle("convertRarToZip", "Convertir CBR a CBZ", "Los CBR requieren descompresión externa; el CBZ se sirve directo.")}
 				{toggle("hardDeleteConversions", "Borrar el CBR tras convertir", "Solo se aplica si la conversión está activada.")}
-				{toggle("watch", "Vigilar cambios en disco", "Escanea al detectar ficheros nuevos, sin esperar a un escaneo manual.")}
-				{toggle("hideSeriesView", "Ocultar la vista de series", "Para bibliotecas de tomos sueltos donde la serie no aporta nada.")}
 			</Stack>
-
-			<Divider />
-
-			<Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-				<TextField
-					label="Ancho de miniatura"
-					type="number"
-					size="small"
-					fullWidth
-					value={value.thumbnailWidth}
-					onChange={(e) => set("thumbnailWidth", Number(e.target.value))}
-					disabled={disabled}
-				/>
-				<TextField
-					label="Alto de miniatura"
-					type="number"
-					size="small"
-					fullWidth
-					value={value.thumbnailHeight}
-					onChange={(e) => set("thumbnailHeight", Number(e.target.value))}
-					disabled={disabled}
-				/>
-			</Stack>
-
-			<TextField
-				label="Reglas de exclusión"
-				size="small"
-				fullWidth
-				multiline
-				rows={2}
-				value={value.ignoreRules ?? ""}
-				onChange={(e) => set("ignoreRules", e.target.value)}
-				disabled={disabled}
-				helperText="Un patrón por línea, estilo .gitignore. Por ejemplo: **/extras/**"
-			/>
 		</Stack>
 	);
 }

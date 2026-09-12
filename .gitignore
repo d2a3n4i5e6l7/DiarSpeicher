@@ -58,3 +58,8 @@ libraries/
 
 # Paquetes de despliegue generados por build.sh
 /dist/
+
+# Volcado de MangaBaka: se descarga desde la interfaz, nunca se versiona.
+# Son ~390 MB comprimido y ~3,5 GB descomprimido, con licencia CC BY-NC-SA 4.0.
+*.zst
+*.tar.gz

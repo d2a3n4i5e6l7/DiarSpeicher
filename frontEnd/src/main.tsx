@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import App from "./App";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 const container = document.getElementById("root");
 if (!container) {
@@ -10,8 +11,10 @@ if (!container) {
 
 createRoot(container).render(
 	<StrictMode>
-		<MemoryRouter>
-			<App />
-		</MemoryRouter>
+		<ErrorBoundary>
+			<MemoryRouter>
+				<App />
+			</MemoryRouter>
+		</ErrorBoundary>
 	</StrictMode>
 );

@@ -24,6 +24,7 @@ public class LibraryScannerService : ILibraryScannerService
     private readonly IDirectoryScanner _directoryScanner;
     private readonly ICompositeBookProcessor _bookProcessor;
     private readonly IThumbnailService _thumbnailService;
+    private readonly IArchiveConversionService _archiveConverter;
     private readonly StorageOptions _storage;
     private readonly ILogger<LibraryScannerService> _logger;
     private readonly IScanProgressPublisher? _progressPublisher;
@@ -36,11 +37,47 @@ public class LibraryScannerService : ILibraryScannerService
 
     private sealed record PreparedMedia(string MediaId, string Path, ProcessedBook Analysis, string? ThumbnailPath);
 
+    /// <summary>
+    /// Lo que la configuracion de la biblioteca le pide a este escaneo. Se resuelve una vez
+    /// al principio y viaja hacia abajo: leerla dentro del bucle obligaria a arrastrar la
+    /// entidad Library por toda la cadena solo para consultar cuatro booleanos.
+    /// </summary>
+    private sealed record ScanSettings(BookAnalysisOptions Analysis, bool ConvertRarToZip, bool HardDeleteConversions)
+    {
+        public static ScanSettings From(LibraryConfig? config) => new(
+            new BookAnalysisOptions
+            {
+                ComputeFileHash = config?.GenerateFileHashes ?? true,
+                ComputeKoreaderHash = config?.GenerateKoreaderHashes ?? true,
+                ReadEmbeddedMetadata = config?.ProcessMetadata ?? true
+            },
+            config?.ConvertRarToZip ?? false,
+            config?.HardDeleteConversions ?? false);
+    }
+
+    /// <summary>
+    /// Un CBR con un CBZ hermano es el mismo libro dos veces. Se descarta el CBR, venga de
+    /// una conversion que no borro el original o de una copia que ya estaba ahi.
+    /// </summary>
+    private static bool HasConvertedSibling(string path)
+    {
+        var extension = Path.GetExtension(path);
+        if (!extension.Equals(".cbr", StringComparison.OrdinalIgnoreCase)
+            && !extension.Equals(".rar", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var sibling = Path.ChangeExtension(path, ".cbz");
+        return sibling is not null && File.Exists(sibling);
+    }
+
     public LibraryScannerService(
         DiarSpeicherDbContext dbContext,
         IDirectoryScanner directoryScanner,
         ICompositeBookProcessor bookProcessor,
         IThumbnailService thumbnailService,
+        IArchiveConversionService archiveConverter,
         ILogger<LibraryScannerService> logger,
         IOptions<StorageOptions>? storageOptions = null,
         IScanProgressPublisher? progressPublisher = null)
@@ -49,6 +86,7 @@ public class LibraryScannerService : ILibraryScannerService
         _directoryScanner = directoryScanner;
         _bookProcessor = bookProcessor;
         _thumbnailService = thumbnailService;
+        _archiveConverter = archiveConverter;
         _storage = storageOptions?.Value ?? new StorageOptions();
         _logger = logger;
         _progressPublisher = progressPublisher;
@@ -122,6 +160,7 @@ public class LibraryScannerService : ILibraryScannerService
         }
 
         var isCollectionBased = library.Config?.LibraryPattern == LibraryPattern.CollectionBased;
+        var settings = ScanSettings.From(library.Config);
         var thumbnailsDir = _storage.ResolveThumbnailsPath();
         Directory.CreateDirectory(thumbnailsDir);
 
@@ -153,6 +192,7 @@ public class LibraryScannerService : ILibraryScannerService
             walkedLibrary.SeriesToVisit.Concat(newlyCreatedSeries.Select(s => s.Path)),
             storedMtimes,
             thumbnailsDir,
+            settings,
             report,
             cancellationToken);
 
@@ -265,6 +305,7 @@ public class LibraryScannerService : ILibraryScannerService
         IEnumerable<string> seriesPaths,
         IReadOnlyDictionary<string, long> storedMtimes,
         string thumbnailsDir,
+        ScanSettings settings,
         LibraryScanReport report,
         CancellationToken cancellationToken)
     {
@@ -286,7 +327,7 @@ public class LibraryScannerService : ILibraryScannerService
                 totalSeries: seriesEntities.Count,
                 currentSeries: series.Name);
 
-            await ProcessSingleSeriesAsync(series, storedMtimes, thumbnailsDir, allObservedDirMtimes, report, cancellationToken);
+            await ProcessSingleSeriesAsync(series, storedMtimes, thumbnailsDir, allObservedDirMtimes, settings, report, cancellationToken);
             completed++;
         }
 
@@ -298,9 +339,22 @@ public class LibraryScannerService : ILibraryScannerService
         IReadOnlyDictionary<string, long> storedMtimes,
         string thumbnailsDir,
         Dictionary<string, long> allObservedDirMtimes,
+        ScanSettings settings,
         LibraryScanReport report,
         CancellationToken cancellationToken)
     {
+        // La conversion va antes de mirar el disco: si no, el recorrido veria el CBR que
+        // esta a punto de desaparecer y el CBZ que aun no existe.
+        if (settings.ConvertRarToZip)
+        {
+            var conversions = await _archiveConverter.ConvertDirectoryAsync(
+                series.Path,
+                settings.HardDeleteConversions,
+                cancellationToken);
+
+            await RepointConvertedMediaAsync(series.Id, conversions, report, cancellationToken);
+        }
+
         var existingMedia = await _dbContext.Media
             .Where(m => m.SeriesId == series.Id)
             .Select(m => new ExistingMediaInfo(m.Id, m.Path, m.Status, m.ModifiedAt))
@@ -317,10 +371,48 @@ public class LibraryScannerService : ILibraryScannerService
             allObservedDirMtimes[dirPath] = mtime;
         }
 
+        var mediaToCreate = walkedSeries.MediaToCreate.Where(path => !HasConvertedSibling(path)).ToList();
+
         await MarkMissingMediaAsync(series.Id, walkedSeries.MissingMedia, report, cancellationToken);
         await MarkRecoveredMediaAsync(walkedSeries.RecoveredMedia, report, cancellationToken);
-        await CreateNewMediaAsync(series.Id, walkedSeries.MediaToCreate, thumbnailsDir, report, cancellationToken);
-        await UpdateVisitedMediaAsync(series.Id, walkedSeries.MediaToVisit, thumbnailsDir, report, cancellationToken);
+        await CreateNewMediaAsync(series.Id, mediaToCreate, thumbnailsDir, settings, report, cancellationToken);
+        await UpdateVisitedMediaAsync(series.Id, walkedSeries.MediaToVisit, thumbnailsDir, settings, report, cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Mueve el medio ya indexado al CBZ resultante. Sin esto el CBR quedaria marcado como
+    /// desaparecido y el CBZ entraria como libro nuevo, y con el cambio el usuario perderia
+    /// el progreso de lectura que colgaba del medio anterior.
+    /// </summary>
+    private async Task RepointConvertedMediaAsync(
+        string seriesId,
+        IReadOnlyList<ArchiveConversion> conversions,
+        LibraryScanReport report,
+        CancellationToken cancellationToken)
+    {
+        if (conversions.Count == 0) return;
+
+        var sourcePaths = conversions.Select(c => c.SourcePath).ToList();
+        var affected = await _dbContext.Media
+            .Where(m => m.SeriesId == seriesId && sourcePaths.Contains(m.Path))
+            .ToListAsync(cancellationToken);
+
+        if (affected.Count == 0) return;
+
+        var bySource = conversions.ToDictionary(c => c.SourcePath, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var media in affected)
+        {
+            if (!bySource.TryGetValue(media.Path, out var conversion)) continue;
+
+            media.Path = conversion.TargetPath;
+            media.Extension = "cbz";
+            media.Status = FileStatus.Ready;
+            media.UpdatedAt = DateTimeOffset.UtcNow;
+            report.UpdatedMedia++;
+        }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -363,6 +455,7 @@ public class LibraryScannerService : ILibraryScannerService
     private async Task<List<PreparedMedia>> PrepareMediaAsync(
         List<(string MediaId, string Path)> targets,
         string thumbnailsDir,
+        BookAnalysisOptions analysisOptions,
         CancellationToken cancellationToken)
     {
         var results = new PreparedMedia?[targets.Count];
@@ -381,7 +474,7 @@ public class LibraryScannerService : ILibraryScannerService
                 {
                     // includeCover reuses the archive that the analysis already opened,
                     // instead of decompressing the whole book a second time for the cover.
-                    var analyzed = await _bookProcessor.AnalyzeAsync(mediaPath, includeCover: true, token, measurePages: true);
+                    var analyzed = await _bookProcessor.AnalyzeAsync(mediaPath, includeCover: true, token, measurePages: true, analysisOptions);
                     var thumbPath = await _thumbnailService.SaveThumbnailAsync(mediaId, analyzed.Cover, thumbnailsDir, token);
                     results[index] = new PreparedMedia(mediaId, mediaPath, analyzed, thumbPath);
                 }
@@ -398,6 +491,7 @@ public class LibraryScannerService : ILibraryScannerService
         string seriesId,
         List<string> mediaToCreate,
         string thumbnailsDir,
+        ScanSettings settings,
         LibraryScanReport report,
         CancellationToken cancellationToken)
     {
@@ -406,6 +500,7 @@ public class LibraryScannerService : ILibraryScannerService
         var prepared = await PrepareMediaAsync(
             mediaToCreate.Select(path => (Ulid.NewUlid().ToString(), path)).ToList(),
             thumbnailsDir,
+            settings.Analysis,
             cancellationToken);
 
         // Sequential phase: the change tracker must only ever be touched by one thread.
@@ -448,6 +543,7 @@ public class LibraryScannerService : ILibraryScannerService
         string seriesId,
         List<string> toVisitPaths,
         string thumbnailsDir,
+        ScanSettings settings,
         LibraryScanReport report,
         CancellationToken cancellationToken)
     {
@@ -463,6 +559,7 @@ public class LibraryScannerService : ILibraryScannerService
         var prepared = await PrepareMediaAsync(
             existingOnDisk.Select(m => (m.Id, m.Path)).ToList(),
             thumbnailsDir,
+            settings.Analysis,
             cancellationToken);
 
         var byId = prepared.ToDictionary(p => p.MediaId, StringComparer.Ordinal);

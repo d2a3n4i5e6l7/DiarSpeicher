@@ -173,6 +173,74 @@ public static class StumpV2Endpoints
             return result == null ? Results.NotFound() : Results.Ok(result);
         });
 
+        group.MapPut("/series/{id}", async (
+            string id,
+            [FromBody] StumpUpdateSeriesInput input,
+            HttpContext httpContext,
+            [FromServices] IStumpV2Service service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            if (!user.HasPermission(Permissions.ManageLibrary))
+            {
+                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            var result = await service.UpdateSeriesAsync(user, id, input, ct);
+            return result == null ? Results.NotFound() : Results.Ok(result);
+        });
+
+        // La portada la ve cualquiera que ya puede ver la serie; cambiarla es gestion.
+        group.MapGet("/series/{id}/thumbnail", async (
+            string id,
+            HttpContext httpContext,
+            [FromServices] IStumpV2Service service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            var cover = await service.GetSeriesThumbnailAsync(user, id, ct);
+            if (cover is null) return Results.NotFound();
+
+            // Sin revalidar: la URL lleva un testigo que cambia al cambiar la portada.
+            httpContext.Response.Headers.CacheControl = "public, max-age=86400";
+            return Results.File(cover.Value.Data, cover.Value.ContentType);
+        });
+
+        group.MapPut("/series/{id}/thumbnail", async (
+            string id,
+            [FromBody] StumpSeriesThumbnailInput input,
+            HttpContext httpContext,
+            [FromServices] IStumpV2Service service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            if (!user.HasPermission(Permissions.ManageLibrary))
+            {
+                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            var applied = await service.SetSeriesThumbnailFromMediaAsync(user, id, input.MediaId, ct);
+            return applied ? Results.Ok(new { updated = true }) : Results.NotFound();
+        });
+
+        group.MapPost("/series/{id}/thumbnail", HandleSeriesCoverUpload).DisableAntiforgery();
+
+        group.MapDelete("/series/{id}/thumbnail", async (
+            string id,
+            HttpContext httpContext,
+            [FromServices] IStumpV2Service service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            if (!user.HasPermission(Permissions.ManageLibrary))
+            {
+                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            var cleared = await service.ClearSeriesThumbnailAsync(user, id, ct);
+            return cleared ? Results.NoContent() : Results.NotFound();
+        });
+
         group.MapGet("/series/{id}/media", async (
             string id,
             HttpContext httpContext,
@@ -185,6 +253,42 @@ public static class StumpV2Endpoints
             var result = await service.GetSeriesMediaAsync(user, id, page, pageSize, ct);
             return Results.Ok(result);
         });
+    }
+
+    /// <summary>
+    /// Portada personalizada. Una imagen suelta cabe de sobra en el limite por defecto de
+    /// Kestrel, asi que aqui si vale leer el formulario de una pieza.
+    /// </summary>
+    private static async Task<IResult> HandleSeriesCoverUpload(
+        string id,
+        HttpContext httpContext,
+        [FromServices] IStumpV2Service service,
+        CancellationToken ct)
+    {
+        var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+        if (!user.HasPermission(Permissions.ManageLibrary))
+        {
+            return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!httpContext.Request.HasFormContentType)
+        {
+            return Results.BadRequest(new { error = "Se espera multipart/form-data con la imagen." });
+        }
+
+        var form = await httpContext.Request.ReadFormAsync(ct);
+        var file = form.Files.FirstOrDefault();
+        if (file is null || file.Length == 0)
+        {
+            return Results.BadRequest(new { error = "No llego ninguna imagen." });
+        }
+
+        await using var stream = file.OpenReadStream();
+        var applied = await service.SetSeriesThumbnailAsync(user, id, stream, Path.GetFileName(file.FileName), ct);
+
+        return applied
+            ? Results.Ok(new { updated = true })
+            : Results.BadRequest(new { error = "Solo se aceptan imagenes JPG, PNG o WebP." });
     }
 
     private static void MapLibraryRoutes(RouteGroupBuilder group)

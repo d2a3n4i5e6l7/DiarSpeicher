@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Xml.Linq;
 using DiarSpeicher.Core.Domain.Entities;
@@ -25,6 +26,10 @@ public sealed class StumpV2Service : IStumpV2Service
     private readonly IScannerQueue _scannerQueue;
     private readonly ILogger<StumpV2Service> _logger;
     private readonly UploadOptions _uploadOptions;
+    private readonly StorageOptions _storage;
+
+    /// <summary>Lo unico que se acepta como portada subida a mano.</summary>
+    private static readonly string[] CoverExtensions = [".jpg", ".jpeg", ".png", ".webp"];
 
     public StumpV2Service(
         DiarSpeicherDbContext db,
@@ -38,6 +43,137 @@ public sealed class StumpV2Service : IStumpV2Service
         _scannerQueue = scannerQueue;
         _logger = logger;
         _uploadOptions = storageOptions.Value.Upload;
+        _storage = storageOptions.Value;
+    }
+
+    /// <summary>
+    /// Portada de la serie: la elegida a mano si la hay, y si no la del primer tomo por
+    /// orden natural, que es lo que hacia el unico endpoint que existia hasta ahora.
+    /// </summary>
+    public async Task<(byte[] Data, string ContentType)?> GetSeriesThumbnailAsync(AuthUser user, string seriesId, CancellationToken ct = default)
+    {
+        var series = await _db.Series.ForUser(user).FirstOrDefaultAsync(s => s.Id == seriesId, ct);
+        if (series == null) return null;
+
+        if (!string.IsNullOrWhiteSpace(series.ThumbnailPath) && File.Exists(series.ThumbnailPath))
+        {
+            return await ReadImageAsync(series.ThumbnailPath, ct);
+        }
+
+        var fallback = await _db.Media.ForUser(user)
+            .Where(m => m.SeriesId == seriesId && m.ThumbnailPath != null)
+            .OrderBy(m => m.Name)
+            .Select(m => m.ThumbnailPath)
+            .FirstOrDefaultAsync(ct);
+
+        return string.IsNullOrWhiteSpace(fallback) || !File.Exists(fallback)
+            ? null
+            : await ReadImageAsync(fallback, ct);
+    }
+
+    /// <summary>
+    /// Toma como portada la miniatura de un tomo que ya esta indexado. Se copia en vez de
+    /// apuntar al fichero del tomo: si ese tomo se borra o se reescanea, la portada de la
+    /// serie no debe irse con el.
+    /// </summary>
+    public async Task<bool> SetSeriesThumbnailFromMediaAsync(AuthUser user, string seriesId, string mediaId, CancellationToken ct = default)
+    {
+        var series = await _db.Series.ForUser(user).FirstOrDefaultAsync(s => s.Id == seriesId, ct);
+        if (series == null) return false;
+
+        var source = await _db.Media.ForUser(user)
+            .Where(m => m.Id == mediaId)
+            .Select(m => m.ThumbnailPath)
+            .FirstOrDefaultAsync(ct);
+
+        if (string.IsNullOrWhiteSpace(source) || !File.Exists(source)) return false;
+
+        var target = BuildSeriesThumbnailPath(seriesId, Path.GetExtension(source));
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        File.Copy(source, target, overwrite: true);
+
+        await ApplySeriesThumbnailAsync(series, target, ct);
+        return true;
+    }
+
+    public async Task<bool> SetSeriesThumbnailAsync(AuthUser user, string seriesId, Stream image, string fileName, CancellationToken ct = default)
+    {
+        var series = await _db.Series.ForUser(user).FirstOrDefaultAsync(s => s.Id == seriesId, ct);
+        if (series == null) return false;
+
+        var extension = Path.GetExtension(fileName).ToLowerInvariant();
+        if (!CoverExtensions.Contains(extension)) return false;
+
+        var target = BuildSeriesThumbnailPath(seriesId, extension);
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+
+        await using (var output = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            await image.CopyToAsync(output, ct);
+        }
+
+        await ApplySeriesThumbnailAsync(series, target, ct);
+        return true;
+    }
+
+    /// <summary>Vuelve a la portada automatica: se borra la elegida y manda el primer tomo.</summary>
+    public async Task<bool> ClearSeriesThumbnailAsync(AuthUser user, string seriesId, CancellationToken ct = default)
+    {
+        var series = await _db.Series.ForUser(user).FirstOrDefaultAsync(s => s.Id == seriesId, ct);
+        if (series == null) return false;
+
+        if (!string.IsNullOrWhiteSpace(series.ThumbnailPath) && File.Exists(series.ThumbnailPath))
+        {
+            TryDeleteFile(series.ThumbnailPath);
+        }
+
+        series.ThumbnailPath = null;
+        series.ThumbnailMeta = null;
+        series.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>
+    /// ThumbnailMeta guarda la marca de tiempo: el navegador cachea la portada por URL, y
+    /// sin algo que cambie en ella una portada nueva no se veria hasta vaciar la cache.
+    /// </summary>
+    private async Task ApplySeriesThumbnailAsync(Series series, string path, CancellationToken ct)
+    {
+        // Una portada anterior con otra extension quedaria huerfana en disco.
+        if (!string.IsNullOrWhiteSpace(series.ThumbnailPath)
+            && !string.Equals(series.ThumbnailPath, path, StringComparison.Ordinal)
+            && File.Exists(series.ThumbnailPath))
+        {
+            TryDeleteFile(series.ThumbnailPath);
+        }
+
+        series.ThumbnailPath = path;
+        series.ThumbnailMeta = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
+        series.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private string BuildSeriesThumbnailPath(string seriesId, string extension) =>
+        Path.Combine(_storage.ResolveThumbnailsPath(), "series", $"{seriesId}{extension}");
+
+    private static async Task<(byte[] Data, string ContentType)> ReadImageAsync(string path, CancellationToken ct)
+    {
+        var bytes = await File.ReadAllBytesAsync(path, ct);
+        var mime = ContentTypeExtensions.FromExtension(Path.GetExtension(path)).MimeType();
+        return (bytes, mime);
+    }
+
+    private void TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogDebug(ex, "Could not delete the previous series cover {Path}", path);
+        }
     }
 
     public async Task<StumpPageResponse<StumpMediaDto>> GetMediaAsync(AuthUser user, int page, int pageSize, CancellationToken ct = default)
@@ -146,6 +282,36 @@ public sealed class StumpV2Service : IStumpV2Service
             .FirstOrDefaultAsync(s => s.Id == id, ct);
 
         return series == null ? null : ToSeriesDto(series);
+    }
+
+    /// <summary>
+    /// Renombra o describe una serie. ForUser va delante a proposito: sin el, cualquiera
+    /// con permiso de biblioteca podria editar una serie que su filtro de edad le oculta.
+    /// </summary>
+    public async Task<StumpSeriesDto?> UpdateSeriesAsync(AuthUser user, string id, StumpUpdateSeriesInput input, CancellationToken ct = default)
+    {
+        var series = await _db.Series.ForUser(user)
+            .Include(s => s.Metadata)
+            .Include(s => s.Media)
+            .FirstOrDefaultAsync(s => s.Id == id, ct);
+
+        if (series == null) return null;
+
+        if (!string.IsNullOrWhiteSpace(input.Name))
+        {
+            series.Name = input.Name.Trim();
+        }
+
+        // La descripcion si admite vaciarse: mandar cadena vacia la borra, nulo no la toca.
+        if (input.Description != null)
+        {
+            series.Description = string.IsNullOrWhiteSpace(input.Description) ? null : input.Description.Trim();
+        }
+
+        series.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        return ToSeriesDto(series);
     }
 
     public async Task<StumpPageResponse<StumpMediaDto>> GetSeriesMediaAsync(AuthUser user, string seriesId, int page, int pageSize, CancellationToken ct = default)
@@ -822,7 +988,32 @@ public sealed class StumpV2Service : IStumpV2Service
             Status = s.Status.ToString(),
             LibraryId = s.LibraryId ?? string.Empty,
             MediaCount = s.Media.Count,
-            Description = s.Description ?? s.Metadata?.Summary
+            Description = s.Description ?? s.Metadata?.Summary,
+            CoverUpdatedAt = s.ThumbnailMeta,
+            Metadata = ToSeriesMetadataDto(s.Metadata)
+        };
+    }
+
+    private static StumpSeriesMetadataDto? ToSeriesMetadataDto(SeriesMetadata? metadata)
+    {
+        if (metadata is null) return null;
+
+        return new StumpSeriesMetadataDto
+        {
+            Source = metadata.MetaType,
+            ExternalId = metadata.Comicid,
+            Title = metadata.Title,
+            Summary = metadata.Summary,
+            Publisher = metadata.Publisher,
+            Writers = metadata.Writers,
+            Genres = metadata.Genres,
+            Status = metadata.Status,
+            Year = metadata.Year,
+            CoverUrl = metadata.ComicImage,
+            Link = metadata.Links,
+            FinalVolume = metadata.TotalIssues,
+            Type = metadata.Booktype,
+            TotalChapters = metadata.PublicationRun
         };
     }
 }

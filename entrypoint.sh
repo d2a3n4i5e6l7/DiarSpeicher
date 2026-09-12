@@ -12,7 +12,7 @@ as_root() {
 
 echo "==> DiarSpeicher: asegurando estructura y permisos en /data..."
 
-mkdir -p /data/db /data/thumbnails /data/cache/pages /data/backups
+mkdir -p /data/db /data/thumbnails /data/cache/pages /data/backups /data/manga_database
 
 as_root chown -R node:node /data
 as_root chmod -R u+rwX,g+rwX,o+rX /data

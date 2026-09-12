@@ -110,6 +110,7 @@ public sealed class ScanProgressTests : IDisposable
             new DirectoryScanner(),
             composite,
             new ThumbnailService(composite, NullLogger<ThumbnailService>.Instance),
+            new ArchiveConversionService(NullLogger<ArchiveConversionService>.Instance),
             NullLogger<LibraryScannerService>.Instance,
             storageOptions: null,
             progressPublisher: progressPublisher);

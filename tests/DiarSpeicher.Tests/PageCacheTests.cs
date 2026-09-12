@@ -190,8 +190,8 @@ public sealed class PageCacheTests : IDisposable
 
         IBookProcessor? ICompositeBookProcessor.GetProcessor(string path) => _inner.GetProcessor(path);
 
-        Task<ProcessedBook> ICompositeBookProcessor.AnalyzeAsync(string path, bool includeCover, CancellationToken cancellationToken, bool measurePages) =>
-            _inner.AnalyzeAsync(path, includeCover, cancellationToken, measurePages);
+        Task<ProcessedBook> ICompositeBookProcessor.AnalyzeAsync(string path, bool includeCover, CancellationToken cancellationToken, bool measurePages, BookAnalysisOptions? options) =>
+            _inner.AnalyzeAsync(path, includeCover, cancellationToken, measurePages, options);
 
         public Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
         {

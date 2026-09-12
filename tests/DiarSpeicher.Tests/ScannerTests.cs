@@ -160,6 +160,7 @@ public class ScannerTests : IDisposable
             scanner,
             compositeProcessor,
             thumbnailService,
+            new ArchiveConversionService(NullLogger<ArchiveConversionService>.Instance),
             NullLogger<LibraryScannerService>.Instance);
 
         // Act 1: Initial scan (Discovery)
@@ -264,6 +265,7 @@ public class ScannerTests : IDisposable
             new DirectoryScanner(),
             compositeProcessor,
             new ThumbnailService(compositeProcessor, NullLogger<ThumbnailService>.Instance),
+            new ArchiveConversionService(NullLogger<ArchiveConversionService>.Instance),
             NullLogger<LibraryScannerService>.Instance);
 
         // Act

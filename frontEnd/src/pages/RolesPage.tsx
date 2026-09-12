@@ -30,6 +30,8 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import SecurityIcon from "@mui/icons-material/Security";
 import { useCallback, useEffect, useState } from "react";
 import PageHeader from "../components/PageHeader";
+import HudFrame from "../components/HudFrame";
+import { DS } from "../theme";
 import { rolesApi, type RoleItem } from "../api/endpoints";
 
 export default function RolesPage() {
@@ -161,14 +163,48 @@ export default function RolesPage() {
 	let tableContent: React.ReactNode;
 	if (loading) {
 		tableContent = (
-			<Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", p: 6 }}>
-				<CircularProgress />
+			<Box
+				sx={{
+					display: "flex",
+					flexDirection: "column",
+					alignItems: "center",
+					justifyContent: "center",
+					gap: 2,
+					p: 6,
+				}}
+			>
+				<CircularProgress size={28} thickness={5} />
+				<Typography
+					sx={{
+						fontFamily: "'JetBrains Mono', monospace",
+						fontSize: "11px",
+						letterSpacing: "1px",
+						color: DS.subtle,
+					}}
+				>
+					CONSULTANDO MATRIZ DE PERMISOS...
+				</Typography>
 			</Box>
 		);
 	} else if (roles.length === 0) {
 		tableContent = (
 			<Box sx={{ p: 6, textAlign: "center" }}>
-				<Typography color="text.secondary">No hay roles registrados.</Typography>
+				<SecurityIcon sx={{ fontSize: 40, color: DS.borderRed, mb: 1.5 }} />
+				<Typography
+					sx={{
+						fontFamily: "'Rajdhani', sans-serif",
+						fontSize: "16px",
+						fontWeight: 700,
+						letterSpacing: "1.5px",
+						textTransform: "uppercase",
+						color: DS.platinum,
+					}}
+				>
+					Matriz de permisos vacía
+				</Typography>
+				<Typography sx={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", color: DS.muted, mt: 0.5 }}>
+					Este nodo todavía no tiene ningún rol registrado.
+				</Typography>
 			</Box>
 		);
 	} else {
@@ -177,11 +213,11 @@ export default function RolesPage() {
 				<Table>
 					<TableHead>
 						<TableRow>
-							<TableCell>ID</TableCell>
-							<TableCell>Nombre</TableCell>
+							<TableCell sx={{ width: 96 }}>ID</TableCell>
+							<TableCell>Designación</TableCell>
 							<TableCell>Descripción</TableCell>
-							<TableCell>Tipo</TableCell>
-							<TableCell>Usuarios</TableCell>
+							<TableCell>Nivel</TableCell>
+							<TableCell>Efectivos</TableCell>
 							<TableCell align="right">Acciones</TableCell>
 						</TableRow>
 					</TableHead>
@@ -190,9 +226,24 @@ export default function RolesPage() {
 							const isAdmin = r.is_admin === true || (typeof r.is_admin === "number" && r.is_admin === 1);
 							return (
 								<TableRow key={r.id} hover>
-									<TableCell>{r.id}</TableCell>
 									<TableCell>
-										<Typography sx={{ fontWeight: 600 }}>{r.name}</Typography>
+										<Box component="span" className="ds-pill-mono">
+											{String(r.id).padStart(3, "0")}
+										</Box>
+									</TableCell>
+									<TableCell>
+										<Typography
+											sx={{
+												fontFamily: "'Rajdhani', sans-serif",
+												fontSize: "15px",
+												fontWeight: 700,
+												letterSpacing: "1px",
+												textTransform: "uppercase",
+												color: "#FFFFFF",
+											}}
+										>
+											{r.name}
+										</Typography>
 									</TableCell>
 									<TableCell>
 										<Typography variant="body2" color="text.secondary">
@@ -203,16 +254,20 @@ export default function RolesPage() {
 										{isAdmin ? (
 											<Chip
 												icon={<SecurityIcon />}
-												label="Administrador"
+												label="ADMINISTRADOR"
 												size="small"
 												color="primary"
 											/>
 										) : (
-											<Chip label="Estándar" size="small" variant="outlined" />
+											<Chip label="ESTÁNDAR" size="small" variant="outlined" />
 										)}
 									</TableCell>
 									<TableCell>
-										<Chip label={`${r.user_count ?? 0} usuarios`} size="small" variant="outlined" />
+										<Chip
+											label={`${String(r.user_count ?? 0).padStart(2, "0")} USUARIOS`}
+											size="small"
+											variant="outlined"
+										/>
 									</TableCell>
 									<TableCell align="right">
 										<Tooltip title="Editar Rol">
@@ -257,22 +312,29 @@ export default function RolesPage() {
 				actions={
 					<>
 						<Button
-							variant="outlined"
 							startIcon={<RefreshIcon />}
 							onClick={() => {
 								void loadRoles();
 							}}
 							disabled={loading}
+							sx={{
+								color: "#A3ABB8",
+								border: `1px solid ${DS.border}`,
+								backgroundColor: DS.bgSunken,
+								"&:hover": { borderColor: "#383E4C", backgroundColor: DS.bgSurface, color: "#FFFFFF" },
+							}}
 						>
-							Refrescar
+							ACTUALIZAR
 						</Button>
 						<Button
 							id="create-role-btn"
 							variant="contained"
 							startIcon={<AddIcon />}
 							onClick={() => setOpenCreate(true)}
+							className="btn-tactical"
+							sx={{ background: DS.red, borderColor: DS.redGlow, color: "#FFFFFF" }}
 						>
-							Nuevo Rol
+							NUEVO ROL
 						</Button>
 					</>
 				}
@@ -290,18 +352,20 @@ export default function RolesPage() {
 				</Alert>
 			)}
 
-			<Card>
+			<Card sx={{ overflow: "hidden" }}>
+				<HudFrame />
 				{tableContent}
 			</Card>
 
 			{/* Modal: Crear Rol */}
 			<Dialog open={openCreate} onClose={() => setOpenCreate(false)} maxWidth="xs" fullWidth>
+				<HudFrame />
 				<form
 					onSubmit={(e) => {
 						void handleCreateRole(e);
 					}}
 				>
-					<DialogTitle>Crear Nuevo Rol</DialogTitle>
+					<DialogTitle>Alta de nuevo rol</DialogTitle>
 					<DialogContent>
 						<Stack spacing={2.5} sx={{ mt: 1 }}>
 							<TextField
@@ -345,6 +409,7 @@ export default function RolesPage() {
 
 			{/* Modal: Editar Rol */}
 			<Dialog open={openEdit} onClose={() => setOpenEdit(false)} maxWidth="xs" fullWidth>
+				<HudFrame />
 				<form
 					onSubmit={(e) => {
 						void handleUpdateRole(e);
@@ -392,7 +457,12 @@ export default function RolesPage() {
 
 			{/* Modal: Confirmar Eliminación */}
 			<Dialog open={Boolean(deleteRole)} onClose={() => setDeleteRole(null)} maxWidth="xs" fullWidth>
-				<DialogTitle>¿Eliminar Rol?</DialogTitle>
+				<HudFrame />
+				<DialogTitle
+					sx={{ color: DS.redGlow, backgroundColor: "#160303", borderBottom: `1px solid ${DS.borderRed}` }}
+				>
+					Confirmar baja de rol
+				</DialogTitle>
 				<DialogContent>
 					<Typography variant="body2">
 						¿Estás seguro de que deseas eliminar el rol <strong>{deleteRole?.name}</strong>?
