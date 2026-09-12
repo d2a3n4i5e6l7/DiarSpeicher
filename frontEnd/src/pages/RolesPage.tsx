@@ -40,21 +40,18 @@ export default function RolesPage() {
 	const [error, setError] = useState<string | null>(null);
 	const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-	// Create Dialog
 	const [openCreate, setOpenCreate] = useState(false);
 	const [newName, setNewName] = useState("");
 	const [newDescription, setNewDescription] = useState("");
 	const [newIsAdmin, setNewIsAdmin] = useState(false);
 	const [savingRole, setSavingRole] = useState(false);
 
-	// Edit Dialog
 	const [openEdit, setOpenEdit] = useState(false);
 	const [editingRole, setEditingRole] = useState<RoleItem | null>(null);
 	const [editName, setEditName] = useState("");
 	const [editDescription, setEditDescription] = useState("");
 	const [editIsAdmin, setEditIsAdmin] = useState(false);
 
-	// Delete Dialog
 	const [deleteRole, setDeleteRole] = useState<RoleItem | null>(null);
 
 	const loadRoles = useCallback(async () => {
@@ -239,7 +236,7 @@ export default function RolesPage() {
 												fontWeight: 700,
 												letterSpacing: "1px",
 												textTransform: "uppercase",
-												color: "#FFFFFF",
+												color: "var(--ds-text-strong)",
 											}}
 										>
 											{r.name}
@@ -318,10 +315,10 @@ export default function RolesPage() {
 							}}
 							disabled={loading}
 							sx={{
-								color: "#A3ABB8",
+								color: "var(--ds-text-2)",
 								border: `1px solid ${DS.border}`,
 								backgroundColor: DS.bgSunken,
-								"&:hover": { borderColor: "#383E4C", backgroundColor: DS.bgSurface, color: "#FFFFFF" },
+								"&:hover": { borderColor: "var(--ds-border-hi)", backgroundColor: DS.bgSurface, color: "var(--ds-text-strong)" },
 							}}
 						>
 							ACTUALIZAR
@@ -459,7 +456,7 @@ export default function RolesPage() {
 			<Dialog open={Boolean(deleteRole)} onClose={() => setDeleteRole(null)} maxWidth="xs" fullWidth>
 				<HudFrame />
 				<DialogTitle
-					sx={{ color: DS.redGlow, backgroundColor: "#160303", borderBottom: `1px solid ${DS.borderRed}` }}
+					sx={{ color: DS.redGlow, backgroundColor: "var(--ds-bg-danger)", borderBottom: `1px solid ${DS.borderRed}` }}
 				>
 					Confirmar baja de rol
 				</DialogTitle>

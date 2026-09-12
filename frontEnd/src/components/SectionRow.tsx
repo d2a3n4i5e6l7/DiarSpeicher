@@ -35,7 +35,7 @@ export default function SectionRow({ title, count, moreTo, children, empty }: Re
 						fontWeight: 700,
 						letterSpacing: "2px",
 						textTransform: "uppercase",
-						color: "#FFFFFF",
+						color: "var(--ds-text-strong)",
 					}}
 				>
 					{title}
@@ -51,7 +51,7 @@ export default function SectionRow({ title, count, moreTo, children, empty }: Re
 					sx={{
 						flex: 1,
 						height: "1px",
-						background: "linear-gradient(to right, #C21818 0%, rgba(194, 24, 24, 0.1) 70%, transparent 100%)",
+						background: "linear-gradient(to right, var(--ds-red) 0%, rgba(var(--ds-red-rgb), 0.1) 70%, transparent 100%)",
 					}}
 				/>
 
@@ -60,7 +60,7 @@ export default function SectionRow({ title, count, moreTo, children, empty }: Re
 						size="small"
 						aria-label="Desplazar a la izquierda"
 						onClick={() => scrollBy(-SCROLL_STEP)}
-						sx={{ color: DS.muted, border: `1px solid ${DS.border}`, borderRadius: 0, "&:hover": { color: "#FFFFFF", borderColor: DS.red } }}
+						sx={{ color: DS.muted, border: `1px solid ${DS.border}`, borderRadius: 0, "&:hover": { color: "var(--ds-text-strong)", borderColor: DS.red } }}
 					>
 						<ChevronLeftIcon fontSize="small" />
 					</IconButton>
@@ -68,7 +68,7 @@ export default function SectionRow({ title, count, moreTo, children, empty }: Re
 						size="small"
 						aria-label="Desplazar a la derecha"
 						onClick={() => scrollBy(SCROLL_STEP)}
-						sx={{ color: DS.muted, border: `1px solid ${DS.border}`, borderRadius: 0, "&:hover": { color: "#FFFFFF", borderColor: DS.red } }}
+						sx={{ color: DS.muted, border: `1px solid ${DS.border}`, borderRadius: 0, "&:hover": { color: "var(--ds-text-strong)", borderColor: DS.red } }}
 					>
 						<ChevronRightIcon fontSize="small" />
 					</IconButton>

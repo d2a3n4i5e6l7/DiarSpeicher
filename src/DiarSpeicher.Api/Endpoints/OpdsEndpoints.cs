@@ -11,10 +11,8 @@ public static class OpdsEndpoints
 
     public static IEndpointRouteBuilder MapOpdsEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        // 1. Mapear rutas estándar /opds/v1.2
         MapGroup(endpoints.MapGroup("/opds/v1.2"));
 
-        // 2. Mapear rutas con API Key en el path: /opds/{apiKey}/v1.2
         MapGroup(endpoints.MapGroup("/opds/{apiKey}/v1.2"));
 
         return endpoints;

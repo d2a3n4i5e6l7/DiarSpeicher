@@ -6,11 +6,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import HudFrame from "../components/HudFrame";
 import { formatBytes } from "../catalog/mediaHelpers";
-import { READABLE_WIDTH } from "../catalog/layout";
+import { READABLE_COLUMN } from "../catalog/layout";
 import { METADATA_ARCHIVE_EXTENSIONS, metadataApi, type MetadataStatus } from "../api/endpoints";
 import { DS } from "../theme";
 
-/** Mientras la ingesta trabaja se sondea; parada, no se molesta al servidor. */
 const POLL_BUSY_MS = 1500;
 
 const STATE_LABELS: Record<string, string> = {
@@ -23,10 +22,10 @@ const STATE_LABELS: Record<string, string> = {
 };
 
 function stateColor(state: string): string {
-	if (state === "Ready") return "#22C55E";
+	if (state === "Ready") return "var(--ds-ok)";
 	if (state === "Failed") return DS.redGlow;
 	if (state === "Absent") return DS.subtle;
-	return "#F59E0B";
+	return "var(--ds-warn)";
 }
 
 export default function MetadataPage() {
@@ -51,8 +50,6 @@ export default function MetadataPage() {
 				const next = await metadataApi.status();
 				if (!mounted) return;
 				setStatus(next);
-				// Solo se vuelve a preguntar si hay algo en marcha: parado, un sondeo cada
-				// segundo y medio es ruido contra el servidor para siempre.
 				if (next.busy) {
 					timer = window.setTimeout(() => void tick(), POLL_BUSY_MS);
 				}
@@ -103,7 +100,7 @@ export default function MetadataPage() {
 	const percent = status?.percent;
 
 	return (
-		<Box>
+		<Box sx={READABLE_COLUMN}>
 			<PageHeader
 				title="Metadata externa"
 				subtitle="Catálogo de MangaBaka para rellenar autores, géneros, estado y portadas de las series."
@@ -120,7 +117,6 @@ export default function MetadataPage() {
 					position: "relative",
 					p: 3,
 					mb: 3,
-					maxWidth: READABLE_WIDTH,
 					backgroundImage: DS.gradientCard,
 					border: `1px solid ${DS.border}`,
 				}}
@@ -134,7 +130,7 @@ export default function MetadataPage() {
 							<Chip
 								size="small"
 								label={STATE_LABELS[state] ?? state.toUpperCase()}
-								sx={{ backgroundColor: "rgba(194, 24, 24, 0.15)", color: stateColor(state), border: `1px solid ${DS.redDark}` }}
+								sx={{ backgroundColor: "rgba(var(--ds-red-rgb), 0.15)", color: stateColor(state), border: `1px solid ${DS.redDark}` }}
 							/>
 							{status && status.seriesCount > 0 && (
 								<Box component="span" className="ds-pill-mono">
@@ -199,9 +195,8 @@ export default function MetadataPage() {
 				}}
 				onClick={() => fileInputRef.current?.click()}
 				sx={{
-					maxWidth: READABLE_WIDTH,
 					border: `2px dashed ${dragging ? DS.redGlow : DS.border}`,
-					backgroundColor: dragging ? "rgba(194, 24, 24, 0.12)" : DS.bgSunken,
+					backgroundColor: dragging ? "rgba(var(--ds-red-rgb), 0.12)" : DS.bgSunken,
 					p: 5,
 					textAlign: "center",
 					cursor: busy ? "not-allowed" : "pointer",

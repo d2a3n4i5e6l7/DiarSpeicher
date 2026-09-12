@@ -1,13 +1,14 @@
 import {
-	Accordion,
-	AccordionDetails,
-	AccordionSummary,
 	Alert,
 	Box,
 	Button,
 	Card,
 	CardContent,
+	Chip,
+	FormControlLabel,
+	Switch,
 	CircularProgress,
+	Collapse,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -28,6 +29,8 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import SyncIcon from "@mui/icons-material/Sync";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
+import CloudUploadIcon from "@mui/icons-material/CloudUpload";
+import FolderIcon from "@mui/icons-material/Folder";
 import AutoStoriesIcon from "@mui/icons-material/AutoStories";
 import CollectionsBookmarkIcon from "@mui/icons-material/CollectionsBookmark";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -38,19 +41,22 @@ import CatalogToolbar, { type SortDirection } from "../components/CatalogToolbar
 import { PANEL_GRID } from "../catalog/layout";
 import { filterAndSortLibraries, LIBRARY_SORTS } from "../catalog/sorting";
 import {
+	filesystemApi,
 	librariesApi,
 	DEFAULT_LIBRARY_CONFIG,
-	LIBRARY_STATUS_SCANNING,
+	type FolderEntry,
 	type LibraryConfig,
 	type LibraryItem,
+	type ScanPreview as ScanPreviewData,
+	type ScanStatus,
 } from "../api/endpoints";
 import LibraryConfigForm from "../components/LibraryConfigForm";
+import FolderPickerDialog from "../components/FolderPickerDialog";
+import UploadPanel from "../components/UploadPanel";
+import DeleteScopeNotice from "../components/DeleteScopeNotice";
+import { scanLabel } from "../catalog/useScanProgress";
 
 const SCAN_POLL_MS = 3000;
-
-function isScanning(library: LibraryItem): boolean {
-	return (library.status ?? "").toUpperCase() === LIBRARY_STATUS_SCANNING;
-}
 
 function formatDate(iso: string | null | undefined): string {
 	if (!iso) return "NUNCA ESCANEADA";
@@ -84,6 +90,14 @@ export default function LibrariesPage() {
 	const [formOpen, setFormOpen] = useState(false);
 	const [name, setName] = useState("");
 	const [path, setPath] = useState("");
+	const [pickerOpen, setPickerOpen] = useState(false);
+	const [previewPath, setPreviewPath] = useState("");
+	const [formError, setFormError] = useState<string | null>(null);
+	const [activeScans, setActiveScans] = useState<ScanStatus[]>([]);
+	// Apagado siempre al abrir: un borrado del disco no se hereda del intento anterior.
+	const [deleteFiles, setDeleteFiles] = useState(false);
+	const [uploadTarget, setUploadTarget] = useState<{ library: LibraryItem; subpath: string } | null>(null);
+	const [expanded, setExpanded] = useState<string | null>(null);
 	const [description, setDescription] = useState("");
 	const [emoji, setEmoji] = useState("");
 	const [config, setConfig] = useState<LibraryConfig>(DEFAULT_LIBRARY_CONFIG);
@@ -95,8 +109,14 @@ export default function LibrariesPage() {
 	const load = useCallback(async (silent = false) => {
 		if (!silent) setLoading(true);
 		try {
-			const list = await librariesApi.list();
+			// La cola viaja aparte de la lista: el estado de la biblioteca no distingue
+			// "escaneando" de "esperando turno", y la cola tiene un solo lector.
+			const [list, scans] = await Promise.all([
+				librariesApi.list(),
+				librariesApi.activeScans().catch(() => [] as ScanStatus[]),
+			]);
 			setLibraries(list ?? []);
+			setActiveScans(scans);
 			if (!silent) setError(null);
 		} catch (err: unknown) {
 			setError(err instanceof Error ? err.message : "Error cargando las bibliotecas.");
@@ -132,7 +152,7 @@ export default function LibrariesPage() {
 	}, []);
 
 	useEffect(() => {
-		const anyScanning = libraries.some(isScanning);
+		const anyScanning = activeScans.length > 0;
 		if (!anyScanning) {
 			if (pollRef.current !== null) {
 				window.clearInterval(pollRef.current);
@@ -153,12 +173,14 @@ export default function LibrariesPage() {
 				pollRef.current = null;
 			}
 		};
-	}, [libraries, load]);
+	}, [activeScans.length, load]);
 
 	const openForCreate = () => {
 		setEditing(null);
 		setName("");
 		setPath("");
+		setPreviewPath("");
+		setFormError(null);
 		setDescription("");
 		setEmoji("");
 		setConfig(DEFAULT_LIBRARY_CONFIG);
@@ -169,6 +191,8 @@ export default function LibrariesPage() {
 		setEditing(library);
 		setName(library.name);
 		setPath(library.path);
+		setPreviewPath("");
+		setFormError(null);
 		setDescription(library.description ?? "");
 		setEmoji(library.emoji ?? "");
 		setConfig(library.config ?? DEFAULT_LIBRARY_CONFIG);
@@ -177,17 +201,19 @@ export default function LibrariesPage() {
 
 	const handleSubmit = async (e: React.SyntheticEvent) => {
 		e.preventDefault();
-		if (!name.trim() || (!editing && !path.trim())) {
-			setError("El nombre y la ruta de la biblioteca son obligatorios.");
+		if (!name.trim() || !path.trim()) {
+			setFormError("El nombre y la ruta de la biblioteca son obligatorios.");
 			return;
 		}
 
 		setSaving(true);
-		setError(null);
+		setFormError(null);
 		try {
 			if (editing) {
 				await librariesApi.update(editing.id, {
 					name: name.trim(),
+					// Solo viaja si cambió: el backend reescribe rutas de series y tomos al recibirla.
+					path: path.trim() === editing.path ? undefined : path.trim(),
 					description: description.trim(),
 					emoji: emoji.trim() || undefined,
 					config,
@@ -206,7 +232,7 @@ export default function LibrariesPage() {
 			setFormOpen(false);
 			await load(true);
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error guardando la biblioteca.");
+			setFormError(err instanceof Error ? err.message : "Error guardando la biblioteca.");
 		} finally {
 			setSaving(false);
 		}
@@ -217,8 +243,13 @@ export default function LibrariesPage() {
 		setSaving(true);
 		setError(null);
 		try {
-			await librariesApi.delete(pendingDelete.id);
-			setNotice(`Biblioteca "${pendingDelete.name}" eliminada del índice.`);
+			await librariesApi.delete(pendingDelete.id, deleteFiles);
+			setNotice(
+				deleteFiles
+					? `"${pendingDelete.name}" eliminada. Recuperable en Restaurar durante una hora.`
+					: `Biblioteca "${pendingDelete.name}" eliminada del índice.`,
+			);
+			setDeleteFiles(false);
 			setPendingDelete(null);
 			await load(true);
 		} catch (err: unknown) {
@@ -248,15 +279,15 @@ export default function LibrariesPage() {
 	if (loading) {
 		contentSection = (
 			<Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
-				<CircularProgress sx={{ color: "#C21818" }} />
+				<CircularProgress sx={{ color: "var(--ds-red)" }} />
 			</Box>
 		);
 	} else if (libraries.length === 0) {
 		contentSection = (
 			<Card
 				sx={{
-					backgroundColor: "#0D0F14",
-					border: "1px dashed #383E4C",
+					backgroundColor: "var(--ds-bg-overlay)",
+					border: "1px dashed var(--ds-border-hi)",
 					borderRadius: "4px",
 					position: "relative",
 					overflow: "hidden",
@@ -273,12 +304,12 @@ export default function LibrariesPage() {
 							display: "flex",
 							alignItems: "center",
 							justifyContent: "center",
-							backgroundColor: "#161821",
-							border: "1px solid #381010",
+							backgroundColor: "var(--ds-bg-surface)",
+							border: "1px solid var(--ds-border-red)",
 							borderRadius: "4px",
 						}}
 					>
-						<LibraryBooksIcon sx={{ fontSize: 32, color: "#FF2E2E" }} />
+						<LibraryBooksIcon sx={{ fontSize: 32, color: "var(--ds-red-glow)" }} />
 					</Box>
 					<Typography
 						component="h2"
@@ -287,7 +318,7 @@ export default function LibrariesPage() {
 							fontSize: "20px",
 							fontWeight: 900,
 							letterSpacing: "1.5px",
-							color: "#FFFFFF",
+							color: "var(--ds-text-strong)",
 							mb: 1,
 						}}
 					>
@@ -297,7 +328,7 @@ export default function LibrariesPage() {
 						variant="body2"
 						sx={{
 							fontFamily: "'Inter', sans-serif",
-							color: "#8E95A5",
+							color: "var(--ds-muted)",
 							maxWidth: 480,
 							mx: "auto",
 							mb: 3,
@@ -313,8 +344,8 @@ export default function LibrariesPage() {
 						sx={{
 							px: 3,
 							py: 1.2,
-							background: "#C21818",
-							borderColor: "#FF2E2E",
+							background: "var(--ds-red)",
+							borderColor: "var(--ds-red-glow)",
 							color: "#FFFFFF",
 						}}
 					>
@@ -333,24 +364,26 @@ export default function LibrariesPage() {
 				}}
 			>
 				{visibleLibraries.map((library) => {
-					const scanning = isScanning(library);
+					const active = activeScans.find((scan) => scan.libraryId === library.id);
+					const queued = active?.queued ?? false;
+					const scanning = active !== undefined && !queued;
 					const busy = scanning || scanningIds.includes(library.id);
 
-					let statusDotColor = "#22C55E";
+					let statusDotColor = "var(--ds-ok)";
 					let statusText = "READY";
-					let statusBg = "rgba(34, 197, 94, 0.1)";
-					let statusBorder = "#14532D";
+					let statusBg = "rgba(var(--ds-ok-rgb), 0.1)";
+					let statusBorder = "var(--ds-ok-dark)";
 
 					if (scanning) {
-						statusDotColor = "#FF2E2E";
+						statusDotColor = "var(--ds-red-glow)";
 						statusText = "SCANNING";
-						statusBg = "rgba(194, 24, 24, 0.15)";
-						statusBorder = "#660B0B";
+						statusBg = "rgba(var(--ds-red-rgb), 0.15)";
+						statusBorder = "var(--ds-red-dark)";
 					} else if ((library.status ?? "").toUpperCase() === "MISSING") {
-						statusDotColor = "#F59E0B";
+						statusDotColor = "var(--ds-warn)";
 						statusText = "MISSING";
-						statusBg = "rgba(245, 158, 11, 0.15)";
-						statusBorder = "#78350F";
+						statusBg = "rgba(var(--ds-warn-rgb), 0.15)";
+						statusBorder = "var(--ds-warn-dark)";
 					}
 
 					return (
@@ -360,192 +393,272 @@ export default function LibrariesPage() {
 								display: "flex",
 								flexDirection: "column",
 								overflow: "hidden",
-								transition: "transform 0.25s ease",
+								transition: "transform 0.25s ease, filter 0.25s ease, opacity 0.25s ease",
 								"&:hover": { transform: "translateY(-2px)" },
+								// Esperando turno: apagada hasta que la cola llegue a ella.
+								...(queued && { filter: "grayscale(1)", opacity: 0.55 }),
 							}}
 						>
 							<HudFrame />
 
-							{busy && (
-								<LinearProgress
+							{busy && !queued && <Box className="ds-scanline" />}
+							{queued && (
+								<Box
 									sx={{
-										height: 3,
-										backgroundColor: "#1C0303",
-										"& .MuiLinearProgress-bar": {
-											backgroundColor: "#FF2E2E",
-										},
+										position: "absolute",
+										top: 8,
+										right: 8,
+										zIndex: 3,
+										fontFamily: "'JetBrains Mono', monospace",
+										fontSize: "10px",
+										letterSpacing: "1px",
+										color: "var(--ds-subtle)",
+										border: "1px solid var(--ds-border)",
+										px: 0.75,
 									}}
-								/>
+								>
+									EN COLA
+								</Box>
+							)}
+
+							{active && !queued && (
+								<Box
+									sx={{
+										position: "absolute",
+										top: 8,
+										right: 8,
+										maxWidth: "70%",
+										zIndex: 3,
+										fontFamily: "'JetBrains Mono', monospace",
+										fontSize: "10px",
+										letterSpacing: "1px",
+										color: "var(--ds-red-glow)",
+										border: "1px solid var(--ds-red-dark)",
+										backgroundColor: "var(--ds-bg-sunken)",
+										px: 0.75,
+										overflow: "hidden",
+										textOverflow: "ellipsis",
+										whiteSpace: "nowrap",
+									}}
+								>
+									{scanLabel(active)}
+								</Box>
 							)}
 
 							<CardContent sx={{ p: 2.5, flexGrow: 1, display: "flex", flexDirection: "column" }}>
-								{/* Cabecera de la Tarjeta */}
-								<Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.5, mb: 2 }}>
-									<Box
-										sx={{
-											width: 42,
-											height: 42,
-											flexShrink: 0,
-											display: "flex",
-											alignItems: "center",
-											justifyContent: "center",
-											background: "linear-gradient(145deg, #1C0303 0%, #0D0E12 100%)",
-											border: "1px solid #381010",
-											borderRadius: "3px",
-										}}
-									>
-										<LibraryBooksIcon sx={{ color: "#FF2E2E", fontSize: 22 }} />
-									</Box>
-
-									<Box sx={{ minWidth: 0, flexGrow: 1 }}>
-										<Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.25 }}>
-											<Typography
-												component={RouterLink}
-												to={`/libraries/${library.id}`}
-												noWrap
-												sx={{
-													display: "block",
-													fontFamily: "'Rajdhani', sans-serif",
-													fontSize: "18px",
-													fontWeight: 700,
-													letterSpacing: "1px",
-													color: "#FFFFFF",
-													textTransform: "uppercase",
-													textDecoration: "none",
-													transition: "color 0.2s ease",
-													"&:hover": { color: "#FF2E2E" },
-												}}
-											>
-												{library.name}
-											</Typography>
+								<Box sx={{ display: "flex", flexDirection: "column", gap: 1.25, mb: 2 }}>
+									<Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+										<Box
+											sx={{
+												width: 42,
+												height: 42,
+												flexShrink: 0,
+												display: "flex",
+												alignItems: "center",
+												justifyContent: "center",
+												background: "linear-gradient(145deg, var(--ds-red-deep) 0%, var(--ds-bg-deep) 100%)",
+												border: "1px solid var(--ds-border-red)",
+												borderRadius: "3px",
+											}}
+										>
+											<LibraryBooksIcon sx={{ color: "var(--ds-red-glow)", fontSize: 22 }} />
 										</Box>
 
+										<Typography
+											component={RouterLink}
+											to={`/libraries/${library.id}`}
+											noWrap
+											sx={{
+												flexGrow: 1,
+												minWidth: 0,
+												fontFamily: "'Rajdhani', sans-serif",
+												fontSize: "20px",
+												fontWeight: 700,
+												letterSpacing: "1px",
+												color: "var(--ds-text-strong)",
+												textTransform: "uppercase",
+												textDecoration: "none",
+												transition: "color 0.2s ease",
+												"&:hover": { color: "var(--ds-red-glow)" },
+											}}
+										>
+											{library.name}
+										</Typography>
+									</Box>
+
+								<Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap", gap: 0.5 }}>
+									<Tooltip title="Ver series y tomos">
+										<IconButton
+											size="small"
+											component={RouterLink}
+											to={`/libraries/${library.id}`}
+											sx={{
+												color: "var(--ds-text-2)",
+												border: "1px solid var(--ds-border)",
+												borderRadius: "2px",
+												p: 0.6,
+												"&:hover": {
+													color: "var(--ds-red-glow)",
+													borderColor: "var(--ds-red)",
+													backgroundColor: "rgba(var(--ds-red-rgb), 0.1)",
+												},
+											}}
+										>
+											<ChevronRightIcon fontSize="small" />
+										</IconButton>
+									</Tooltip>
+
+									<Tooltip title={busy ? "Escaneo en curso..." : "Lanzar escaneo manual"}>
+										<span>
+											<IconButton
+												size="small"
+												onClick={() => { void handleScan(library); }}
+												disabled={busy}
+												sx={{
+													color: "var(--ds-text-2)",
+													border: "1px solid var(--ds-border)",
+													borderRadius: "2px",
+													p: 0.6,
+													"&:hover": {
+														color: "var(--ds-red-glow)",
+														borderColor: "var(--ds-red)",
+														backgroundColor: "rgba(var(--ds-red-rgb), 0.1)",
+													},
+												}}
+											>
+												<SyncIcon
+													fontSize="small"
+													sx={{
+														animation: busy ? "spin 1.2s linear infinite" : "none",
+														"@keyframes spin": {
+															"0%": { transform: "rotate(0deg)" },
+															"100%": { transform: "rotate(360deg)" },
+														},
+													}}
+												/>
+											</IconButton>
+										</span>
+									</Tooltip>
+
+									<Tooltip title="Subir ficheros">
+										<IconButton
+											size="small"
+											onClick={() => {
+												setUploadTarget({ library, subpath: "" });
+											}}
+											sx={{
+												color: "var(--ds-text-2)",
+												border: "1px solid var(--ds-border)",
+												borderRadius: "2px",
+												p: 0.6,
+												"&:hover": {
+													color: "var(--ds-text-strong)",
+													borderColor: "var(--ds-border-hi)",
+													backgroundColor: "var(--ds-bg-surface)",
+												},
+											}}
+										>
+											<CloudUploadIcon fontSize="small" />
+										</IconButton>
+									</Tooltip>
+
+									<Tooltip title="Editar configuración">
+										<IconButton
+											size="small"
+											onClick={() => openForEdit(library)}
+											sx={{
+												color: "var(--ds-text-2)",
+												border: "1px solid var(--ds-border)",
+												borderRadius: "2px",
+												p: 0.6,
+												"&:hover": {
+													color: "var(--ds-text-strong)",
+													borderColor: "var(--ds-border-hi)",
+													backgroundColor: "var(--ds-bg-surface)",
+												},
+											}}
+										>
+											<EditOutlinedIcon fontSize="small" />
+										</IconButton>
+									</Tooltip>
+
+									<Tooltip title="Eliminar del índice">
+										<IconButton
+											size="small"
+											onClick={() => {
+													setDeleteFiles(false);
+													setPendingDelete(library);
+												}}
+											sx={{
+												color: "var(--ds-text-2)",
+												border: "1px solid var(--ds-border)",
+												borderRadius: "2px",
+												p: 0.6,
+												"&:hover": {
+													color: "var(--ds-red-glow)",
+													borderColor: "var(--ds-red-dark)",
+													backgroundColor: "rgba(var(--ds-red-rgb), 0.15)",
+												},
+											}}
+										>
+											<DeleteOutlinedIcon fontSize="small" />
+										</IconButton>
+									</Tooltip>
+								</Stack>
+
+									<Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
 										<Tooltip title={library.path}>
 											<Box
 												sx={{
-													display: "inline-flex",
+													display: "flex",
 													alignItems: "center",
 													gap: 0.5,
-													maxWidth: "100%",
-													backgroundColor: "#08090D",
-													border: "1px solid #1F232D",
+													flexGrow: 1,
+													minWidth: 0,
+													backgroundColor: "var(--ds-bg-deep)",
+													border: "1px solid var(--ds-bg-surface-hi)",
 													borderRadius: "2px",
 													px: 0.75,
 													py: 0.2,
 												}}
 											>
-												<FolderOpenIcon sx={{ fontSize: 12, color: "#FF3E3E", flexShrink: 0 }} />
+												<FolderOpenIcon sx={{ fontSize: 12, color: "var(--ds-red-light)", flexShrink: 0 }} />
 												<Typography
-													sx={{
-														fontFamily: "'JetBrains Mono', monospace",
-														fontSize: "11px",
-														color: "#8E95A5",
-														overflow: "hidden",
-														textOverflow: "ellipsis",
-														whiteSpace: "nowrap",
-													}}
+													noWrap
+													sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "var(--ds-muted)" }}
 												>
 													{library.path}
 												</Typography>
 											</Box>
 										</Tooltip>
+
+										<Tooltip title="Ver las carpetas que contiene">
+											<IconButton
+												size="small"
+												onClick={() => {
+													setExpanded((prev) => (prev === library.id ? null : library.id));
+												}}
+												sx={{ color: "var(--ds-text-2)", p: 0.4 }}
+											>
+												<ExpandMoreIcon
+													fontSize="small"
+													sx={{
+														transition: "transform 0.2s ease",
+														transform: expanded === library.id ? "rotate(180deg)" : "none",
+													}}
+												/>
+											</IconButton>
+										</Tooltip>
 									</Box>
 
-									{/* Botones de acción */}
-									<Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-										<Tooltip title="Ver series y tomos">
-											<IconButton
-												size="small"
-												component={RouterLink}
-												to={`/libraries/${library.id}`}
-												sx={{
-													color: "#A3ABB8",
-													border: "1px solid #282C38",
-													borderRadius: "2px",
-													p: 0.6,
-													"&:hover": {
-														color: "#FF2E2E",
-														borderColor: "#C21818",
-														backgroundColor: "rgba(194, 24, 24, 0.1)",
-													},
-												}}
-											>
-												<ChevronRightIcon fontSize="small" />
-											</IconButton>
-										</Tooltip>
-
-										<Tooltip title={busy ? "Escaneo en curso..." : "Lanzar escaneo manual"}>
-											<span>
-												<IconButton
-													size="small"
-													onClick={() => { void handleScan(library); }}
-													disabled={busy}
-													sx={{
-														color: "#A3ABB8",
-														border: "1px solid #282C38",
-														borderRadius: "2px",
-														p: 0.6,
-														"&:hover": {
-															color: "#FF2E2E",
-															borderColor: "#C21818",
-															backgroundColor: "rgba(194, 24, 24, 0.1)",
-														},
-													}}
-												>
-													<SyncIcon
-														fontSize="small"
-														sx={{
-															animation: busy ? "spin 1.2s linear infinite" : "none",
-															"@keyframes spin": {
-																"0%": { transform: "rotate(0deg)" },
-																"100%": { transform: "rotate(360deg)" },
-															},
-														}}
-													/>
-												</IconButton>
-											</span>
-										</Tooltip>
-
-										<Tooltip title="Editar configuración">
-											<IconButton
-												size="small"
-												onClick={() => openForEdit(library)}
-												sx={{
-													color: "#A3ABB8",
-													border: "1px solid #282C38",
-													borderRadius: "2px",
-													p: 0.6,
-													"&:hover": {
-														color: "#FFFFFF",
-														borderColor: "#383E4C",
-														backgroundColor: "#161821",
-													},
-												}}
-											>
-												<EditOutlinedIcon fontSize="small" />
-											</IconButton>
-										</Tooltip>
-
-										<Tooltip title="Eliminar del índice">
-											<IconButton
-												size="small"
-												onClick={() => setPendingDelete(library)}
-												sx={{
-													color: "#A3ABB8",
-													border: "1px solid #282C38",
-													borderRadius: "2px",
-													p: 0.6,
-													"&:hover": {
-														color: "#FF2E2E",
-														borderColor: "#660B0B",
-														backgroundColor: "rgba(194, 24, 24, 0.15)",
-													},
-												}}
-											>
-												<DeleteOutlinedIcon fontSize="small" />
-											</IconButton>
-										</Tooltip>
-									</Stack>
+									<Collapse in={expanded === library.id} unmountOnExit>
+										<LibraryFolderList
+											library={library}
+											onUpload={(subpath) => {
+												setUploadTarget({ library, subpath });
+											}}
+										/>
+									</Collapse>
 								</Box>
 
 								{/* Cuadrícula de Métricas Tácticas */}
@@ -554,8 +667,8 @@ export default function LibrariesPage() {
 										display: "grid",
 										gridTemplateColumns: "repeat(3, 1fr)",
 										gap: 1,
-										backgroundColor: "#0A0B0E",
-										border: "1px solid #212530",
+										backgroundColor: "var(--ds-bg-sunken)",
+										border: "1px solid var(--ds-bg-surface-hi)",
 										borderRadius: "3px",
 										p: 1.25,
 										mb: 2,
@@ -563,7 +676,7 @@ export default function LibrariesPage() {
 									}}
 								>
 									<Box>
-										<Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0.5, color: "#636B7C" }}>
+										<Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0.5, color: "var(--ds-subtle)" }}>
 											<CollectionsBookmarkIcon sx={{ fontSize: 13 }} />
 											<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontSize: "10px", fontWeight: 700, letterSpacing: "1px" }}>
 												SERIES
@@ -574,7 +687,7 @@ export default function LibrariesPage() {
 												fontFamily: "'Orbitron', sans-serif",
 												fontSize: "16px",
 												fontWeight: 700,
-												color: "#FFFFFF",
+												color: "var(--ds-text-strong)",
 												mt: 0.25,
 											}}
 										>
@@ -582,8 +695,8 @@ export default function LibrariesPage() {
 										</Typography>
 									</Box>
 
-									<Box sx={{ borderLeft: "1px solid #1C1F28", borderRight: "1px solid #1C1F28" }}>
-										<Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0.5, color: "#636B7C" }}>
+									<Box sx={{ borderLeft: "1px solid var(--ds-border-soft)", borderRight: "1px solid var(--ds-border-soft)" }}>
+										<Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0.5, color: "var(--ds-subtle)" }}>
 											<AutoStoriesIcon sx={{ fontSize: 13 }} />
 											<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontSize: "10px", fontWeight: 700, letterSpacing: "1px" }}>
 												TOMOS
@@ -594,7 +707,7 @@ export default function LibrariesPage() {
 												fontFamily: "'Orbitron', sans-serif",
 												fontSize: "16px",
 												fontWeight: 700,
-												color: "#FF3E3E",
+												color: "var(--ds-red-light)",
 												mt: 0.25,
 											}}
 										>
@@ -603,7 +716,7 @@ export default function LibrariesPage() {
 									</Box>
 
 									<Box>
-										<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontSize: "10px", fontWeight: 700, letterSpacing: "1px", color: "#636B7C" }}>
+										<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontSize: "10px", fontWeight: 700, letterSpacing: "1px", color: "var(--ds-subtle)" }}>
 											TIPO
 										</Typography>
 										<Typography
@@ -611,7 +724,7 @@ export default function LibrariesPage() {
 												fontFamily: "'Rajdhani', sans-serif",
 												fontSize: "14px",
 												fontWeight: 700,
-												color: "#F0F2F6",
+												color: "var(--ds-platinum)",
 												letterSpacing: "0.5px",
 												mt: 0.25,
 											}}
@@ -628,7 +741,7 @@ export default function LibrariesPage() {
 										sx={{
 											fontFamily: "'Inter', sans-serif",
 											fontSize: "12px",
-											color: "#8E95A5",
+											color: "var(--ds-muted)",
 											lineHeight: 1.4,
 											mb: 2,
 											flexGrow: 1,
@@ -643,7 +756,7 @@ export default function LibrariesPage() {
 									sx={{
 										mt: "auto",
 										pt: 1.5,
-										borderTop: "1px solid #1A1D26",
+										borderTop: "1px solid var(--ds-metal-3)",
 										display: "flex",
 										alignItems: "center",
 										justifyContent: "space-between",
@@ -693,7 +806,7 @@ export default function LibrariesPage() {
 										sx={{
 											fontFamily: "'JetBrains Mono', monospace",
 											fontSize: "10px",
-											color: "#636B7C",
+											color: "var(--ds-subtle)",
 										}}
 									>
 										{formatDate(library.lastScannedAt)}
@@ -719,10 +832,10 @@ export default function LibrariesPage() {
 							disabled={loading}
 							startIcon={<RefreshIcon />}
 							sx={{
-								color: "#A3ABB8",
-								border: "1px solid #282C38",
-								backgroundColor: "#0A0B0E",
-								"&:hover": { borderColor: "#383E4C", backgroundColor: "#161821", color: "#FFFFFF" },
+								color: "var(--ds-text-2)",
+								border: "1px solid var(--ds-border)",
+								backgroundColor: "var(--ds-bg-sunken)",
+								"&:hover": { borderColor: "var(--ds-border-hi)", backgroundColor: "var(--ds-bg-surface)", color: "var(--ds-text-strong)" },
 							}}
 						>
 							ACTUALIZAR
@@ -733,8 +846,8 @@ export default function LibrariesPage() {
 							onClick={openForCreate}
 							className="btn-tactical"
 							sx={{
-								background: "#C21818",
-								borderColor: "#FF2E2E",
+								background: "var(--ds-red)",
+								borderColor: "var(--ds-red-glow)",
 								color: "#FFFFFF",
 							}}
 						>
@@ -750,10 +863,10 @@ export default function LibrariesPage() {
 					onClose={() => setError(null)}
 					sx={{
 						mb: 3,
-						backgroundColor: "#1C0303",
-						border: "1px solid #660B0B",
-						borderLeft: "4px solid #C21818",
-						color: "#FF5C5C",
+						backgroundColor: "var(--ds-red-deep)",
+						border: "1px solid var(--ds-red-dark)",
+						borderLeft: "4px solid var(--ds-red)",
+						color: "var(--ds-red-soft)",
 					}}
 				>
 					{error}
@@ -766,10 +879,10 @@ export default function LibrariesPage() {
 					onClose={() => setNotice(null)}
 					sx={{
 						mb: 3,
-						backgroundColor: "#071A0E",
-						border: "1px solid #14532D",
-						borderLeft: "4px solid #22C55E",
-						color: "#4ADE80",
+						backgroundColor: "var(--ds-ok-bg)",
+						border: "1px solid var(--ds-ok-dark)",
+						borderLeft: "4px solid var(--ds-ok)",
+						color: "var(--ds-ok-light)",
 					}}
 				>
 					{notice}
@@ -797,13 +910,13 @@ export default function LibrariesPage() {
 			<Dialog
 				open={formOpen}
 				onClose={() => !saving && setFormOpen(false)}
-				maxWidth="md"
+				maxWidth="lg"
 				fullWidth
 				slotProps={{
 					paper: {
 						sx: {
-							backgroundColor: "#0D0F14",
-							border: "1px solid #C21818",
+							backgroundColor: "var(--ds-bg-overlay)",
+							border: "1px solid var(--ds-red)",
 							boxShadow: "0 12px 50px rgba(0,0,0,0.9)",
 							position: "relative",
 						},
@@ -819,17 +932,36 @@ export default function LibrariesPage() {
 							fontSize: "18px",
 							fontWeight: 900,
 							letterSpacing: "1.5px",
-							borderBottom: "1px solid #232733",
-							backgroundColor: "#0A0B0E",
-							color: "#FFFFFF",
+							borderBottom: "1px solid var(--ds-border-head)",
+							backgroundColor: "var(--ds-bg-sunken)",
+							color: "var(--ds-text-strong)",
 							py: 2,
 						}}
 					>
 						{editing ? `// EDITAR BIBLIOTECA: ${editing.name}` : "// REGISTRAR NUEVA BIBLIOTECA DE ARCHIVO"}
 					</DialogTitle>
 
-					<DialogContent sx={{ p: 3 }}>
+					<DialogContent
+						sx={{
+							p: 3,
+							display: "grid",
+							gap: 3,
+							gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) minmax(0, 1fr)" },
+							alignItems: "start",
+						}}
+					>
 						<Stack spacing={2.5} sx={{ mt: 1 }}>
+							{formError && (
+								<Alert
+									severity="error"
+									onClose={() => {
+										setFormError(null);
+									}}
+								>
+									{formError}
+								</Alert>
+							)}
+
 							<TextField
 								label="Nombre de la biblioteca"
 								value={name}
@@ -840,25 +972,38 @@ export default function LibrariesPage() {
 								placeholder="Ej. Manga Seinen, Cómics DC, Novelas Ligeras"
 							/>
 
-							<TextField
-								label="Ruta en el sistema de ficheros"
-								value={path}
-								onChange={(e) => setPath(e.target.value)}
-								required
-								fullWidth
-								disabled={Boolean(editing) || saving}
-								helperText={
-									editing
-										? "La ruta del sistema no puede modificarse tras la creación."
-										: "Ruta absoluta o relativa dentro del volumen de almacenamiento."
-								}
-								placeholder="/libraries/manga"
-								slotProps={{
-									input: {
-										sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: "13px" },
-									},
-								}}
-							/>
+							<Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
+								<TextField
+									label="Ruta en el sistema de ficheros"
+									value={path}
+									onChange={(e) => setPath(e.target.value)}
+									required
+									fullWidth
+									disabled={saving}
+									helperText={
+										editing && path.trim() !== editing.path
+											? "Mover la biblioteca reapunta el registro; los ficheros no se tocan."
+											: "Dentro de una de las carpetas declaradas en el compose."
+									}
+									placeholder="/libraries/manga"
+									slotProps={{
+										input: {
+											sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: "13px" },
+										},
+									}}
+								/>
+								<Button
+									variant="outlined"
+									disabled={saving}
+									onClick={() => {
+										setPickerOpen(true);
+									}}
+									startIcon={<FolderOpenIcon fontSize="small" />}
+									sx={{ mt: 1, flexShrink: 0, whiteSpace: "nowrap" }}
+								>
+									Examinar
+								</Button>
+							</Stack>
 
 							<TextField
 								label="Descripción opcional"
@@ -871,39 +1016,46 @@ export default function LibrariesPage() {
 								placeholder="Metadatos o notas internas sobre el contenido de este almacén."
 							/>
 
-							<Accordion
+							<Box
 								sx={{
-									backgroundColor: "#0A0B0E",
-									border: "1px solid #232733",
-									borderRadius: "3px !important",
-									"&:before": { display: "none" },
+									backgroundColor: "var(--ds-bg-sunken)",
+									border: "1px solid var(--ds-border-head)",
+									borderRadius: "3px",
+									p: 2,
 								}}
 							>
-								<AccordionSummary
-									expandIcon={<ExpandMoreIcon sx={{ color: "#FF2E2E" }} />}
+								<Typography
 									sx={{
 										fontFamily: "'Rajdhani', sans-serif",
 										fontWeight: 700,
 										fontSize: "14px",
 										letterSpacing: "1px",
-										color: "#FFFFFF",
+										color: "var(--ds-text-strong)",
 										textTransform: "uppercase",
+										mb: 2,
 									}}
 								>
-									CONFIGURACIÓN AVANZADA DEL ESCÁNER Y LECTOR
-								</AccordionSummary>
-								<AccordionDetails sx={{ pt: 2, borderTop: "1px solid #1C1F28" }}>
-									<LibraryConfigForm value={config} onChange={setConfig} disabled={saving} />
-								</AccordionDetails>
-							</Accordion>
+									Escáner y lector
+								</Typography>
+								<LibraryConfigForm value={config} onChange={setConfig} disabled={saving} />
+							</Box>
 						</Stack>
+
+						<ScanPreview
+							path={previewPath}
+							typedPath={path.trim()}
+							pattern={config.libraryPattern}
+							onRun={() => {
+								setPreviewPath(path.trim());
+							}}
+						/>
 					</DialogContent>
 
 					<DialogActions
 						sx={{
 							p: 2.5,
-							borderTop: "1px solid #1C1F28",
-							backgroundColor: "#0A0B0E",
+							borderTop: "1px solid var(--ds-border-soft)",
+							backgroundColor: "var(--ds-bg-sunken)",
 							justifyContent: "space-between",
 						}}
 					>
@@ -911,10 +1063,10 @@ export default function LibrariesPage() {
 							onClick={() => setFormOpen(false)}
 							disabled={saving}
 							sx={{
-								color: "#8E95A5",
+								color: "var(--ds-muted)",
 								fontFamily: "'Rajdhani', sans-serif",
 								fontWeight: 700,
-								"&:hover": { color: "#FFFFFF" },
+								"&:hover": { color: "var(--ds-text-strong)" },
 							}}
 						>
 							CANCELAR
@@ -933,8 +1085,8 @@ export default function LibrariesPage() {
 									disabled={saving}
 									className="btn-tactical"
 									sx={{
-										background: "#C21818",
-										borderColor: "#FF2E2E",
+										background: "var(--ds-red)",
+										borderColor: "var(--ds-red-glow)",
 										color: "#FFFFFF",
 										px: 3,
 									}}
@@ -954,8 +1106,8 @@ export default function LibrariesPage() {
 				slotProps={{
 					paper: {
 						sx: {
-							backgroundColor: "#0D0F14",
-							border: "1px solid #660B0B",
+							backgroundColor: "var(--ds-bg-overlay)",
+							border: "1px solid var(--ds-red-dark)",
 							position: "relative",
 						},
 					},
@@ -968,43 +1120,70 @@ export default function LibrariesPage() {
 						fontFamily: "'Orbitron', sans-serif",
 						fontSize: "17px",
 						fontWeight: 900,
-						color: "#FF2E2E",
-						backgroundColor: "#160303",
-						borderBottom: "1px solid #381010",
+						color: "var(--ds-red-glow)",
+						backgroundColor: "var(--ds-bg-danger)",
+						borderBottom: "1px solid var(--ds-border-red)",
 					}}
 				>
 					CONFIRMAR ELIMINACIÓN DE ÍNDICE
 				</DialogTitle>
 
 				<DialogContent sx={{ p: 3, mt: 1 }}>
-					<Typography sx={{ fontFamily: "'Inter', sans-serif", color: "#F0F2F6", mb: 2 }}>
+					<Typography sx={{ fontFamily: "'Inter', sans-serif", color: "var(--ds-platinum)", mb: 2 }}>
 						¿Estás seguro de que deseas eliminar la biblioteca <strong>{pendingDelete?.name}</strong>?
 					</Typography>
-					<Box
-						sx={{
-							p: 1.5,
-							backgroundColor: "#11131C",
-							borderLeft: "3px solid #22C55E",
-							borderRadius: "2px",
-						}}
-					>
-						<Typography sx={{ fontFamily: "'Inter', sans-serif", fontSize: "12px", color: "#8E95A5" }}>
-							<strong>Aviso de seguridad:</strong> Los archivos originales de manga y libros alojados en el disco nunca serán eliminados ni modificados. Solo se purgará el índice de metadatos en la base de datos de DiarSpeicher.
-						</Typography>
-					</Box>
+					{!deleteFiles && (
+						<Box
+							sx={{
+								p: 1.5,
+								backgroundColor: "var(--ds-bg-panel)",
+								borderLeft: "3px solid var(--ds-ok)",
+								borderRadius: "2px",
+							}}
+						>
+							<Typography sx={{ fontFamily: "'Inter', sans-serif", fontSize: "12px", color: "var(--ds-muted)" }}>
+								<strong>Aviso de seguridad:</strong> Los archivos originales de manga y libros alojados en el disco
+								nunca serán eliminados ni modificados. Solo se purgará el índice de metadatos en la base de datos de
+								DiarSpeicher.
+							</Typography>
+						</Box>
+					)}
+
+					<FormControlLabel
+						sx={{ mt: 2 }}
+						control={
+							<Switch
+								checked={deleteFiles}
+								onChange={(e) => {
+									setDeleteFiles(e.target.checked);
+								}}
+								disabled={saving}
+							/>
+						}
+						label={
+							<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, letterSpacing: "1px" }}>
+								ELIMINAR TAMBIÉN EL DIRECTORIO DEL DISCO
+							</Typography>
+						}
+					/>
+
+					{deleteFiles && pendingDelete && <DeleteScopeNotice path={pendingDelete.path} />}
 				</DialogContent>
 
 				<DialogActions
 					sx={{
 						p: 2,
-						borderTop: "1px solid #1C1F28",
-						backgroundColor: "#0A0B0E",
+						borderTop: "1px solid var(--ds-border-soft)",
+						backgroundColor: "var(--ds-bg-sunken)",
 					}}
 				>
 					<Button
-						onClick={() => setPendingDelete(null)}
+						onClick={() => {
+							setDeleteFiles(false);
+							setPendingDelete(null);
+						}}
 						disabled={saving}
-						sx={{ color: "#8E95A5" }}
+						sx={{ color: "var(--ds-muted)" }}
 					>
 						CANCELAR
 					</Button>
@@ -1013,15 +1192,302 @@ export default function LibrariesPage() {
 						variant="contained"
 						disabled={saving}
 						sx={{
-							backgroundColor: "#C21818",
+							backgroundColor: "var(--ds-red)",
 							color: "#FFFFFF",
-							"&:hover": { backgroundColor: "#80060A" },
+							"&:hover": { backgroundColor: "var(--ds-red-hover)" },
 						}}
 					>
 						{saving ? "ELIMINANDO..." : "ELIMINAR DEL ÍNDICE"}
 					</Button>
 				</DialogActions>
 			</Dialog>
+
+			{uploadTarget && (
+				<Dialog
+					open
+					onClose={() => {
+						setUploadTarget(null);
+					}}
+					maxWidth="md"
+					fullWidth
+				>
+					<HudFrame />
+					<DialogTitle>
+						{`// Subir a ${uploadTarget.library.name}${uploadTarget.subpath ? ` / ${uploadTarget.subpath}` : ""}`}
+					</DialogTitle>
+					<DialogContent sx={{ p: 3 }}>
+						<UploadPanel
+							libraryId={uploadTarget.library.id}
+							libraryPath={uploadTarget.library.path}
+							initialSubpath={uploadTarget.subpath}
+						/>
+					</DialogContent>
+					<DialogActions>
+						<Button
+							onClick={() => {
+								setUploadTarget(null);
+								void load(true);
+							}}
+						>
+							Cerrar
+						</Button>
+					</DialogActions>
+				</Dialog>
+			)}
+
+			{pickerOpen && (
+				<FolderPickerDialog
+					initialPath={path.trim() || undefined}
+					onClose={() => {
+						setPickerOpen(false);
+					}}
+					onSelect={(chosen) => {
+						setPath(chosen);
+						setPreviewPath(chosen);
+					}}
+				/>
+			)}
+		</Box>
+	);
+}
+
+/**
+ * Carpetas de primer nivel de una biblioteca. Se piden al desplegar y no antes: una rejilla
+ * de bibliotecas lanzaria una peticion por tarjeta solo para pintarse.
+ */
+function LibraryFolderList({
+	library,
+	onUpload,
+}: Readonly<{ library: LibraryItem; onUpload: (subpath: string) => void }>) {
+	const [entries, setEntries] = useState<FolderEntry[] | null>(null);
+
+	useEffect(() => {
+		let cancelled = false;
+		filesystemApi.browse(library.path).then(
+			(listing) => {
+				if (!cancelled) setEntries(listing.entries);
+			},
+			() => {
+				if (!cancelled) setEntries([]);
+			},
+		);
+
+		return () => {
+			cancelled = true;
+		};
+	}, [library.path]);
+
+	if (entries === null) {
+		return <LinearProgress sx={{ height: 2 }} />;
+	}
+
+	if (entries.length === 0) {
+		return (
+			<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "var(--ds-subtle)", px: 1 }}>
+				Sin carpetas dentro.
+			</Typography>
+		);
+	}
+
+	return (
+		<Box sx={{ maxHeight: 190, overflowY: "auto", border: "1px solid var(--ds-border-soft)" }}>
+			{entries.map((entry) => (
+				<Box
+					key={entry.path}
+					sx={{
+						display: "flex",
+						alignItems: "center",
+						gap: 1,
+						px: 1,
+						py: 0.6,
+						borderBottom: "1px solid var(--ds-border-soft)",
+						"&:hover": { backgroundColor: "rgba(var(--ds-red-rgb), 0.06)" },
+					}}
+				>
+					<FolderIcon sx={{ fontSize: 15, color: "var(--ds-red-light)", flexShrink: 0 }} />
+					<Typography
+						noWrap
+						sx={{ flexGrow: 1, minWidth: 0, fontFamily: "'Rajdhani', sans-serif", fontSize: "13px", fontWeight: 600 }}
+					>
+						{entry.name}
+					</Typography>
+					{entry.fileCount > 0 && (
+						<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", color: "var(--ds-subtle)" }}>
+							{entry.fileCount}
+						</Typography>
+					)}
+					<Tooltip title={`Subir a ${entry.name}`}>
+						<IconButton
+							size="small"
+							onClick={() => {
+								onUpload(entry.name);
+							}}
+							sx={{ color: "var(--ds-text-2)", p: 0.3 }}
+						>
+							<CloudUploadIcon sx={{ fontSize: 16 }} />
+						</IconButton>
+					</Tooltip>
+				</Box>
+			))}
+		</Box>
+	);
+}
+
+/**
+ * Ensayo del escaneo antes de guardar. Lo calcula el backend llamando al escaner de verdad:
+ * reimplementar aqui las reglas de clasificacion haria que la vista previa empezase a mentir
+ * en cuanto alguien tocase el escaner.
+ */
+function ScanPreview({
+	path,
+	typedPath,
+	pattern,
+	onRun,
+}: Readonly<{ path: string; typedPath: string; pattern: string; onRun: () => void }>) {
+	const [preview, setPreview] = useState<{ key: string; data: ScanPreviewData | null; error: string | null } | null>(
+		null,
+	);
+
+	const key = `${path}#${pattern}`;
+
+	// Solo se ensaya sobre una ruta ya decidida. Hacerlo mientras se teclea recorreria el
+	// disco entero cada vez que lo escrito casase con una carpeta real de paso.
+	useEffect(() => {
+		if (!path) return;
+
+		let cancelled = false;
+		filesystemApi.preview(path, pattern).then(
+			(data) => {
+				if (!cancelled) setPreview({ key, data, error: null });
+			},
+			(e: unknown) => {
+				if (!cancelled) {
+					setPreview({
+						key,
+						data: null,
+						error: e instanceof Error ? e.message : "No se pudo leer esa carpeta.",
+					});
+				}
+			},
+		);
+
+		return () => {
+			cancelled = true;
+		};
+	}, [key, path, pattern]);
+
+	const fresh = preview?.key === key ? preview : null;
+	const stale = typedPath.length > 0 && typedPath !== path;
+	const duplicated = fresh?.data?.series.some((serie) => serie.overlapsParent) ?? false;
+
+	return (
+		<Box
+			sx={{
+				backgroundColor: "var(--ds-bg-sunken)",
+				border: "1px solid var(--ds-border-head)",
+				borderRadius: "3px",
+				p: 2,
+				mt: 1,
+				minHeight: 260,
+			}}
+		>
+			<Typography
+				sx={{
+					fontFamily: "'Rajdhani', sans-serif",
+					fontWeight: 700,
+					fontSize: "14px",
+					letterSpacing: "1px",
+					color: "var(--ds-text-strong)",
+					textTransform: "uppercase",
+					mb: 0.5,
+				}}
+			>
+				Así quedaría
+			</Typography>
+			<Typography sx={{ fontSize: "11px", color: "var(--ds-muted)", mb: 2 }}>
+				Ensayo sobre el disco. No se guarda nada hasta que pulses crear.
+			</Typography>
+
+			{(!path || stale) && (
+				<Stack spacing={1.5} sx={{ alignItems: "flex-start" }}>
+					<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "var(--ds-subtle)" }}>
+						{typedPath
+							? "La ruta cambió. Recorrer el disco cuesta, así que se hace cuando lo pidas."
+							: "Elige una ruta con Examinar, o escríbela y pulsa aquí."}
+					</Typography>
+					<Button variant="outlined" size="small" disabled={!typedPath} onClick={onRun} startIcon={<RefreshIcon />}>
+						Calcular
+					</Button>
+				</Stack>
+			)}
+
+			{path && !stale && !fresh && <LinearProgress sx={{ height: 2 }} />}
+
+			{fresh?.error && !stale && (
+				<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "var(--ds-red-glow)" }}>
+					{fresh.error}
+				</Typography>
+			)}
+
+			{fresh?.data && !stale && (
+				<>
+					<Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: "wrap", gap: 1 }}>
+						<Chip size="small" label={`${String(fresh.data.series.length)} series`} />
+						<Chip size="small" label={`${String(fresh.data.totalVolumes)} tomos`} variant="outlined" />
+					</Stack>
+
+					{fresh.data.series.length === 0 && (
+						<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "var(--ds-subtle)" }}>
+							Ninguna serie. No hay ficheros reconocibles ahí dentro.
+						</Typography>
+					)}
+
+					<Box sx={{ maxHeight: 300, overflowY: "auto" }}>
+						{fresh.data.series.map((serie) => (
+							<Box
+								key={serie.path}
+								sx={{
+									display: "flex",
+									alignItems: "center",
+									gap: 1,
+									px: 1,
+									py: 0.7,
+									borderBottom: "1px solid var(--ds-border-soft)",
+								}}
+							>
+								<CollectionsBookmarkIcon
+									sx={{ fontSize: 15, color: serie.overlapsParent ? "var(--ds-warn)" : "var(--ds-red-light)", flexShrink: 0 }}
+								/>
+								<Box sx={{ minWidth: 0, flexGrow: 1 }}>
+									<Typography
+										noWrap
+										sx={{ fontFamily: "'Rajdhani', sans-serif", fontSize: "13px", fontWeight: 600, color: "var(--ds-platinum)" }}
+									>
+										{serie.name}
+									</Typography>
+									{serie.isRoot && (
+										<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", color: "var(--ds-subtle)" }}>
+											tomos sueltos en la raíz
+										</Typography>
+									)}
+								</Box>
+								<Typography
+									sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "var(--ds-muted)", flexShrink: 0 }}
+								>
+									{serie.volumeCount}
+								</Typography>
+							</Box>
+						))}
+					</Box>
+
+					{duplicated && (
+						<Alert severity="warning" sx={{ mt: 1.5 }}>
+							Hay carpetas con tomos sueltos que además contienen subcarpetas con tomos. Las dos salen como
+							serie y los mismos ficheros se indexan dos veces. Prueba con «Por colecciones».
+						</Alert>
+					)}
+				</>
+			)}
 		</Box>
 	);
 }

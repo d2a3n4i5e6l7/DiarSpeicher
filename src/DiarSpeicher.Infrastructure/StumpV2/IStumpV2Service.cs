@@ -28,7 +28,15 @@ public interface IStumpV2Service
     Task<(byte[] Data, string ContentType)?> GetEpubResourceAsync(AuthUser user, string mediaId, string resourcePath, CancellationToken ct = default);
     Task<StumpLibraryDto?> CreateLibraryAsync(AuthUser user, StumpCreateLibraryInput input, CancellationToken ct = default);
     Task<StumpLibraryDto?> UpdateLibraryAsync(AuthUser user, string id, StumpUpdateLibraryInput input, CancellationToken ct = default);
-    Task<bool> DeleteLibraryAsync(AuthUser user, string id, CancellationToken ct = default);
+    Task<bool> DeleteLibraryAsync(AuthUser user, string id, bool deleteFiles = false, CancellationToken ct = default);
+
+    Task<bool> DeleteMediaAsync(AuthUser user, string id, bool deleteFile = false, CancellationToken ct = default);
+
+    Task<bool> DeleteSeriesAsync(AuthUser user, string id, bool deleteFiles = false, CancellationToken ct = default);
+
+    Task<StumpMissingReportDto> GetMissingAsync(AuthUser user, string libraryId, CancellationToken ct = default);
+
+    Task<int> PurgeMissingAsync(AuthUser user, string libraryId, CancellationToken ct = default);
     Task<UploadResult> UploadToLibraryAsync(AuthUser user, string libraryId, string? subpath, IEnumerable<StumpUploadFileInput> files, CancellationToken ct = default);
     Task<UploadResult> UploadToLibraryAsync(AuthUser user, string libraryId, string? subpath, IAsyncEnumerable<StumpUploadFileInput> files, CancellationToken ct = default);
     Task<StumpSystemStatusDto> GetSystemStatusAsync(CancellationToken ct = default);

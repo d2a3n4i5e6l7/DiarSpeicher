@@ -58,7 +58,7 @@ export default function LibrarySelector() {
 						cursor: "pointer",
 						background: DS.bgSunken,
 						border: `1px solid ${libraryId ? DS.red : DS.border}`,
-						color: libraryId ? DS.redGlow : "#A3ABB8",
+						color: libraryId ? DS.redGlow : "var(--ds-text-2)",
 						fontFamily: "'Rajdhani', sans-serif",
 						fontWeight: 700,
 						fontSize: "13px",
@@ -69,7 +69,7 @@ export default function LibrarySelector() {
 						mr: 1.5,
 						maxWidth: 220,
 						clipPath: "polygon(6px 0%, 100% 0%, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0% 100%, 0% 6px)",
-						"&:hover": { borderColor: DS.redGlow, color: "#FFFFFF" },
+						"&:hover": { borderColor: DS.redGlow, color: "var(--ds-text-strong)" },
 					}}
 				>
 					<StorageIcon sx={{ fontSize: 16 }} />

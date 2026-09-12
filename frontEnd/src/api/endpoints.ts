@@ -235,7 +235,6 @@ export interface LibraryItem {
 	config?: LibraryConfig;
 }
 
-export const LIBRARY_STATUS_SCANNING = "SCANNING";
 
 export interface CreateLibraryPayload {
 	name: string;
@@ -248,9 +247,37 @@ export interface CreateLibraryPayload {
 /** Cuerpo de PUT: un campo ausente significa "no tocar". */
 export interface UpdateLibraryPayload {
 	name?: string;
+	/** Mueve el registro a otra carpeta; no mueve ficheros. El backend reescribe las rutas
+	 *  guardadas de series y tomos para no perder el progreso de lectura. */
+	path?: string;
 	description?: string;
 	emoji?: string;
 	config?: LibraryConfig;
+}
+
+/** Una de las carpetas que el compose declara como raiz de bibliotecas. */
+export interface FolderRoot {
+	path: string;
+	name: string;
+	/** Declarada en configuracion pero ausente en disco: el volumen no esta montado. */
+	mounted: boolean;
+}
+
+export interface FolderEntry {
+	name: string;
+	path: string;
+	hasChildren: boolean;
+	fileCount: number;
+	readable: boolean;
+}
+
+export interface FolderListing {
+	path: string;
+	/** Null cuando subir saldria de las carpetas permitidas. */
+	parent: string | null;
+	isRoot: boolean;
+	entries: FolderEntry[];
+	truncated: boolean;
 }
 
 export interface UploadedFileItem {
@@ -297,12 +324,133 @@ export const rolesApi = {
 		id > 0 ? Promise.resolve() : Promise.reject(new Error("ID inválido")),
 };
 
+export interface FolderHit {
+	path: string;
+	name: string;
+	parent: string;
+	depth: number;
+}
+
+export interface FolderIndexStatus {
+	built: boolean;
+	folders: number;
+	updatedAt: string | null;
+	running: boolean;
+}
+
+export interface DiskUsage {
+	path: string;
+	totalBytes: number;
+	freeBytes: number;
+	available: boolean;
+}
+
+export interface PreviewSeries {
+	name: string;
+	path: string;
+	volumeCount: number;
+	isRoot: boolean;
+	/** Sus tomos los cuenta también una serie de más arriba: saldrían duplicados. */
+	overlapsParent: boolean;
+}
+
+export interface ScanPreview {
+	path: string;
+	pattern: string;
+	series: PreviewSeries[];
+	totalVolumes: number;
+}
+
+export interface DeletionPreview {
+	path: string;
+	name: string;
+	fileCount: number;
+	bytes: number;
+	folders: DeletionPreview[];
+}
+
+export interface TrashEntry {
+	id: string;
+	originalPath: string;
+	name: string;
+	isDirectory: boolean;
+	fileCount: number;
+	bytes: number;
+	deletedAt: string;
+	/** Segundos que le quedan antes de vaciarse de verdad. */
+	expiresInSeconds: number;
+}
+
+export const trashApi = {
+	list: () => http.get<TrashEntry[]>("/api/v2/trash/"),
+	restore: (id: string) => http.post<void>(`/api/v2/trash/${id}/restore`),
+};
+
+export const filesystemApi = {
+	deletionPreview: (path: string) =>
+		http.get<DeletionPreview>(`/api/v2/filesystem/deletion?path=${encodeURIComponent(path)}`),
+	deleteEntry: (path: string) =>
+		http.delete<TrashEntry>(`/api/v2/filesystem/entry?path=${encodeURIComponent(path)}`),
+	preview: (path: string, pattern: string) =>
+		http.get<ScanPreview>(
+			`/api/v2/filesystem/preview?path=${encodeURIComponent(path)}&pattern=${encodeURIComponent(pattern)}`,
+		),
+	disk: (path: string) => http.get<DiskUsage>(`/api/v2/filesystem/disk?path=${encodeURIComponent(path)}`),
+	createFolder: (parent: string, name: string) =>
+		http.post<FolderEntry>("/api/v2/filesystem/folder", { parent, name }),
+	roots: () => http.get<FolderRoot[]>("/api/v2/filesystem/roots"),
+	browse: (path?: string) =>
+		http.get<FolderListing>(`/api/v2/filesystem/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+	indexStatus: () => http.get<FolderIndexStatus>("/api/v2/filesystem/index"),
+	rebuildIndex: () => http.post<FolderIndexStatus>("/api/v2/filesystem/index"),
+	search: (q: string) => http.get<FolderHit[]>(`/api/v2/filesystem/search?q=${encodeURIComponent(q)}`),
+};
+
+export interface MissingSeries {
+	id: string;
+	name: string;
+	path: string;
+	volumeCount: number;
+	/** Sesiones de lectura que se perderían al purgarla. */
+	readingSessions: number;
+}
+
+export interface MissingReport {
+	series: MissingSeries[];
+	orphanVolumes: number;
+	totalVolumes: number;
+	totalReadingSessions: number;
+}
+
+export interface ScanStatus {
+	libraryId: string;
+	phase: string;
+	completedSeries: number;
+	totalSeries: number;
+	currentSeries?: string;
+	message?: string;
+	percentage: number;
+	elapsedSeconds: number;
+	/** Null mientras no haya una serie terminada: sin muestras no hay estimación. */
+	etaSeconds?: number;
+	finished: boolean;
+	/** Esperando turno: hay otro escaneo delante. */
+	queued: boolean;
+}
+
 export const librariesApi = {
+	scanStatus: (id: string) => http.get<ScanStatus | null>(`/api/v2/libraries/${id}/scan`),
+	missing: (id: string) => http.get<MissingReport>(`/api/v2/libraries/${id}/missing`),
+	purgeMissing: (id: string) => http.post<{ removed: number }>(`/api/v2/libraries/${id}/purge-missing`),
+	activeScans: () => http.get<ScanStatus[]>("/api/v2/libraries/scans"),
+	/** URL para EventSource. La cookie de sesión viaja sola; no pasa por request(). */
+	scanStreamUrl: (id: string) => `${API_BASE}/api/v2/libraries/${id}/scan/stream`,
 	list: () => http.get<LibraryItem[]>("/api/v2/libraries"),
 	get: (id: string) => http.get<LibraryItem>(`/api/v2/libraries/${id}`),
 	create: (payload: CreateLibraryPayload) => http.post<LibraryItem>("/api/v2/libraries", payload),
 	update: (id: string, payload: UpdateLibraryPayload) => http.put<LibraryItem>(`/api/v2/libraries/${id}`, payload),
-	delete: (id: string) => http.delete<void>(`/api/v2/libraries/${id}`),
+	delete: (id: string, deleteFiles = false) =>
+		http.delete<void>(`/api/v2/libraries/${id}?deleteFiles=${String(deleteFiles)}`),
 	scan: (id: string) => http.post<void>(`/api/v2/libraries/${id}/scan`),
 	upload: (libraryId: string, files: File[], subpath?: string) => {
 		const formData = new FormData();
@@ -326,9 +474,6 @@ export const systemApi = {
 };
 
 
-// ---------------------------------------------------------------------------
-// Catálogo: series y medios (API v2)
-// ---------------------------------------------------------------------------
 
 export interface PageResponse<T> {
 	data: T[];
@@ -417,6 +562,8 @@ export const mediaApi = {
 	list: (page = 0, pageSize = 20) => http.get<PageResponse<MediaItem>>(`/api/v2/media?${pageQuery(page, pageSize)}`),
 	keepReading: () => http.get<MediaItem[]>("/api/v2/media/keep-reading"),
 	get: (id: string) => http.get<MediaItem>(`/api/v2/media/${id}`),
+	delete: (id: string, deleteFile = false) =>
+		http.delete<void>(`/api/v2/media/${id}?deleteFile=${String(deleteFile)}`),
 	updateProgress: (id: string, payload: ProgressPayload) =>
 		http.put<{ updated: boolean }>(`/api/v2/media/${id}/progress`, payload),
 
@@ -448,6 +595,8 @@ export const seriesApi = {
 		return http.get<PageResponse<SeriesItem>>(`/api/v2/series?${pageQuery(page, pageSize)}${scope}`);
 	},
 	get: (id: string) => http.get<SeriesItem>(`/api/v2/series/${id}`),
+	delete: (id: string, deleteFiles = false) =>
+		http.delete<void>(`/api/v2/series/${id}?deleteFiles=${String(deleteFiles)}`),
 	media: (id: string, page = 0, pageSize = 50) =>
 		http.get<PageResponse<MediaItem>>(`/api/v2/series/${id}/media?${pageQuery(page, pageSize)}`),
 
@@ -484,9 +633,6 @@ export const seriesApi = {
 	clearCover: (seriesId: string) => http.delete<void>(`/api/v2/series/${seriesId}/thumbnail`),
 };
 
-// ---------------------------------------------------------------------------
-// Metadata externa (volcado de MangaBaka)
-// ---------------------------------------------------------------------------
 
 export type MangaBakaState = "Absent" | "Downloading" | "Decompressing" | "Indexing" | "Ready" | "Failed";
 

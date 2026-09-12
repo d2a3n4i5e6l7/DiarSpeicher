@@ -1,4 +1,6 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
+using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.StumpV2;
 using DiarSpeicher.Core.Filesystem;
@@ -15,6 +17,45 @@ namespace DiarSpeicher.Api.Endpoints;
 public static class StumpV2Endpoints
 {
     private const string AuthUserKey = "AuthUser";
+
+    private static readonly JsonSerializerOptions ScanJson =
+        new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+
+    /// <summary>
+    /// Una linea que empieza por ":" es un comentario de SSE: EventSource la descarta y a
+    /// nginx le basta para no dar por muerta la conexion en su proxy_read_timeout.
+    /// </summary>
+    private static async Task SendHeartbeatsAsync(HttpResponse response, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(20), ct);
+                await response.WriteAsync(": ping\n\n", ct);
+                await response.Body.FlushAsync(ct);
+            }
+        }
+        catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or IOException)
+        {
+            // El cliente se fue o el flujo se cerro: no hay nada que salvar.
+        }
+    }
+
+    private static StumpScanStatusDto ToScanDto(ScanSnapshot snapshot) => new()
+    {
+        LibraryId = snapshot.Progress.LibraryId,
+        Phase = snapshot.Progress.Phase.ToString(),
+        CompletedSeries = snapshot.Progress.CompletedSeries,
+        TotalSeries = snapshot.Progress.TotalSeries,
+        CurrentSeries = snapshot.Progress.CurrentSeries,
+        Message = snapshot.Progress.Message,
+        Percentage = snapshot.Progress.Percentage,
+        ElapsedSeconds = (int)snapshot.Elapsed.TotalSeconds,
+        EtaSeconds = snapshot.Eta is { } eta ? (int)eta.TotalSeconds : null,
+        Finished = snapshot.Finished,
+        Queued = snapshot.Queued
+    };
 
     public static RouteGroupBuilder MapStumpV2Endpoints(this IEndpointRouteBuilder app)
     {
@@ -326,8 +367,17 @@ public static class StumpV2Endpoints
                 return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
             }
 
-            var result = await service.CreateLibraryAsync(user, input, ct);
-            return result == null ? Results.BadRequest("Could not create library") : Results.Created($"/api/v2/libraries/{result.Id}", result);
+            try
+            {
+                var result = await service.CreateLibraryAsync(user, input, ct);
+                return result == null
+                    ? Results.BadRequest(new { error = "Could not create library" })
+                    : Results.Created($"/api/v2/libraries/{result.Id}", result);
+            }
+            catch (InvalidOperationException e)
+            {
+                return Results.BadRequest(new { error = e.Message });
+            }
         });
 
         group.MapPut("/libraries/{id}", async (
@@ -343,11 +393,29 @@ public static class StumpV2Endpoints
                 return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
             }
 
-            var result = await service.UpdateLibraryAsync(user, id, input, ct);
-            return result == null ? Results.NotFound() : Results.Ok(result);
+            try
+            {
+                var result = await service.UpdateLibraryAsync(user, id, input, ct);
+                return result == null ? Results.NotFound() : Results.Ok(result);
+            }
+            catch (InvalidOperationException e)
+            {
+                return Results.BadRequest(new { error = e.Message });
+            }
         });
 
-        group.MapDelete("/libraries/{id}", async (
+        group.MapGet("/libraries/{id}/missing", async (
+            string id,
+            HttpContext httpContext,
+            [FromServices] IStumpV2Service service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+
+            return Results.Ok(await service.GetMissingAsync(user, id, ct));
+        });
+
+        group.MapPost("/libraries/{id}/purge-missing", async (
             string id,
             HttpContext httpContext,
             [FromServices] IStumpV2Service service,
@@ -359,8 +427,130 @@ public static class StumpV2Endpoints
                 return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
             }
 
-            var deleted = await service.DeleteLibraryAsync(user, id, ct);
-            return deleted ? Results.NoContent() : Results.NotFound();
+            return Results.Ok(new { removed = await service.PurgeMissingAsync(user, id, ct) });
+        });
+
+        group.MapGet("/libraries/{id}/scan", (
+            string id,
+            [FromServices] IScanProgressHub hub) =>
+        {
+            var snapshot = hub.GetSnapshot(id);
+
+            return snapshot == null ? Results.NoContent() : Results.Ok(ToScanDto(snapshot));
+        });
+
+        // SSE y no websocket: el progreso solo baja del servidor, asi que un canal HTTP de
+        // toda la vida basta y atraviesa el gateway sin configurarle nada.
+        group.MapGet("/libraries/{id}/scan/stream", async (
+            string id,
+            HttpContext httpContext,
+            [FromServices] IScanProgressHub hub,
+            CancellationToken ct) =>
+        {
+            httpContext.Response.Headers.ContentType = "text/event-stream";
+            httpContext.Response.Headers.CacheControl = "no-cache, no-transform";
+            // Sin esto nginx acumula la respuesta y el cliente no recibe nada hasta el final.
+            httpContext.Response.Headers["X-Accel-Buffering"] = "no";
+
+            using var heartbeat = new CancellationTokenSource();
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, heartbeat.Token);
+            var pinger = SendHeartbeatsAsync(httpContext.Response, linked.Token);
+
+            try
+            {
+                await foreach (var snapshot in hub.SubscribeAsync(id, linked.Token))
+                {
+                    var payload = JsonSerializer.Serialize(ToScanDto(snapshot), ScanJson);
+                    await httpContext.Response.WriteAsync($"data: {payload}\n\n", ct);
+                    await httpContext.Response.Body.FlushAsync(ct);
+
+                    if (snapshot.Finished) break;
+                }
+            }
+            finally
+            {
+                await heartbeat.CancelAsync();
+                await pinger;
+            }
+        });
+
+        group.MapGet("/libraries/scans", (
+            [FromServices] IScanProgressHub hub) =>
+            Results.Ok(hub.GetActive().Select(ToScanDto).ToList()));
+
+        group.MapDelete("/libraries/{id}", async (
+            string id,
+            [FromQuery] bool deleteFiles,
+            HttpContext httpContext,
+            [FromServices] IStumpV2Service service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            if (!user.HasPermission(Permissions.ManageLibrary))
+            {
+                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            try
+            {
+                return await service.DeleteLibraryAsync(user, id, deleteFiles, ct)
+                    ? Results.NoContent()
+                    : Results.NotFound();
+            }
+            catch (InvalidOperationException e)
+            {
+                return Results.BadRequest(new { error = e.Message });
+            }
+        });
+
+        group.MapDelete("/series/{id}", async (
+            string id,
+            [FromQuery] bool deleteFiles,
+            HttpContext httpContext,
+            [FromServices] IStumpV2Service service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            if (!user.HasPermission(Permissions.ManageLibrary))
+            {
+                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            try
+            {
+                return await service.DeleteSeriesAsync(user, id, deleteFiles, ct)
+                    ? Results.NoContent()
+                    : Results.NotFound();
+            }
+            catch (InvalidOperationException e)
+            {
+                return Results.BadRequest(new { error = e.Message });
+            }
+        });
+
+        group.MapDelete("/media/{id}", async (
+            string id,
+            [FromQuery] bool deleteFile,
+            HttpContext httpContext,
+            [FromServices] IStumpV2Service service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            if (!user.HasPermission(Permissions.ManageLibrary))
+            {
+                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            try
+            {
+                return await service.DeleteMediaAsync(user, id, deleteFile, ct)
+                    ? Results.NoContent()
+                    : Results.NotFound();
+            }
+            catch (InvalidOperationException e)
+            {
+                return Results.BadRequest(new { error = e.Message });
+            }
         });
 
         group.MapPost("/libraries/{id}/upload", HandleLibraryUpload).DisableAntiforgery();

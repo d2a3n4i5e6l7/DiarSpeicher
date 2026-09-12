@@ -57,6 +57,7 @@ export default function ReaderSettingsPanel({ open, onClose, settings, onChange 
 			onClose={onClose}
 			slotProps={{
 				paper: {
+					className: "ds-force-dark",
 					sx: {
 						width: 320,
 						maxWidth: "90vw",

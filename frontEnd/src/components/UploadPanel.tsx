@@ -19,18 +19,16 @@ import {
 	Typography,
 } from "@mui/material";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
-import LibraryBooksIcon from "@mui/icons-material/LibraryBooks";
+import CreateNewFolderIcon from "@mui/icons-material/CreateNewFolder";
 import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
 import PauseOutlinedIcon from "@mui/icons-material/PauseOutlined";
 import PlayArrowOutlinedIcon from "@mui/icons-material/PlayArrowOutlined";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { librariesApi, type LibraryItem } from "../api/endpoints";
+import { filesystemApi, type DiskUsage, type FolderEntry } from "../api/endpoints";
 import { TusUpload, type TusUploadStatus } from "../api/tusClient";
-import { Link as RouterLink } from "react-router-dom";
-import PageHeader from "../components/PageHeader";
-import HudFrame from "../components/HudFrame";
+import HudFrame from "./HudFrame";
 
 function formatBytes(bytes: number, decimals = 2): string {
 	if (bytes === 0) return "0 Bytes";
@@ -51,47 +49,78 @@ interface UploadQueueItem {
 	errorMessage?: string;
 }
 
-export default function UploadPage() {
+interface Props {
+	libraryId: string;
+	/** Ruta en disco de la biblioteca: de ella salen las subcarpetas y el espacio libre. */
+	libraryPath: string;
+	/** Carpeta dentro de la biblioteca donde caen los ficheros. */
+	initialSubpath?: string;
+	onUploaded?: () => void;
+}
+
+function DiskGauge({ disk }: Readonly<{ disk: DiskUsage }>) {
+	const usedPct = disk.totalBytes > 0 ? ((disk.totalBytes - disk.freeBytes) / disk.totalBytes) * 100 : 0;
+	const tight = disk.freeBytes < 5 * 1024 * 1024 * 1024;
+
+	return (
+		<Stack sx={{ minWidth: 190 }}>
+			<Stack direction="row" sx={{ justifyContent: "space-between", mb: 0.5 }}>
+				<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", color: "var(--ds-muted)" }}>
+					DISCO
+				</Typography>
+				<Typography
+					sx={{
+						fontFamily: "'JetBrains Mono', monospace",
+						fontSize: "10px",
+						color: tight ? "var(--ds-warn)" : "var(--ds-muted)",
+					}}
+				>
+					{formatBytes(disk.freeBytes, 1)} libres de {formatBytes(disk.totalBytes, 1)}
+				</Typography>
+			</Stack>
+			<LinearProgress
+				variant="determinate"
+				value={usedPct}
+				sx={{ height: 6, "& .MuiLinearProgress-bar": { backgroundColor: tight ? "var(--ds-warn)" : "var(--ds-red-glow)" } }}
+			/>
+		</Stack>
+	);
+}
+
+export default function UploadPanel({ libraryId, libraryPath, initialSubpath, onUploaded }: Readonly<Props>) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
-	const [libraries, setLibraries] = useState<LibraryItem[]>([]);
-	const [selectedLibraryId, setSelectedLibraryId] = useState<string>("");
-	const [subpath, setSubpath] = useState("");
+	const [subpath, setSubpath] = useState(initialSubpath ?? "");
 	const [items, setItems] = useState<UploadQueueItem[]>([]);
 	const [isDragging, setIsDragging] = useState(false);
 
-	const [loadingLibraries, setLoadingLibraries] = useState(true);
+	const [subfolders, setSubfolders] = useState<FolderEntry[]>([]);
+	const [disk, setDisk] = useState<DiskUsage | null>(null);
+	const [newFolder, setNewFolder] = useState("");
+	const [creatingFolder, setCreatingFolder] = useState(false);
+
 	const [error, setError] = useState<string | null>(null);
 	const [successCount, setSuccessCount] = useState<number | null>(null);
 
-	useEffect(() => {
-		let isMounted = true;
-		const init = async () => {
-			try {
-				const list = await librariesApi.list();
-				if (isMounted) {
-					setLibraries(list || []);
-					if (list && list.length > 0) {
-						setSelectedLibraryId((prev) => prev || list[0].id);
-					}
-				}
-			} catch (err: unknown) {
-				if (isMounted) {
-					setError(err instanceof Error ? err.message : "Error cargando las bibliotecas.");
-				}
-			} finally {
-				if (isMounted) {
-					setLoadingLibraries(false);
-				}
-			}
-		};
 
-		void init();
+	const loadDestination = useCallback((path: string, alive: () => boolean = () => true) => {
+		return Promise.allSettled([filesystemApi.browse(path), filesystemApi.disk(path)]).then(([listing, usage]) => {
+			if (!alive()) return;
+			setSubfolders(listing.status === "fulfilled" ? listing.value.entries : []);
+			setDisk(usage.status === "fulfilled" ? usage.value : null);
+		});
+	}, []);
+
+	useEffect(() => {
+		if (!libraryPath) return;
+
+		let cancelled = false;
+		void loadDestination(libraryPath, () => !cancelled);
 
 		return () => {
-			isMounted = false;
+			cancelled = true;
 		};
-	}, []);
+	}, [libraryPath, loadDestination]);
 
 	const createQueueItem = useCallback(
 		(file: File): UploadQueueItem => {
@@ -99,7 +128,7 @@ export default function UploadPage() {
 
 			const tusUploadInstance = new TusUpload({
 				file,
-				libraryId: selectedLibraryId,
+				libraryId,
 				subpath: subpath.trim() || undefined,
 				onProgress: (uploaded, _total, pct) => {
 					setItems((prev) =>
@@ -129,6 +158,7 @@ export default function UploadPage() {
 						)
 					);
 					setSuccessCount((prev) => (prev ? prev + 1 : 1));
+					onUploaded?.();
 				},
 				onError: (err) => {
 					setItems((prev) =>
@@ -154,14 +184,10 @@ export default function UploadPage() {
 				percentage: 0,
 			};
 		},
-		[selectedLibraryId, subpath]
+		[libraryId, subpath, onUploaded]
 	);
 
 	const handleAddFiles = (files: File[]) => {
-		if (!selectedLibraryId) {
-			setError("Selecciona primero una biblioteca de destino.");
-			return;
-		}
 		setError(null);
 		const newItems = files.map((f) => createQueueItem(f));
 		setItems((prev) => [...prev, ...newItems]);
@@ -243,8 +269,8 @@ export default function UploadPage() {
 		}
 	};
 
-	const dropBorderColor = isDragging ? "#FF2E2E" : "#282C38";
-	const dropBgColor = isDragging ? "rgba(194, 24, 24, 0.15)" : "#0A0B0E";
+	const dropBorderColor = isDragging ? "var(--ds-red-glow)" : "var(--ds-border)";
+	const dropBgColor = isDragging ? "rgba(var(--ds-red-rgb), 0.15)" : "var(--ds-bg-sunken)";
 
 	const hasUploading = items.some((it) => it.status === "uploading");
 	const hasPausedOrIdle = items.some(
@@ -252,11 +278,7 @@ export default function UploadPage() {
 	);
 
 	return (
-		<Box sx={{ maxWidth: 1100, mx: "auto" }}>
-			<PageHeader
-				title="Subida de Ficheros Reanudable (TUS)"
-				subtitle="Protocolo de ingesta de manga, cómics y novelas digitales con tolerancia a fallos y reanudación automática."
-			/>
+		<Box>
 			<Stack spacing={3}>
 
 				{error && (
@@ -271,55 +293,71 @@ export default function UploadPage() {
 					</Alert>
 				)}
 
-				{/* Selección de Biblioteca y Destino */}
 				<Card sx={{ overflow: "hidden" }}>
 					<HudFrame />
 					<CardContent>
 						<Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-							1. Seleccionar Biblioteca Destino
+							Destino
 						</Typography>
 
-						{loadingLibraries ? (
-							<LinearProgress sx={{ my: 2 }} />
-						) : (
-							<Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ alignItems: "center" }}>
-								<FormControl size="small" sx={{ minWidth: 260, flexGrow: 1 }}>
-									<InputLabel id="library-select-label">Biblioteca</InputLabel>
+						<Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ alignItems: "center" }}>
+								<FormControl size="small" sx={{ minWidth: 220, flexGrow: 1 }}>
+									<InputLabel id="subfolder-select-label">Carpeta destino</InputLabel>
 									<Select
-										labelId="library-select-label"
-										label="Biblioteca"
-										value={selectedLibraryId}
-										onChange={(e) => setSelectedLibraryId(e.target.value)}
-										disabled={hasUploading}
+										labelId="subfolder-select-label"
+										label="Carpeta destino"
+										value={subpath}
+										onChange={(e) => setSubpath(e.target.value)}
+										disabled={hasUploading || !libraryPath}
 									>
-										{libraries.map((lib) => (
-											<MenuItem key={lib.id} value={lib.id}>
-												{lib.name} ({lib.path})
+										<MenuItem value="">
+											<em>Raíz de la biblioteca</em>
+										</MenuItem>
+										{subfolders.map((folder) => (
+											<MenuItem key={folder.path} value={folder.name}>
+												{folder.name}
 											</MenuItem>
 										))}
 									</Select>
 								</FormControl>
+						</Stack>
 
-								<Button
-									variant="outlined"
-									startIcon={<LibraryBooksIcon />}
-									component={RouterLink}
-									to="/libraries"
-								>
-									Gestionar bibliotecas
-								</Button>
+						<Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ alignItems: "center", mt: 2 }}>
+							<TextField
+								label="Crear carpeta nueva aquí"
+								size="small"
+								value={newFolder}
+								onChange={(e) => setNewFolder(e.target.value)}
+								disabled={creatingFolder || !libraryPath}
+								placeholder="ej. Segunda temporada"
+								sx={{ flexGrow: 1 }}
+							/>
+							<Button
+								variant="outlined"
+								startIcon={<CreateNewFolderIcon />}
+								disabled={creatingFolder || !newFolder.trim() || !libraryPath}
+								onClick={() => {
+									setCreatingFolder(true);
+									filesystemApi
+										.createFolder(libraryPath, newFolder.trim())
+										.then(async (created) => {
+											setNewFolder("");
+											setSubpath(created.name);
+											await loadDestination(libraryPath);
+										})
+										.catch((err: unknown) => {
+											setError(err instanceof Error ? err.message : "No se pudo crear la carpeta.");
+										})
+										.finally(() => {
+											setCreatingFolder(false);
+										});
+								}}
+							>
+								Crear
+							</Button>
 
-								<TextField
-									label="Subcarpeta (opcional)"
-									size="small"
-									value={subpath}
-									onChange={(e) => setSubpath(e.target.value)}
-									disabled={hasUploading}
-									placeholder="ej. Tomo 1"
-									sx={{ flexGrow: 1 }}
-								/>
-							</Stack>
-						)}
+							{disk?.available && <DiskGauge disk={disk} />}
+						</Stack>
 					</CardContent>
 				</Card>
 
@@ -328,7 +366,7 @@ export default function UploadPage() {
 					<HudFrame />
 					<CardContent>
 						<Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-							2. Seleccionar o Arrastrar Ficheros
+							Ficheros
 						</Typography>
 
 						<Box
@@ -345,8 +383,8 @@ export default function UploadPage() {
 								cursor: "pointer",
 								transition: "all 0.2s ease-in-out",
 								"&:hover": {
-									borderColor: "#FF2E2E",
-									backgroundColor: "rgba(194, 24, 24, 0.08)",
+									borderColor: "var(--ds-red-glow)",
+									backgroundColor: "rgba(var(--ds-red-rgb), 0.08)",
 								},
 							}}
 						>

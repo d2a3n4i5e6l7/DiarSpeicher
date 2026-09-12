@@ -37,10 +37,12 @@ public class ArchiveConversionService : IArchiveConversionService
     private static readonly string[] SourceExtensions = [".cbr", ".rar"];
 
     private readonly ILogger<ArchiveConversionService> _logger;
+    private readonly ITrashService _trash;
 
-    public ArchiveConversionService(ILogger<ArchiveConversionService> logger)
+    public ArchiveConversionService(ILogger<ArchiveConversionService> logger, ITrashService trash)
     {
         _logger = logger;
+        _trash = trash;
     }
 
     public async Task<IReadOnlyList<ArchiveConversion>> ConvertDirectoryAsync(
@@ -75,8 +77,15 @@ public class ArchiveConversionService : IArchiveConversionService
                 var deleted = false;
                 if (hardDeleteSource && File.Exists(source))
                 {
-                    File.Delete(source);
-                    deleted = true;
+                    // A la papelera, no a File.Delete: esto corre solo dentro del escaneo,
+                    // sin que nadie confirme nada, asi que un CBR convertido mal o un CBZ
+                    // corrupto se llevaria el original sin vuelta atras.
+                    deleted = _trash.TryMoveToTrash(source, out _) == TrashOutcome.Moved;
+
+                    if (!deleted)
+                    {
+                        _logger.LogWarning("No se pudo retirar el CBR {Source}; se deja en su sitio", source);
+                    }
                 }
 
                 conversions.Add(new ArchiveConversion(source, target, deleted));

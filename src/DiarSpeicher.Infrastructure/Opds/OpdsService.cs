@@ -384,14 +384,12 @@ public class OpdsService : IOpdsService
 
         var entries = new List<OpdsEntry>();
 
-        // 1. Libraries
         var libraries = await _db.Libraries.ForUser(user)
             .Where(l => l.Name.Contains(search))
             .OrderBy(l => l.Name)
             .ToListAsync(ct);
         entries.AddRange(libraries.Select(l => ToOpdsEntry(l, apiKey)));
 
-        // 2. Series
         var seriesList = await _db.Series.ForUser(user)
             .Include(s => s.Metadata)
             .Where(s => s.Name.Contains(search) || (s.Metadata != null && s.Metadata.Title != null && s.Metadata.Title.Contains(search)))
@@ -399,7 +397,6 @@ public class OpdsService : IOpdsService
             .ToListAsync(ct);
         entries.AddRange(seriesList.Select(s => ToOpdsEntry(s, apiKey)));
 
-        // 3. Books
         var books = await _db.Media.ForUser(user)
             .Include(m => m.Metadata)
             .Where(m =>

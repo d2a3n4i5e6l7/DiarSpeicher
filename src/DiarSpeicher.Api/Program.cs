@@ -48,14 +48,19 @@ builder.Services.Configure<GatewayOptions>(builder.Configuration.GetSection(Gate
 builder.Services.AddSingleton<ILinkPrefixProvider, HttpContextLinkPrefixProvider>();
 
 
-// Storage locations & page cache
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<MangaBakaOptions>(builder.Configuration.GetSection(MangaBakaOptions.SectionName));
+builder.Services.Configure<LibraryRootsOptions>(builder.Configuration.GetSection(LibraryRootsOptions.SectionName));
+builder.Services.Configure<TrashOptions>(builder.Configuration.GetSection(TrashOptions.SectionName));
+builder.Services.AddSingleton<ITrashService, TrashService>();
+builder.Services.AddHostedService<TrashPurgeService>();
+builder.Services.AddHostedService<ScanRecoveryService>();
+builder.Services.AddSingleton<IFolderIndex, FolderIndex>();
+builder.Services.AddHostedService<FolderIndexStartupService>();
 builder.Services.PostConfigure<StorageOptions>(ApplyUploadEnvironmentOverrides);
 builder.Services.AddOptions<MangaBakaOptions>().PostConfigure<IOptions<StorageOptions>>(ApplyMangaBakaStorageRoot);
 builder.Services.AddSingleton<IPageCache, DiskPageCache>();
 
-// Book Processing & Extraction
 builder.Services.AddSingleton<IBookProcessor, ZipBookProcessor>();
 builder.Services.AddSingleton<IBookProcessor, RarBookProcessor>();
 builder.Services.AddSingleton<IBookProcessor, EpubBookProcessor>();
@@ -71,17 +76,14 @@ builder.Services.AddSingleton<ICompositeBookProcessor>(sp => new CachingBookProc
 builder.Services.AddSingleton<IThumbnailService, ThumbnailService>();
 
 
-// OPDS v1.2, v2.0 & Komga Services
 builder.Services.AddScoped<IOpdsService, OpdsService>();
 builder.Services.AddScoped<IOpdsV2Service, OpdsV2Service>();
 builder.Services.AddScoped<IKomgaService, KomgaService>();
 
-// E-Reader Sync (KOReader & Kobo) and Stump API v2 Services
 builder.Services.AddScoped<IKoReaderService, KoReaderService>();
 builder.Services.AddScoped<IKoboService, KoboService>();
 builder.Services.AddScoped<IStumpV2Service, StumpV2Service>();
 
-// Filesystem Scanner & Background Worker
 builder.Services.AddSingleton<IDirectoryScanner, DirectoryScanner>();
 builder.Services.AddSingleton<IArchiveConversionService, ArchiveConversionService>();
 
@@ -96,7 +98,14 @@ builder.Services.AddHostedService<ScanBackgroundService>();
 builder.Services.AddHostedService<LibraryWatcherService>();
 builder.Services.AddHostedService<DatabaseBackupService>();
 
-builder.Services.AddScoped<IScanProgressPublisher, GraphQLScanProgressPublisher>();
+// El hub es singleton porque los suscriptores de SSE viven mas que la peticion que los
+// abrio; el publicador de GraphQL sigue siendo scoped porque su emisor lo es.
+builder.Services.AddSingleton<ScanProgressHub>();
+builder.Services.AddSingleton<IScanProgressHub>(sp => sp.GetRequiredService<ScanProgressHub>());
+builder.Services.AddScoped<GraphQLScanProgressPublisher>();
+builder.Services.AddScoped<IScanProgressPublisher>(sp => new CompositeScanProgressPublisher(
+    [sp.GetRequiredService<GraphQLScanProgressPublisher>(), sp.GetRequiredService<ScanProgressHub>()],
+    sp.GetRequiredService<ILogger<CompositeScanProgressPublisher>>()));
 builder.Services.AddScoped<AuthUserResolver>();
 
 builder.Services
@@ -127,7 +136,6 @@ var app = builder.Build();
 // arrancar el proceso.
 EnsureDataDirectories(app.Services, connectionString);
 
-// Inicializar base de datos y WAL
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<DiarSpeicherDbContext>();
@@ -173,6 +181,8 @@ app.MapKoReaderEndpoints();
 app.MapKoboEndpoints();
 app.MapStumpV2Endpoints();
 app.MapMetadataEndpoints();
+app.MapFilesystemEndpoints();
+app.MapTrashEndpoints();
 app.MapTusEndpoints();
 
 await app.RunAsync();

@@ -1,9 +1,8 @@
-import { Box, InputAdornment, MenuItem, Select, TextField, ToggleButton, Tooltip } from "@mui/material";
+import { Box, InputAdornment, MenuItem, Select, TextField, ToggleButton, Tooltip, IconButton } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import ClearIcon from "@mui/icons-material/Close";
-import { IconButton } from "@mui/material";
 import { DS } from "../theme";
 
 export type SortDirection = "asc" | "desc";
@@ -120,7 +119,7 @@ export default function CatalogToolbar({
 						border: `1px solid ${DS.border}`,
 						color: DS.muted,
 						px: 1,
-						"&.Mui-selected": { backgroundColor: "rgba(194, 24, 24, 0.18)", borderColor: DS.red, color: "#FFFFFF" },
+						"&.Mui-selected": { backgroundColor: "rgba(var(--ds-select-rgb), 0.18)", borderColor: DS.select, color: "var(--ds-text-strong)" },
 					}}
 				>
 					{flipped ? <ArrowDownwardIcon sx={{ fontSize: 18 }} /> : <ArrowUpwardIcon sx={{ fontSize: 18 }} />}

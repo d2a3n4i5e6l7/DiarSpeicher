@@ -16,6 +16,10 @@ Esta skill define el sistema de diseño exclusivo, identidad visual y reglas de 
 
 ## 2. Paleta Cromática y Tokens CSS
 
+Lo que sigue es el juego de **noche**. `buildTheme(mode)` publica en `:root` uno de los
+dos juegos de `frontEnd/src/theme/tokens.ts`, así que los nombres no cambian nunca:
+una página escrita contra ellos ya sabe pintarse de día.
+
 ```css
 :root {
   /* Fondos principales */
@@ -54,6 +58,10 @@ Esta skill define el sistema de diseño exclusivo, identidad visual y reglas de 
   --ds-gradient-header: linear-gradient(90deg, #1C0303 0%, #050508 100%);
   --ds-gradient-card: linear-gradient(145deg, #161922 0%, #0A0B0E 100%);
 
+  /* Alfa del resplandor rojo: 0.45 de noche, 0 de día. Apaga todos los halos
+     de golpe sin tocar ni una página. */
+  --ds-glow-a: 0.45;
+
   /* Tipografías */
   --font-display: 'Orbitron', 'Chakra Petch', sans-serif;
   --font-tactical: 'Rajdhani', sans-serif;
@@ -61,6 +69,25 @@ Esta skill define el sistema de diseño exclusivo, identidad visual y reglas de 
   --font-body: 'Inter', sans-serif;
 }
 ```
+
+### Modo día (`Tageslicht`)
+
+Sacado del uniforme de Iron Blood: porcelana, gris acero del equipamiento, rojo opaco
+de la capa y el azul del iris. Los mismos nombres, otros valores.
+
+| Token | Noche | Día | Papel |
+|---|---|---|---|
+| `--ds-bg` | `#050508` | `#ECEEF2` | `Porzellan`, nunca blanco puro |
+| `--ds-bg-card` | `#0F1015` | `#F7F8FA` | tarjetas |
+| `--ds-border` | `#282C38` | `#B7BEC9` | `Stahlgrau`, bordes y biseles |
+| `--ds-red` | `#C21818` | `#A32020` | `Rot gedämpft`, 6.49:1 |
+| `--ds-platinum` | `#F0F2F6` | `#16181D` | texto principal |
+| `--ds-text-2` | `#A3ABB8` | `#4A505C` | secundario, 6.97:1 |
+| `--ds-select` | `#C21818` | `#2F5C90` | `Eisblau`, el iris: selección |
+| `--ds-glow-a` | `0.45` | `0` | de día el rojo es tinta, no luz |
+
+El bisel metálico se invierte porque la luz cae desde arriba: reflejo blanco en el
+borde superior, sombra acero en el inferior.
 
 ---
 
@@ -181,8 +208,19 @@ arrastrar con el scroll:
 }
 
 .ds-glow-bg {
-  background-image: radial-gradient(circle at 50% 0%, rgba(194, 24, 24, 0.08) 0%, transparent 55%);
+  /* Cierra en el mismo rojo con alfa 0, nunca en `transparent`: `transparent` es
+     rgba(0,0,0,0) y al interpolar deja un aro gris. Firefox no aplica dithering a
+     los degradados y lo dibuja como un circulo visible; Chrome y Edge lo disimulan. */
+  background-image: radial-gradient(ellipse 130% 80% at 50% -20%,
+    rgba(var(--ds-red-rgb), 0.10) 0%,
+    rgba(var(--ds-red-rgb), 0.065) 26%,
+    rgba(var(--ds-red-rgb), 0.035) 48%,
+    rgba(var(--ds-red-rgb), 0.014) 68%,
+    rgba(var(--ds-red-rgb), 0) 100%);
 }
+
+/* Remata las bandas que queden. Va encima del halo. */
+.ds-noise { background-image: url("data:image/svg+xml,...feTurbulence..."); opacity: .035; }
 ```
 
 ### Pastilla Monoespaciada (IDs, hashes, contadores)
@@ -239,7 +277,9 @@ SVG canónico para avatares, favicon y navbar:
 ## 5. Prohibiciones Estrictas de Diseño
 1. **Colores Prohibidos**: No usar verde (#10b981, #22c55e, #00695c), cian (#0284c7), naranja o violeta como colores de marca. El acento es **estrictamente Blutrot (`#C21818`) y Red Glow (`#FF2E2E`)**. Única excepción: el verde y el ámbar como semáforo de estado (`READY`, `MISSING`, `NODE: ONLINE`, alertas de éxito y aviso), nunca aplicados a superficies, bordes de marca ni acentos de navegación.
 2. **Deformaciones**: El logotipo e isotipo no deben sufrir escalado no uniforme, deformación axial ni rotación (siempre a 0°).
-3. **Fondos**: Prohibido usar fondos blancos o claros para la estructura de la aplicación. Todo es dark mode táctico sobre `#050508`. El lienzo del lector debe permitir negro puro `#000000` para cero fatiga visual.
+3. **Fondos**: La estructura de la aplicación no usa blanco puro en ningún modo. De noche es `#050508`; de día, porcelana `#ECEEF2`, nunca `#FFFFFF`. El lienzo del lector debe permitir negro puro `#000000` para cero fatiga visual.
+4. **Nada de resplandor rojo de día**: el rojo diurno es tinta impresa. Ningún `box-shadow` ni `drop-shadow` rojo; el token `--ds-glow-a` lo apaga solo.
+5. **El azul del iris no señala error**: es informacion y seleccion, y solo de día.
 
 ---
 
@@ -257,6 +297,14 @@ El sistema vive en `frontEnd/src/theme/index.ts`. Trampas reales al tocarlo:
 - **El marco HUD es un componente**, `frontEnd/src/components/HudFrame.tsx`. Se pone como
   hijo directo de la tarjeta o del papel del diálogo, antes del contenido.
 - **Tokens desde los `sx`**: `import { DS } from "../theme"` en vez de repetir hex sueltos.
-- **El tema es dark fijo.** `buildTheme()` no acepta argumentos y `getPalette()` devuelve
-  siempre `mode: "dark"`, porque el brandbook prohíbe fondos claros para la estructura de
-  la aplicación.
+- **El tema tiene dos modos.** `buildTheme(mode)` publica en `:root` el juego de tokens
+  de `frontEnd/src/theme/tokens.ts` (`DARK` o `DAY`). Los valores de `palette` sí son hex
+  literales: MUI calcula contrastes y sombras sobre ellos y `var()` los rompería.
+- **`DS.*` no son colores, son referencias a variables CSS.** Esa es la razón de que las
+  17 páginas cambien de modo sin reescribirlas. No pasarlos por `alpha()` ni concatenarlos
+  dentro de un `rgb()`; para eso existen `--ds-red-rgb`, `--ds-ok-rgb` y `--ds-warn-rgb`.
+- **En SVG, `style={{ fill: "var(--ds-red)" }}`, no `fill="var(--ds-red)"`.** Como atributo
+  de presentación no todos los navegadores resuelven la variable.
+- **El lector se queda en noche siempre.** Su raíz lleva `ds-force-dark`, que vuelve a
+  declarar los tokens oscuros en su subárbol. El panel de ajustes es un `Drawer` y se
+  renderiza en un portal, así que la clase va también en su `paper`.

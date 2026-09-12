@@ -55,16 +55,13 @@ export class TusUpload {
 		this.status = "uploading";
 
 		try {
-			// 1. Si no tenemos uploadUrl, crear la subida
 			if (!this.uploadUrl) {
 				this.uploadUrl = await this.createUpload();
 				this.currentOffset = 0;
 			} else {
-				// 2. Si ya teníamos uploadUrl, verificar offset actual con HEAD
 				this.currentOffset = await this.getOffsetFromServer(this.uploadUrl);
 			}
 
-			// 3. Subir en bucle de chunks hasta completar
 			await this.uploadChunks();
 		} catch (err: unknown) {
 			if (this.isAborted) {
@@ -137,7 +134,6 @@ export class TusUpload {
 				if (xhr.status === 201) {
 					const location = xhr.getResponseHeader("Location");
 					if (location) {
-						// Resolver ubicación absoluta si es relativa
 						const resolved = location.startsWith("http") ? location : `${API_BASE}${location}`;
 						resolve(resolved);
 					} else {

@@ -1,66 +1,70 @@
 import { createTheme } from "@mui/material/styles";
-import type { Theme, ThemeOptions } from "@mui/material";
+import type { PaletteMode, Theme, ThemeOptions } from "@mui/material";
 import { alertClasses } from "@mui/material/Alert";
 import { chipClasses } from "@mui/material/Chip";
+import { getBrandTokens, PALETTE_LITERALS } from "./tokens";
 
-function getPalette(): ThemeOptions["palette"] {
+function getPalette(mode: PaletteMode): ThemeOptions["palette"] {
+	const p = mode === "light" ? PALETTE_LITERALS.light : PALETTE_LITERALS.dark;
 	return {
-		mode: "dark",
-		primary: {
-			main: "#C21818",
-			light: "#FF2E2E",
-			dark: "#660B0B",
-			contrastText: "#FFFFFF",
-		},
-		secondary: {
-			main: "#A3ABB8",
-			light: "#F0F2F6",
-			dark: "#383E4C",
-			contrastText: "#FFFFFF",
-		},
-		error: {
-			main: "#FF2E2E",
-			light: "#FF5C5C",
-			dark: "#80060A",
-		},
-		warning: {
-			main: "#F59E0B",
-			light: "#FBBF24",
-			dark: "#78350F",
-		},
-		info: {
-			main: "#C21818",
-			light: "#FF3E3E",
-			dark: "#331010",
-		},
-		success: {
-			main: "#22C55E",
-			light: "#4ADE80",
-			dark: "#14532D",
-		},
-		background: {
-			default: "#050508",
-			paper: "#0F1015",
-		},
-		text: {
-			primary: "#F0F2F6",
-			secondary: "#8E95A5",
-			disabled: "#636B7C",
-		},
-		divider: "#1C1F28",
+		mode,
+		primary: { ...p.primary, contrastText: "#FFFFFF" },
+		secondary: { ...p.secondary, contrastText: "#FFFFFF" },
+		error: { ...p.error },
+		warning: { ...p.warning },
+		info: { ...p.info },
+		success: { ...p.success },
+		background: { ...p.background },
+		text: { ...p.text },
+		divider: p.divider,
 	};
 }
 
 const TYPOGRAPHY_OPTIONS: ThemeOptions["typography"] = {
 	fontFamily: ["'Inter'", "'Chakra Petch'", "'Roboto'", "sans-serif"].join(","),
-	h1: { fontFamily: "'Orbitron', sans-serif", fontWeight: 900, letterSpacing: "2px" },
-	h2: { fontFamily: "'Orbitron', sans-serif", fontWeight: 900, letterSpacing: "2px" },
-	h3: { fontFamily: "'Orbitron', sans-serif", fontWeight: 700, letterSpacing: "1.5px" },
-	h4: { fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase" },
-	h5: { fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase" },
-	h6: { fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase" },
-	subtitle1: { fontFamily: "'Rajdhani', sans-serif", fontWeight: 600, letterSpacing: "0.5px" },
-	subtitle2: { fontFamily: "'Rajdhani', sans-serif", fontWeight: 600, letterSpacing: "0.5px" },
+	h1: {
+		fontFamily: "'Orbitron', sans-serif",
+		fontWeight: 900,
+		letterSpacing: "2px",
+	},
+	h2: {
+		fontFamily: "'Orbitron', sans-serif",
+		fontWeight: 900,
+		letterSpacing: "2px",
+	},
+	h3: {
+		fontFamily: "'Orbitron', sans-serif",
+		fontWeight: 700,
+		letterSpacing: "1.5px",
+	},
+	h4: {
+		fontFamily: "'Rajdhani', sans-serif",
+		fontWeight: 700,
+		letterSpacing: "1px",
+		textTransform: "uppercase",
+	},
+	h5: {
+		fontFamily: "'Rajdhani', sans-serif",
+		fontWeight: 700,
+		letterSpacing: "1px",
+		textTransform: "uppercase",
+	},
+	h6: {
+		fontFamily: "'Rajdhani', sans-serif",
+		fontWeight: 700,
+		letterSpacing: "1px",
+		textTransform: "uppercase",
+	},
+	subtitle1: {
+		fontFamily: "'Rajdhani', sans-serif",
+		fontWeight: 600,
+		letterSpacing: "0.5px",
+	},
+	subtitle2: {
+		fontFamily: "'Rajdhani', sans-serif",
+		fontWeight: 600,
+		letterSpacing: "0.5px",
+	},
 	button: {
 		fontFamily: "'Rajdhani', sans-serif",
 		fontWeight: 700,
@@ -72,91 +76,77 @@ const TYPOGRAPHY_OPTIONS: ThemeOptions["typography"] = {
 	},
 };
 
-/**
- * Rampa metalica del isotipo oficial: es la que da el bisel de los bordes.
- * Va de reflejo (#4B5160) a sombra (#121318) en diagonal a 145deg.
- */
-const METAL_BEVEL = "linear-gradient(145deg, #4B5160 0%, #2B303E 38%, #1A1D26 62%, #121318 100%)";
-const METAL_BEVEL_HOT = "linear-gradient(145deg, #8F96A3 0%, #C21818 45%, #660B0B 75%, #1A0202 100%)";
-const SURFACE_GRADIENT = "linear-gradient(145deg, #161922 0%, #0A0B0E 100%)";
+/** Rampa metalica del isotipo: es la que da el bisel de los bordes. */
+const METAL_BEVEL = "var(--ds-bevel-metal)";
+const METAL_BEVEL_HOT = "var(--ds-bevel-metal-hot)";
+const SURFACE_GRADIENT = "var(--ds-gradient-card)";
+/** Halo rojo. En modo dia `--ds-glow-a` vale 0 y esto se apaga solo. */
+const RED_GLOW = "0 0 14px rgba(var(--ds-red-rgb), var(--ds-glow-a))";
+const RED_GLOW_LIFT =
+	"0 8px 30px rgba(var(--ds-red-rgb), calc(var(--ds-glow-a) * 0.5))";
 
 /** Chaflan balistico a 45 grados: esquina superior izquierda e inferior derecha. */
 function chamfer(size: number): string {
 	return `polygon(${size}px 0%, 100% 0%, 100% calc(100% - ${size}px), calc(100% - ${size}px) 100%, 0% 100%, 0% ${size}px)`;
 }
 
-function getCssBaselineStyles() {
+function getCssBaselineStyles(mode: PaletteMode) {
 	return {
 		":root": {
-			/* Fondos */
-			"--bg-dark": "#050508",
-			"--bg-card": "#0F1015",
-			"--bg-surface": "#161821",
-			"--bg-surface-hover": "#1E212D",
-			"--bg-sunken": "#0A0B0E",
-			/* Acentos */
-			"--ds-red": "#C21818",
-			"--ds-red-glow": "#FF2E2E",
-			"--ds-red-light": "#FF3E3E",
-			"--ds-red-dark": "#660B0B",
-			"--ds-red-deep": "#1C0303",
-			/* Texto */
-			"--ds-platinum": "#F0F2F6",
-			"--ds-muted": "#8E95A5",
-			"--ds-subtle": "#636B7C",
-			/* Bordes */
-			"--ds-border": "#282C38",
-			"--ds-border-red": "#381010",
-			"--ds-border-active": "#C21818",
-			/* Metal */
-			"--ds-metal-hi": "#8F96A3",
-			"--ds-metal": "#4B5160",
-			"--ds-metal-lo": "#121318",
-			/* Gradientes oficiales */
-			"--ds-gradient": "linear-gradient(135deg, #C21818 0%, #1A0202 50%, #050508 100%)",
-			"--ds-gradient-header": "linear-gradient(90deg, #1C0303 0%, #050508 100%)",
-			"--ds-gradient-card": SURFACE_GRADIENT,
-			"--ds-bevel-metal": METAL_BEVEL,
+			...getBrandTokens(mode),
+			/* Alias historicos: habia paginas escritas contra estos nombres. */
+			"--bg-dark": "var(--ds-bg)",
+			"--bg-card": "var(--ds-bg-card)",
+			"--bg-surface": "var(--ds-bg-surface)",
+			"--bg-sunken": "var(--ds-bg-sunken)",
+			"--ds-border-active": "var(--ds-red)",
 			/* Tipografias */
 			"--font-display": "'Orbitron', sans-serif",
 			"--font-tactical": "'Rajdhani', sans-serif",
 			"--font-mono": "'JetBrains Mono', monospace",
 			"--font-body": "'Inter', sans-serif",
 		},
+		/* El lector se queda en modo noche pase lo que pase: vuelve a declarar
+		 * los tokens oscuros en su propio subarbol, asi que todo lo que cuelgue
+		 * de el los resuelve en oscuro aunque `:root` este en dia. */
+		".ds-force-dark": {
+			...getBrandTokens("dark"),
+		},
 		body: {
-			backgroundColor: "#050508",
-			color: "#F0F2F6",
-			scrollbarColor: "#282C38 #050508",
+			backgroundColor: "var(--ds-bg)",
+			color: "var(--ds-platinum)",
+			scrollbarColor: "var(--ds-border) var(--ds-bg)",
 			scrollbarWidth: "thin",
 			WebkitUserSelect: "none",
 			MozUserSelect: "none",
 			msUserSelect: "none",
 			userSelect: "none",
 		},
-		'input, textarea, [contenteditable="true"], [contenteditable=""], [role="textbox"]': {
-			WebkitUserSelect: "text",
-			MozUserSelect: "text",
-			msUserSelect: "text",
-			userSelect: "text",
-		},
+		'input, textarea, [contenteditable="true"], [contenteditable=""], [role="textbox"]':
+			{
+				WebkitUserSelect: "text",
+				MozUserSelect: "text",
+				msUserSelect: "text",
+				userSelect: "text",
+			},
 		"::-webkit-scrollbar": {
 			width: "6px",
 			height: "6px",
 		},
 		"::-webkit-scrollbar-track": {
-			background: "#050508",
+			background: "var(--ds-bg)",
 		},
 		"::-webkit-scrollbar-thumb": {
-			background: "#282C38",
+			background: "var(--ds-border)",
 			borderRadius: "2px",
 		},
 		"::-webkit-scrollbar-thumb:hover": {
-			background: "#C21818",
+			background: "var(--ds-red)",
 		},
 		".btn-tactical": {
-			background: "#151821",
-			color: "#F0F2F6",
-			border: "1px solid #383E4C",
+			background: "var(--ds-bg-btn)",
+			color: "var(--ds-platinum)",
+			border: "1px solid var(--ds-border-hi)",
 			fontFamily: "'Rajdhani', sans-serif",
 			fontWeight: 700,
 			fontSize: "14px",
@@ -171,10 +161,10 @@ function getCssBaselineStyles() {
 			clipPath: chamfer(6),
 		},
 		".btn-tactical:hover": {
-			background: "#C21818",
-			borderColor: "#FF2E2E",
+			background: "var(--ds-red)",
+			borderColor: "var(--ds-red-glow)",
 			color: "#FFFFFF",
-			boxShadow: "0 0 14px rgba(229, 9, 20, 0.5)",
+			boxShadow: RED_GLOW,
 		},
 
 		/* --- Marcadores de esquina HUD: los cuatro cuadrados --- */
@@ -188,26 +178,26 @@ function getCssBaselineStyles() {
 		".hud-corner-tl": {
 			top: 0,
 			left: 0,
-			borderTop: "2px solid #C21818",
-			borderLeft: "2px solid #C21818",
+			borderTop: "2px solid var(--ds-red)",
+			borderLeft: "2px solid var(--ds-red)",
 		},
 		".hud-corner-tr": {
 			top: 0,
 			right: 0,
-			borderTop: "2px solid #C21818",
-			borderRight: "2px solid #C21818",
+			borderTop: "2px solid var(--ds-red)",
+			borderRight: "2px solid var(--ds-red)",
 		},
 		".hud-corner-bl": {
 			bottom: 0,
 			left: 0,
-			borderBottom: "2px solid #C21818",
-			borderLeft: "2px solid #C21818",
+			borderBottom: "2px solid var(--ds-red)",
+			borderLeft: "2px solid var(--ds-red)",
 		},
 		".hud-corner-br": {
 			bottom: 0,
 			right: 0,
-			borderBottom: "2px solid #C21818",
-			borderRight: "2px solid #C21818",
+			borderBottom: "2px solid var(--ds-red)",
+			borderRight: "2px solid var(--ds-red)",
 		},
 
 		/* --- Bisel metalico ---
@@ -232,13 +222,14 @@ function getCssBaselineStyles() {
 			pointerEvents: "none",
 			zIndex: 0,
 		},
-		'.ds-bevel.ds-bevel > *:not([class*="hud-corner"]):not(.ds-grid-bg):not(.ds-glow-bg)': {
-			position: "relative",
-			zIndex: 1,
-		},
+		'.ds-bevel.ds-bevel > *:not([class*="hud-corner"]):not(.ds-grid-bg):not(.ds-glow-bg)':
+			{
+				position: "relative",
+				zIndex: 1,
+			},
 		".ds-bevel.ds-bevel:hover": {
 			background: METAL_BEVEL_HOT,
-			boxShadow: "0 8px 30px rgba(194, 24, 24, 0.22)",
+			boxShadow: RED_GLOW_LIFT,
 		},
 		/* Variante ya encendida: para paneles activos o dialogos criticos. */
 		".ds-bevel-hot.ds-bevel-hot": {
@@ -260,20 +251,111 @@ function getCssBaselineStyles() {
 			position: "absolute",
 			inset: 0,
 			backgroundImage: [
-				"linear-gradient(to right, rgba(194, 24, 24, 0.03) 1px, transparent 1px)",
-				"linear-gradient(to bottom, rgba(194, 24, 24, 0.03) 1px, transparent 1px)",
+				"linear-gradient(to right, var(--ds-grid-line) 1px, transparent 1px)",
+				"linear-gradient(to bottom, var(--ds-grid-line) 1px, transparent 1px)",
 			].join(","),
 			backgroundSize: "40px 40px",
 			pointerEvents: "none",
 			zIndex: 0,
 		},
-		/* Halo carmesi superior del brandbook: quita el negro plano. */
+		/* Halo carmesi superior: quita el fondo plano.
+		 * Ojo con el corte: terminar en `transparent` deja un circulo visible
+		 * porque `transparent` es rgba(0,0,0,0) y el degradado pasa por gris al
+		 * interpolar. Se cierra en el mismo rojo con alfa 0 y se reparte en
+		 * varias paradas para que el borde no tenga filo.
+		 */
 		".ds-glow-bg": {
 			position: "absolute",
 			inset: 0,
-			backgroundImage: "radial-gradient(circle at 50% 0%, rgba(194, 24, 24, 0.08) 0%, transparent 55%)",
+			backgroundImage: [
+				"radial-gradient(ellipse 130% 80% at 50% -20%,",
+				"rgba(var(--ds-red-rgb), 0.10) 0%,",
+				"rgba(var(--ds-red-rgb), 0.065) 26%,",
+				"rgba(var(--ds-red-rgb), 0.035) 48%,",
+				"rgba(var(--ds-red-rgb), 0.014) 68%,",
+				"rgba(var(--ds-red-rgb), 0) 100%)",
+			].join(" "),
 			pointerEvents: "none",
 			zIndex: 0,
+		},
+		/* Firefox no aplica dithering a los degradados, asi que un halo tan tenue
+		 * se escalona y el escalon se lee como un circulo. Chrome y Edge lo
+		 * disimulan solos. Esta capa de ruido rompe las bandas en los tres.
+		 */
+		".ds-glow-bg::after": {
+			content: '""',
+			position: "absolute",
+			inset: 0,
+			backgroundImage:
+				"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E\")",
+			opacity: 0.035,
+			pointerEvents: "none",
+		},
+
+		/* Capa de ruido suelta, para halos pintados a mano fuera de .ds-glow-bg. */
+		".ds-noise": {
+			position: "absolute",
+			inset: 0,
+			pointerEvents: "none",
+			zIndex: 0,
+			backgroundImage:
+				"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E\")",
+			opacity: 0.035,
+		},
+
+		/* --- Barrido de indexado ---
+		 * La linea recorre la tarjeta de arriba abajo mientras el escaner trabaja. El halo
+		 * usa la alfa global, asi que de dia se apaga y queda una linea plana: el rojo
+		 * diurno es tinta, no luz.
+		 */
+		".ds-scanline": {
+			position: "absolute",
+			inset: 0,
+			overflow: "hidden",
+			pointerEvents: "none",
+			zIndex: 3,
+		},
+		".ds-scanline::after": {
+			content: '""',
+			position: "absolute",
+			left: 0,
+			right: 0,
+			height: "2px",
+			background: "linear-gradient(90deg, transparent 0%, var(--ds-red-glow) 50%, transparent 100%)",
+			boxShadow: "0 0 12px rgba(var(--ds-red-rgb), calc(var(--ds-glow-a) * 1.8))",
+			animation: "ds-scan 1.9s linear infinite",
+		},
+		"@keyframes ds-scan": {
+			"0%": { top: "-2px", opacity: 0.2 },
+			"12%": { opacity: 1 },
+			"88%": { opacity: 1 },
+			"100%": { top: "100%", opacity: 0.2 },
+		},
+		/* Un barrido continuo en pantalla es justo lo que molesta a quien pide menos
+		 * movimiento: se queda como una linea fija arriba. */
+		"@media (prefers-reduced-motion: reduce)": {
+			".ds-scanline::after": {
+				animation: "none",
+				top: 0,
+			},
+		},
+
+		/* Puntos suspensivos de terminal de fosforo: verde fijo, no el rojo de la marca,
+		 * porque no es una alerta sino la maquina pensando. */
+		".ds-dots": {
+			color: "#33FF66",
+			textShadow: "0 0 6px rgba(51, 255, 102, 0.55)",
+			letterSpacing: "2px",
+		},
+		".ds-dots span": {
+			opacity: 0.15,
+			animation: "ds-blink 1.2s infinite steps(1, end)",
+		},
+		".ds-dots span:nth-of-type(2)": { animationDelay: "0.4s" },
+		".ds-dots span:nth-of-type(3)": { animationDelay: "0.8s" },
+		"@keyframes ds-blink": {
+			"0%, 33%": { opacity: 1 },
+			"34%, 100%": { opacity: 0.15 },
 		},
 
 		/* --- Pastilla monoespaciada para IDs, hashes y contadores --- */
@@ -281,9 +363,9 @@ function getCssBaselineStyles() {
 			display: "inline-flex",
 			alignItems: "center",
 			gap: "4px",
-			background: "#1B1E26",
-			color: "#FF2E2E",
-			border: "1px solid #660B0B",
+			background: "var(--ds-bg-pill)",
+			color: "var(--ds-red-glow)",
+			border: "1px solid var(--ds-red-dark)",
 			fontFamily: "'JetBrains Mono', monospace",
 			fontSize: "11px",
 			fontWeight: 700,
@@ -302,7 +384,7 @@ function getCssBaselineStyles() {
 function metalBevel(size: number, face: string = SURFACE_GRADIENT) {
 	return {
 		position: "relative" as const,
-		backgroundColor: "#121318",
+		backgroundColor: "var(--ds-metal-lo)",
 		backgroundImage: METAL_BEVEL,
 		border: "none",
 		borderRadius: 0,
@@ -323,18 +405,18 @@ function metalBevel(size: number, face: string = SURFACE_GRADIENT) {
 	};
 }
 
-function getComponentOverrides(): ThemeOptions["components"] {
+function getComponentOverrides(mode: PaletteMode): ThemeOptions["components"] {
 	return {
 		MuiCssBaseline: {
-			styleOverrides: getCssBaselineStyles(),
+			styleOverrides: getCssBaselineStyles(mode),
 		},
 		MuiPaper: {
 			defaultProps: { elevation: 0 },
 			styleOverrides: {
 				root: {
 					backgroundImage: SURFACE_GRADIENT,
-					backgroundColor: "#0F1015",
-					border: "1px solid #282C38",
+					backgroundColor: "var(--ds-bg-card)",
+					border: "1px solid var(--ds-border)",
 				},
 			},
 		},
@@ -346,7 +428,7 @@ function getComponentOverrides(): ThemeOptions["components"] {
 						transition: "background-image 0.25s ease, box-shadow 0.25s ease",
 						"&:hover": {
 							backgroundImage: METAL_BEVEL_HOT,
-							boxShadow: "0 8px 30px rgba(194, 24, 24, 0.22)",
+							boxShadow: RED_GLOW_LIFT,
 						},
 					},
 				},
@@ -356,8 +438,8 @@ function getComponentOverrides(): ThemeOptions["components"] {
 			styleOverrides: {
 				paper: {
 					"&&": {
-						...metalBevel(16, "linear-gradient(145deg, #0D0F14 0%, #060709 100%)"),
-						boxShadow: "0 12px 50px rgba(0, 0, 0, 0.9)",
+						...metalBevel(16, "var(--ds-gradient-dialog)"),
+						boxShadow: "var(--ds-shadow-dialog)",
 					},
 				},
 			},
@@ -370,9 +452,9 @@ function getComponentOverrides(): ThemeOptions["components"] {
 					fontWeight: 900,
 					letterSpacing: "1.5px",
 					textTransform: "uppercase",
-					color: "#FFFFFF",
-					backgroundColor: "#0A0B0E",
-					borderBottom: "1px solid #232733",
+					color: "var(--ds-text-strong)",
+					backgroundColor: "var(--ds-bg-sunken)",
+					borderBottom: "1px solid var(--ds-border-head)",
 					padding: "16px 24px",
 				},
 			},
@@ -381,8 +463,8 @@ function getComponentOverrides(): ThemeOptions["components"] {
 			styleOverrides: {
 				root: {
 					padding: "16px 24px",
-					borderTop: "1px solid #1C1F28",
-					backgroundColor: "#0A0B0E",
+					borderTop: "1px solid var(--ds-border-soft)",
+					backgroundColor: "var(--ds-bg-sunken)",
 				},
 			},
 		},
@@ -390,8 +472,8 @@ function getComponentOverrides(): ThemeOptions["components"] {
 			styleOverrides: {
 				paper: {
 					backgroundImage: "none",
-					backgroundColor: "#0D0F14",
-					border: "1px solid #282C38",
+					backgroundColor: "var(--ds-bg-overlay)",
+					border: "1px solid var(--ds-border)",
 					borderRadius: "2px",
 				},
 			},
@@ -408,19 +490,19 @@ function getComponentOverrides(): ThemeOptions["components"] {
 					transition: "all 0.2s ease",
 				},
 				contained: {
-					backgroundColor: "#C21818",
+					backgroundColor: "var(--ds-red)",
 					color: "#FFFFFF",
 					"&:hover": {
-						backgroundColor: "#80060A",
-						boxShadow: "0 0 14px rgba(194, 24, 24, 0.45)",
+						backgroundColor: "var(--ds-red-hover)",
+						boxShadow: RED_GLOW,
 					},
 				},
 				outlined: {
-					borderColor: "#C21818",
-					color: "#FF2E2E",
+					borderColor: "var(--ds-red)",
+					color: "var(--ds-red-glow)",
 					"&:hover": {
-						borderColor: "#FF2E2E",
-						backgroundColor: "rgba(194, 24, 24, 0.1)",
+						borderColor: "var(--ds-red-glow)",
+						backgroundColor: "rgba(var(--ds-red-rgb), 0.1)",
 					},
 				},
 			},
@@ -434,17 +516,17 @@ function getComponentOverrides(): ThemeOptions["components"] {
 		MuiOutlinedInput: {
 			styleOverrides: {
 				root: {
-					backgroundColor: "#0A0B0E",
+					backgroundColor: "var(--ds-bg-sunken)",
 					borderRadius: "2px",
 					"& .MuiOutlinedInput-notchedOutline": {
-						borderColor: "#282C38",
+						borderColor: "var(--ds-border)",
 					},
 					"&:hover .MuiOutlinedInput-notchedOutline": {
-						borderColor: "#C21818",
+						borderColor: "var(--ds-red)",
 					},
 					"&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-						borderColor: "#FF2E2E",
-						boxShadow: "0 0 8px rgba(255, 46, 46, 0.25)",
+						borderColor: "var(--ds-red-glow)",
+						boxShadow: "0 0 8px rgba(var(--ds-red-rgb), var(--ds-glow-a))",
 					},
 				},
 			},
@@ -459,14 +541,14 @@ function getComponentOverrides(): ThemeOptions["components"] {
 					clipPath: chamfer(4),
 				},
 				filled: {
-					backgroundColor: "rgba(194, 24, 24, 0.15)",
-					color: "#FF3E3E",
-					border: "1px solid #660B0B",
+					backgroundColor: "rgba(var(--ds-red-rgb), 0.15)",
+					color: "var(--ds-red-light)",
+					border: "1px solid var(--ds-red-dark)",
 				},
 				outlined: {
-					borderColor: "#282C38",
+					borderColor: "var(--ds-border)",
 					[`&.${chipClasses.colorDefault}`]: {
-						color: "#A3ABB8",
+						color: "var(--ds-text-2)",
 					},
 				},
 			},
@@ -474,7 +556,7 @@ function getComponentOverrides(): ThemeOptions["components"] {
 		MuiDivider: {
 			styleOverrides: {
 				root: {
-					borderColor: "#1C1F28",
+					borderColor: "var(--ds-border-soft)",
 				},
 			},
 		},
@@ -487,28 +569,28 @@ function getComponentOverrides(): ThemeOptions["components"] {
 				},
 				standard: {
 					[`&.${alertClasses.colorError}`]: {
-						backgroundColor: "#1C0303",
-						border: "1px solid #660B0B",
-						borderLeft: "4px solid #C21818",
-						color: "#FF5C5C",
+						backgroundColor: "var(--ds-red-deep)",
+						border: "1px solid var(--ds-red-dark)",
+						borderLeft: "4px solid var(--ds-red)",
+						color: "var(--ds-red-soft)",
 					},
 					[`&.${alertClasses.colorSuccess}`]: {
-						backgroundColor: "#071A0E",
-						border: "1px solid #14532D",
-						borderLeft: "4px solid #22C55E",
-						color: "#4ADE80",
+						backgroundColor: "var(--ds-ok-bg)",
+						border: "1px solid var(--ds-ok-dark)",
+						borderLeft: "4px solid var(--ds-ok)",
+						color: "var(--ds-ok)",
 					},
 					[`&.${alertClasses.colorWarning}`]: {
-						backgroundColor: "#1C1408",
-						border: "1px solid #78350F",
-						borderLeft: "4px solid #F59E0B",
-						color: "#FDE68A",
+						backgroundColor: "var(--ds-warn-bg)",
+						border: "1px solid var(--ds-warn-dark)",
+						borderLeft: "4px solid var(--ds-warn)",
+						color: "var(--ds-warn-text)",
 					},
 					[`&.${alertClasses.colorInfo}`]: {
-						backgroundColor: "#11131C",
-						border: "1px solid #282C38",
-						borderLeft: "4px solid #8E95A5",
-						color: "#A3ABB8",
+						backgroundColor: "var(--ds-bg-panel)",
+						border: "1px solid var(--ds-border)",
+						borderLeft: "4px solid var(--ds-info-line)",
+						color: "var(--ds-text-2)",
 					},
 				},
 			},
@@ -516,14 +598,14 @@ function getComponentOverrides(): ThemeOptions["components"] {
 		MuiTableHead: {
 			styleOverrides: {
 				root: {
-					backgroundColor: "#0A0B0E",
+					backgroundColor: "var(--ds-bg-sunken)",
 					"& .MuiTableCell-head": {
 						fontFamily: "'Rajdhani', sans-serif",
 						fontWeight: 700,
 						letterSpacing: "1.5px",
-						color: "#8E95A5",
+						color: "var(--ds-muted)",
 						textTransform: "uppercase",
-						borderBottom: "1px solid #282C38",
+						borderBottom: "1px solid var(--ds-border)",
 					},
 				},
 			},
@@ -533,7 +615,7 @@ function getComponentOverrides(): ThemeOptions["components"] {
 				root: {
 					transition: "background-color 0.15s ease",
 					"&.MuiTableRow-hover:hover": {
-						backgroundColor: "rgba(194, 24, 24, 0.06)",
+						backgroundColor: "rgba(var(--ds-red-rgb), 0.06)",
 					},
 				},
 			},
@@ -541,93 +623,130 @@ function getComponentOverrides(): ThemeOptions["components"] {
 		MuiTableCell: {
 			styleOverrides: {
 				root: {
-					borderBottom: "1px solid #1C1F28",
+					borderBottom: "1px solid var(--ds-border-soft)",
 				},
 			},
 		},
 		MuiSwitch: {
 			styleOverrides: {
 				switchBase: {
-					"&.Mui-checked": { color: "#FF2E2E" },
+					"&.Mui-checked": { color: "var(--ds-red-glow)" },
 					"&.Mui-checked + .MuiSwitch-track": {
-						backgroundColor: "#C21818",
+						backgroundColor: "var(--ds-red)",
 						opacity: 0.6,
 					},
 				},
 				track: {
-					backgroundColor: "#383E4C",
+					backgroundColor: "var(--ds-border-hi)",
 				},
 			},
 		},
 		MuiTooltip: {
 			styleOverrides: {
 				tooltip: {
-					backgroundColor: "#0D0F14",
-					border: "1px solid #282C38",
+					backgroundColor: "var(--ds-bg-overlay)",
+					border: "1px solid var(--ds-border)",
 					borderRadius: "2px",
 					fontFamily: "'Rajdhani', sans-serif",
 					fontSize: "12px",
 					fontWeight: 600,
 					letterSpacing: "0.5px",
-					color: "#F0F2F6",
+					color: "var(--ds-platinum)",
 				},
 			},
 		},
 		MuiLinearProgress: {
 			styleOverrides: {
 				root: {
-					backgroundColor: "#1C0303",
+					backgroundColor: "var(--ds-red-deep)",
 					borderRadius: 0,
 				},
 				bar: {
-					backgroundColor: "#FF2E2E",
+					backgroundColor: "var(--ds-red-glow)",
 				},
 			},
 		},
 		MuiCircularProgress: {
 			styleOverrides: {
 				root: {
-					color: "#C21818",
+					color: "var(--ds-red)",
 				},
 			},
 		},
 	};
 }
 
-/** Tokens de marca para usar desde los `sx` de las paginas. */
+/**
+ * Tokens de marca para los `sx` de las paginas. Son referencias a variables CSS,
+ * no colores literales: el valor lo decide `:root` segun el modo activo, asi que
+ * una pagina escrita con `DS.*` cambia de dia a noche sin tocarla.
+ * No pasar estos valores por `alpha()` ni concatenarlos dentro de `rgb()`.
+ */
 export const DS = {
-	bgDark: "#050508",
-	bgSunken: "#0A0B0E",
-	bgCard: "#0F1015",
-	bgSurface: "#161821",
-	bgSurfaceHover: "#1E212D",
-	red: "#C21818",
-	redGlow: "#FF2E2E",
-	redLight: "#FF3E3E",
-	redDark: "#660B0B",
-	redDeep: "#1C0303",
-	platinum: "#F0F2F6",
-	muted: "#8E95A5",
-	subtle: "#636B7C",
-	border: "#282C38",
-	borderSoft: "#1C1F28",
-	borderRed: "#381010",
-	metalHi: "#8F96A3",
-	gradientHeader: "linear-gradient(90deg, #1C0303 0%, #050508 100%)",
-	gradientCard: SURFACE_GRADIENT,
-	bevelMetal: METAL_BEVEL,
-	bevelMetalHot: METAL_BEVEL_HOT,
+	bgDark: "var(--ds-bg)",
+	bgDeep: "var(--ds-bg-deep)",
+	bgSunken: "var(--ds-bg-sunken)",
+	bgCard: "var(--ds-bg-card)",
+	bgPanel: "var(--ds-bg-panel)",
+	bgOverlay: "var(--ds-bg-overlay)",
+	bgSurface: "var(--ds-bg-surface)",
+	bgSurfaceHover: "var(--ds-bg-surface-hi)",
+	bgPill: "var(--ds-bg-pill)",
+	bgBtn: "var(--ds-bg-btn)",
+	bgDanger: "var(--ds-bg-danger)",
+	red: "var(--ds-red)",
+	redGlow: "var(--ds-red-glow)",
+	redLight: "var(--ds-red-light)",
+	redSoft: "var(--ds-red-soft)",
+	redDark: "var(--ds-red-dark)",
+	redHover: "var(--ds-red-hover)",
+	redDeep: "var(--ds-red-deep)",
+	textStrong: "var(--ds-text-strong)",
+	platinum: "var(--ds-platinum)",
+	text2: "var(--ds-text-2)",
+	muted: "var(--ds-muted)",
+	subtle: "var(--ds-subtle)",
+	border: "var(--ds-border)",
+	borderSoft: "var(--ds-border-soft)",
+	borderHead: "var(--ds-border-head)",
+	borderHi: "var(--ds-border-hi)",
+	borderRed: "var(--ds-border-red)",
+	metalHi: "var(--ds-metal-hi)",
+	metal: "var(--ds-metal)",
+	metalLo: "var(--ds-metal-lo)",
+	ok: "var(--ds-ok)",
+	okLight: "var(--ds-ok-light)",
+	okDark: "var(--ds-ok-dark)",
+	warn: "var(--ds-warn)",
+	warnLight: "var(--ds-warn-light)",
+	warnDark: "var(--ds-warn-dark)",
+	warnText: "var(--ds-warn-text)",
+	blue: "var(--ds-blue)",
+	select: "var(--ds-select)",
+	gradient: "var(--ds-gradient)",
+	gradientHeader: "var(--ds-gradient-header)",
+	gradientCard: "var(--ds-gradient-card)",
+	bevelMetal: "var(--ds-bevel-metal)",
+	bevelMetalHot: "var(--ds-bevel-metal-hot)",
+	glowRed: RED_GLOW,
+	glowRedLift: RED_GLOW_LIFT,
 } as const;
 
-export const theme: Theme = createTheme({
-	palette: getPalette(),
-	shape: {
-		borderRadius: 4,
-	},
-	typography: TYPOGRAPHY_OPTIONS,
-	components: getComponentOverrides(),
-});
+/** El lector no tiene modo dia: la pagina ya es lo mas claro de la pantalla y
+ *  rodearla de porcelana la haria flotar. Su marco se queda oscuro siempre. */
+export const READER_CHROME = {
+	bg: "#000000",
+	surface: "#0D0F14",
+	border: "#282C38",
+	text: "#F0F2F6",
+	muted: "#8E95A5",
+} as const;
 
-export function buildTheme(): Theme {
-	return theme;
+export function buildTheme(mode: PaletteMode): Theme {
+	return createTheme({
+		palette: getPalette(mode),
+		shape: { borderRadius: 4 },
+		typography: TYPOGRAPHY_OPTIONS,
+		components: getComponentOverrides(mode),
+	});
 }

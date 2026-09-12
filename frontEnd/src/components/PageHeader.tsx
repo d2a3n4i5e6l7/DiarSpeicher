@@ -23,7 +23,7 @@ export default function PageHeader({ title, subtitle, actions }: Readonly<Props>
 								fontSize: { xs: "22px", sm: "26px" },
 								fontWeight: 700,
 								letterSpacing: "2px",
-								color: "#FFFFFF",
+								color: "var(--ds-text-strong)",
 								textTransform: "uppercase",
 								lineHeight: 1.2,
 							}}
@@ -34,7 +34,7 @@ export default function PageHeader({ title, subtitle, actions }: Readonly<Props>
 							sx={{
 								flex: 1,
 								height: "1px",
-								background: "linear-gradient(to right, #C21818 0%, rgba(194, 24, 24, 0.1) 70%, transparent 100%)",
+								background: "linear-gradient(to right, var(--ds-red) 0%, rgba(var(--ds-red-rgb), 0.1) 70%, transparent 100%)",
 								display: { xs: "none", sm: "block" },
 							}}
 						/>
@@ -45,7 +45,7 @@ export default function PageHeader({ title, subtitle, actions }: Readonly<Props>
 							sx={{
 								fontFamily: "'Inter', sans-serif",
 								fontSize: "13px",
-								color: "#8E95A5",
+								color: "var(--ds-muted)",
 								mt: 0.75,
 							}}
 						>

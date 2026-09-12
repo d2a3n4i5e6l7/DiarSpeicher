@@ -164,7 +164,9 @@ public class LibraryScannerService : ILibraryScannerService
         var thumbnailsDir = _storage.ResolveThumbnailsPath();
         Directory.CreateDirectory(thumbnailsDir);
 
-        // 1. Load cached directory mtimes and existing series
+        await PublishProgressAsync(
+            libraryId, ScanPhase.Started, cancellationToken, message: "Leyendo el indice anterior");
+
         var storedMtimes = await _dbContext.ScannedDirectories
             .Where(sd => sd.Path.StartsWith(libraryPath))
             .AsNoTracking()
@@ -175,18 +177,23 @@ public class LibraryScannerService : ILibraryScannerService
             .Select(s => new ExistingSeriesInfo(s.Id, s.Path, s.Status))
             .ToListAsync(cancellationToken);
 
-        // 2. Walk library
-        await PublishProgressAsync(libraryId, ScanPhase.WalkingLibrary, cancellationToken);
+        await PublishProgressAsync(
+            libraryId, ScanPhase.WalkingLibrary, cancellationToken, message: "Recorriendo carpetas en el disco");
         var walkedLibrary = _directoryScanner.WalkLibrary(libraryPath, isCollectionBased, existingSeries);
         report.TotalDirectories = walkedLibrary.SeenDirectories;
         report.IgnoredDirectories = walkedLibrary.IgnoredDirectories;
 
-        // 3. Reconcile missing, recovered, and new series
+        await PublishProgressAsync(
+            libraryId,
+            ScanPhase.WalkingLibrary,
+            cancellationToken,
+            totalSeries: walkedLibrary.SeriesToCreate.Count + walkedLibrary.SeriesToVisit.Count,
+            message: $"Cotejando con el indice: {walkedLibrary.MissingSeries.Count} sin carpeta, {walkedLibrary.SeriesToCreate.Count} nuevas");
+
         await ProcessMissingSeriesAsync(libraryId, walkedLibrary.MissingSeries, report, cancellationToken);
         await ProcessRecoveredSeriesAsync(walkedLibrary.RecoveredSeries, report, cancellationToken);
         var newlyCreatedSeries = await CreateNewSeriesAsync(libraryId, libraryPath, walkedLibrary.SeriesToCreate, report, cancellationToken);
 
-        // 4. Walk series and process media
         var allObservedDirMtimes = await ProcessAllSeriesAsync(
             libraryId,
             walkedLibrary.SeriesToVisit.Concat(newlyCreatedSeries.Select(s => s.Path)),
@@ -196,13 +203,22 @@ public class LibraryScannerService : ILibraryScannerService
             report,
             cancellationToken);
 
-        // 5. Batch Upsert ScannedDirectory MTimes
         await UpsertScannedDirMtimesAsync(allObservedDirMtimes, cancellationToken);
+
+        // Sin esto la ficha decia "NUNCA ESCANEADA" por muchos escaneos que terminaran bien.
+        library.LastScannedAt = DateTimeOffset.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         report.Duration = sw.Elapsed;
         report.Success = true;
 
-        await PublishProgressAsync(libraryId, ScanPhase.Completed, cancellationToken, message: "Scan complete");
+        await PublishProgressAsync(
+            libraryId,
+            ScanPhase.Completed,
+            cancellationToken,
+            completedSeries: (int)(report.CreatedSeries + report.UpdatedSeries),
+            totalSeries: (int)(report.CreatedSeries + report.UpdatedSeries),
+            message: $"Listo: {report.CreatedMedia} tomos nuevos, {report.UpdatedMedia} actualizados");
 
         _logger.LogInformation(
             "Scan complete for library {LibraryId} in {ElapsedMs}ms. Created {CreatedSeries} series, {CreatedMedia} media. Updated {UpdatedSeries} series, {UpdatedMedia} media. Skipped {SkippedFiles} files.",

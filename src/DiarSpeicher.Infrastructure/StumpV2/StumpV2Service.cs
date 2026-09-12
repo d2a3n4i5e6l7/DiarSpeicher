@@ -27,6 +27,8 @@ public sealed class StumpV2Service : IStumpV2Service
     private readonly ILogger<StumpV2Service> _logger;
     private readonly UploadOptions _uploadOptions;
     private readonly StorageOptions _storage;
+    private readonly LibraryRootsOptions _libraryRoots;
+    private readonly ITrashService _trash;
 
     /// <summary>Lo unico que se acepta como portada subida a mano.</summary>
     private static readonly string[] CoverExtensions = [".jpg", ".jpeg", ".png", ".webp"];
@@ -36,7 +38,9 @@ public sealed class StumpV2Service : IStumpV2Service
         ICompositeBookProcessor bookProcessor,
         IScannerQueue scannerQueue,
         ILogger<StumpV2Service> logger,
-        IOptions<StorageOptions> storageOptions)
+        IOptions<StorageOptions> storageOptions,
+        IOptions<LibraryRootsOptions> libraryRoots,
+        ITrashService trash)
     {
         _db = db;
         _bookProcessor = bookProcessor;
@@ -44,6 +48,8 @@ public sealed class StumpV2Service : IStumpV2Service
         _logger = logger;
         _uploadOptions = storageOptions.Value.Upload;
         _storage = storageOptions.Value;
+        _libraryRoots = libraryRoots.Value;
+        _trash = trash;
     }
 
     /// <summary>
@@ -170,9 +176,9 @@ public sealed class StumpV2Service : IStumpV2Service
         {
             File.Delete(path);
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogDebug(ex, "Could not delete the previous series cover {Path}", path);
+            _logger.LogDebug(ex, "No se pudo borrar la miniatura {Path}", path);
         }
     }
 
@@ -569,7 +575,12 @@ public sealed class StumpV2Service : IStumpV2Service
         if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Path))
             return null;
 
-        var fullPath = Path.GetFullPath(input.Path);
+        if (!_libraryRoots.TryResolve(input.Path, out var fullPath))
+        {
+            throw new InvalidOperationException(
+                "Esa ruta esta fuera de las carpetas permitidas para bibliotecas.");
+        }
+
         if (!Directory.Exists(fullPath))
         {
             Directory.CreateDirectory(fullPath);
@@ -588,6 +599,10 @@ public sealed class StumpV2Service : IStumpV2Service
 
         _db.Libraries.Add(library);
         await _db.SaveChangesAsync(ct);
+
+        // Una biblioteca recien dada de alta esta vacia hasta que alguien la escanea, y
+        // nadie espera tener que pedirlo: la carpeta ya se eligio al crearla.
+        await _scannerQueue.QueueScanAsync(new ScanRequest(library.Id), ct);
 
         return ToLibraryDto(library, 0);
     }
@@ -621,8 +636,27 @@ public sealed class StumpV2Service : IStumpV2Service
             ApplyConfig(library.Config, input.Config);
         }
 
+        var oldPath = library.Path;
+        var newPath = ResolveLibraryMove(library, input.Path);
+
         library.UpdatedAt = DateTimeOffset.UtcNow;
-        await _db.SaveChangesAsync(ct);
+
+        if (newPath == null)
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        else
+        {
+            library.Path = newPath;
+
+            await using var tx = await _db.Database.BeginTransactionAsync(ct);
+            await _db.SaveChangesAsync(ct);
+            await RepointLibraryPathsAsync(library.Id, oldPath, newPath, ct);
+            await tx.CommitAsync(ct);
+
+            _logger.LogInformation(
+                "Biblioteca {Library} movida de {OldPath} a {NewPath}", library.Id, oldPath, newPath);
+        }
 
         var mediaCount = await _db.Media
             .CountAsync(m => m.Series != null && m.Series.LibraryId == library.Id, ct);
@@ -631,19 +665,275 @@ public sealed class StumpV2Service : IStumpV2Service
     }
 
     /// <summary>
+    /// Valida la carpeta destino. Null cuando no hay nada que mover; lanza con el motivo
+    /// cuando la ruta no sirve, para que el cliente pueda corregirla.
+    /// </summary>
+    private string? ResolveLibraryMove(Library library, string? requested)
+    {
+        if (string.IsNullOrWhiteSpace(requested)) return null;
+
+        if (!_libraryRoots.TryResolve(requested, out var resolved))
+        {
+            throw new InvalidOperationException(
+                "Esa ruta esta fuera de las carpetas permitidas para bibliotecas.");
+        }
+
+        if (string.Equals(resolved, library.Path, StringComparison.Ordinal)) return null;
+
+        // Al crear se acepta una carpeta que no existe y se crea. Al mover no: si la ruta
+        // esta mal escrita, crearla en silencio deja una biblioteca vacia y el contenido
+        // real huerfano, que es justo el accidente que hay que evitar.
+        if (!Directory.Exists(resolved))
+        {
+            throw new InvalidOperationException("La carpeta destino no existe.");
+        }
+
+        return resolved;
+    }
+
+    /// <summary>
+    /// Reescribe el prefijo de las rutas absolutas guardadas al mover una biblioteca.
+    /// <para>
+    /// Obligatorio, no una optimizacion: el escaner empareja base de datos y disco por ruta
+    /// completa, asi que sin esto cada serie pasaria a Missing y volveria a entrar con otro
+    /// Id. Como <c>ReadingSession</c> cuelga de <c>Media.Id</c>, eso borra el progreso de
+    /// lectura de toda la biblioteca.
+    /// </para>
+    /// </summary>
+    private async Task RepointLibraryPathsAsync(string libraryId, string oldPath, string newPath, CancellationToken ct)
+    {
+        // substr es 1-based. Para la fila cuya ruta es exactamente la raiz devuelve "",
+        // que deja solo la raiz nueva.
+        var cut = oldPath.Length + 1;
+
+        await _db.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE Media SET Path = {0} || substr(Path, {1})
+            WHERE substr(Path, 1, {2}) = {3}
+              AND SeriesId IN (SELECT Id FROM Series WHERE LibraryId = {4})
+            """,
+            [newPath, cut, oldPath.Length, oldPath, libraryId], ct);
+
+        await _db.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE Series SET Path = {0} || substr(Path, {1})
+            WHERE substr(Path, 1, {2}) = {3} AND LibraryId = {4}
+            """,
+            [newPath, cut, oldPath.Length, oldPath, libraryId], ct);
+
+        // La ruta es la clave primaria aqui, asi que reescribirla choca si el destino ya se
+        // habia escaneado. Borrar solo cuesta un escaneo frio.
+        await _db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM ScannedDirectories WHERE substr(Path, 1, {0}) = {1}",
+            [oldPath.Length, oldPath], ct);
+    }
+
+    /// <summary>
     /// Borra el registro de la biblioteca, nunca los ficheros del disco: DiarSpeicher indexa
     /// carpetas que no son suyas y que pueden estar compartidas con otros programas.
     /// </summary>
-    public async Task<bool> DeleteLibraryAsync(AuthUser user, string id, CancellationToken ct = default)
+    public async Task<bool> DeleteLibraryAsync(AuthUser user, string id, bool deleteFiles = false, CancellationToken ct = default)
     {
         var library = await _db.Libraries.ForUser(user)
             .FirstOrDefaultAsync(l => l.Id == id, ct);
 
         if (library == null) return false;
 
+        await PurgeThumbnailsAsync(library.Id, ct);
+
+        // La carpeta va a la papelera antes de soltar el registro: si el movimiento falla,
+        // la biblioteca sigue en el indice y el usuario no se queda con ficheros huerfanos
+        // y sin nada que los describa.
+        if (deleteFiles) EnsureTrashed(library.Path, "la carpeta");
+
         _db.Libraries.Remove(library);
         await _db.SaveChangesAsync(ct);
+
         return true;
+    }
+
+    public async Task<bool> DeleteSeriesAsync(AuthUser user, string id, bool deleteFiles = false, CancellationToken ct = default)
+    {
+        var series = await _db.Series.ForUser(user).FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (series == null) return false;
+
+        if (deleteFiles) EnsureTrashed(series.Path, "la carpeta de la serie");
+
+        // Las miniaturas de la serie y de sus tomos son nuestras y viven en el
+        // almacenamiento: sin esto se quedan sin nada que las referencie.
+        if (!string.IsNullOrWhiteSpace(series.ThumbnailPath))
+        {
+            TryDeleteFile(series.ThumbnailPath);
+        }
+
+        var mediaThumbs = await _db.Media
+            .Where(m => m.SeriesId == series.Id && m.ThumbnailPath != null)
+            .Select(m => m.ThumbnailPath!)
+            .ToListAsync(ct);
+
+        foreach (var thumb in mediaThumbs)
+        {
+            TryDeleteFile(thumb);
+        }
+
+        _db.Series.Remove(series);
+        await _db.SaveChangesAsync(ct);
+
+        return true;
+    }
+
+    public async Task<StumpMissingReportDto> GetMissingAsync(AuthUser user, string libraryId, CancellationToken ct = default)
+    {
+        var series = await _db.Series.ForUser(user)
+            .Where(s => s.LibraryId == libraryId && s.Status == FileStatus.Missing)
+            .Select(s => new
+            {
+                s.Id,
+                s.Name,
+                s.Path,
+                Volumes = s.Media.Count,
+                Sessions = s.Media.Sum(m => m.ReadingSessions.Count)
+            })
+            .ToListAsync(ct);
+
+        var report = new StumpMissingReportDto
+        {
+            Series = series.Select(s => new StumpMissingSeriesDto
+            {
+                Id = s.Id,
+                Name = s.Name,
+                Path = s.Path,
+                VolumeCount = s.Volumes,
+                ReadingSessions = s.Sessions
+            }).ToList()
+        };
+
+        // Tomos perdidos sueltos: la carpeta sigue ahi pero el fichero no. Se cuentan
+        // aparte porque no arrastran la serie entera.
+        var orphans = await _db.Media.ForUser(user)
+            .Where(m => m.Series != null
+                && m.Series.LibraryId == libraryId
+                && m.Status == FileStatus.Missing
+                && m.Series.Status != FileStatus.Missing)
+            .Select(m => new { Sessions = m.ReadingSessions.Count })
+            .ToListAsync(ct);
+
+        report.OrphanVolumes = orphans.Count;
+        report.TotalVolumes = report.Series.Sum(s => s.VolumeCount) + orphans.Count;
+        report.TotalReadingSessions = report.Series.Sum(s => s.ReadingSessions) + orphans.Sum(o => o.Sessions);
+
+        return report;
+    }
+
+    /// <summary>
+    /// Quita del indice lo que ya no esta en disco. Nunca toca un fichero.
+    /// <para>
+    /// Se vuelve a mirar el disco en vez de fiarse del estado guardado: si el volumen se
+    /// desmonto durante el escaneo y volvio despues, esas filas dicen Missing y es mentira.
+    /// Purgarlas se llevaria por delante el progreso de lectura de una biblioteca intacta.
+    /// </para>
+    /// </summary>
+    public async Task<int> PurgeMissingAsync(AuthUser user, string libraryId, CancellationToken ct = default)
+    {
+        var series = await _db.Series.ForUser(user)
+            .Where(s => s.LibraryId == libraryId && s.Status == FileStatus.Missing)
+            .ToListAsync(ct);
+
+        var goneSeries = series.Where(s => !Directory.Exists(s.Path)).ToList();
+
+        var media = await _db.Media.ForUser(user)
+            .Where(m => m.Series != null && m.Series.LibraryId == libraryId && m.Status == FileStatus.Missing)
+            .ToListAsync(ct);
+
+        var goneMedia = media.Where(m => !File.Exists(m.Path)).ToList();
+
+        // Los tomos de una serie perdida ya estan en goneMedia: el escaner propaga Missing
+        // hacia abajo, y si falta la carpeta tampoco existen sus ficheros.
+        foreach (var item in goneMedia)
+        {
+            if (!string.IsNullOrWhiteSpace(item.ThumbnailPath)) TryDeleteFile(item.ThumbnailPath);
+        }
+
+        foreach (var s in goneSeries)
+        {
+            if (!string.IsNullOrWhiteSpace(s.ThumbnailPath)) TryDeleteFile(s.ThumbnailPath);
+        }
+
+        _db.Media.RemoveRange(goneMedia);
+        _db.Series.RemoveRange(goneSeries);
+        await _db.SaveChangesAsync(ct);
+
+        var removed = goneSeries.Count + goneMedia.Count;
+        _logger.LogInformation(
+            "Purgadas {Count} entradas perdidas de la biblioteca {Library}", removed, libraryId);
+
+        return removed;
+    }
+
+    /// <summary>
+    /// Manda algo a la papelera, o explica por que no pudo. Que ya no este en disco no es un
+    /// error: es justo cuando mas falta hace poder quitarlo del indice.
+    /// </summary>
+    private void EnsureTrashed(string path, string what)
+    {
+        switch (_trash.TryMoveToTrash(path, out _))
+        {
+            case TrashOutcome.Moved:
+            case TrashOutcome.NotFound:
+                return;
+            case TrashOutcome.NotAllowed:
+                throw new InvalidOperationException(
+                    $"No se puede borrar {what} del disco: esa ruta esta fuera de las carpetas declaradas en el compose. El indice no se ha tocado.");
+            default:
+                throw new InvalidOperationException(
+                    $"No se pudo mover {what} a la papelera. El indice no se ha tocado.");
+        }
+    }
+
+    public async Task<bool> DeleteMediaAsync(AuthUser user, string id, bool deleteFile = false, CancellationToken ct = default)
+    {
+        var media = await _db.Media.ForUser(user).FirstOrDefaultAsync(m => m.Id == id, ct);
+        if (media == null) return false;
+
+        if (deleteFile) EnsureTrashed(media.Path, "el fichero");
+
+        if (!string.IsNullOrWhiteSpace(media.ThumbnailPath))
+        {
+            TryDeleteFile(media.ThumbnailPath);
+        }
+
+        _db.Media.Remove(media);
+        await _db.SaveChangesAsync(ct);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Borra las miniaturas que genero DiarSpeicher para esta biblioteca. Son suyas y viven
+    /// en el almacenamiento, no entre los ficheros del usuario; sin esto se quedarian como
+    /// basura que ya no referencia nadie.
+    /// </summary>
+    private async Task PurgeThumbnailsAsync(string libraryId, CancellationToken ct)
+    {
+        var seriesThumbs = await _db.Series
+            .Where(s => s.LibraryId == libraryId && s.ThumbnailPath != null)
+            .Select(s => s.ThumbnailPath!)
+            .ToListAsync(ct);
+
+        var mediaThumbs = await _db.Media
+            .Where(m => m.Series != null && m.Series.LibraryId == libraryId && m.ThumbnailPath != null)
+            .Select(m => m.ThumbnailPath!)
+            .ToListAsync(ct);
+
+        foreach (var path in seriesThumbs.Concat(mediaThumbs))
+        {
+            TryDeleteFile(path);
+        }
+
+        _logger.LogInformation(
+            "Purgadas {Count} miniaturas de la biblioteca {Library}",
+            seriesThumbs.Count + mediaThumbs.Count,
+            libraryId);
     }
 
     private static LibraryConfig BuildConfig(StumpLibraryConfigDto? dto)
@@ -811,7 +1101,6 @@ public sealed class StumpV2Service : IStumpV2Service
             return UploadResult.Fail(UploadOutcome.NoAcceptedFiles, "No valid files were provided.");
         }
 
-        // Auto-enqueue scan
         await _scannerQueue.QueueScanAsync(new ScanRequest(library.Id), ct);
 
         return UploadResult.Ok(new StumpUploadResponseDto

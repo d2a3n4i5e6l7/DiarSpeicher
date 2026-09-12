@@ -503,7 +503,7 @@ export default function UsersPage() {
 												fontWeight: 700,
 												letterSpacing: "1px",
 												textTransform: "uppercase",
-												color: "#FFFFFF",
+												color: "var(--ds-text-strong)",
 											}}
 										>
 											{u.username}
@@ -615,10 +615,10 @@ export default function UsersPage() {
 							}}
 							disabled={loading}
 							sx={{
-								color: "#A3ABB8",
+								color: "var(--ds-text-2)",
 								border: `1px solid ${DS.border}`,
 								backgroundColor: DS.bgSunken,
-								"&:hover": { borderColor: "#383E4C", backgroundColor: DS.bgSurface, color: "#FFFFFF" },
+								"&:hover": { borderColor: "var(--ds-border-hi)", backgroundColor: DS.bgSurface, color: "var(--ds-text-strong)" },
 							}}
 						>
 							ACTUALIZAR
@@ -802,7 +802,7 @@ export default function UsersPage() {
 			<Dialog open={Boolean(deleteUser)} onClose={() => setDeleteUser(null)} maxWidth="xs" fullWidth>
 				<HudFrame />
 				<DialogTitle
-					sx={{ color: DS.redGlow, backgroundColor: "#160303", borderBottom: `1px solid ${DS.borderRed}` }}
+					sx={{ color: DS.redGlow, backgroundColor: "var(--ds-bg-danger)", borderBottom: `1px solid ${DS.borderRed}` }}
 				>
 					Confirmar baja de operador
 				</DialogTitle>

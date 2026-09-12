@@ -595,7 +595,8 @@ public class EpubBookProcessor : IBookProcessor
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Fallback to name search
+            // OPF corrupto o sin portada declarada: devolver null hace que el llamante
+            // busque la portada por nombre de fichero.
         }
 
         return null;

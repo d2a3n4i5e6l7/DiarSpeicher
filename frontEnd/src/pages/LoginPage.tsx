@@ -119,18 +119,18 @@ export default function LoginPage() {
 				sx={{
 					mb: 3,
 					textAlign: "left",
-					backgroundColor: "#1C1408",
-					border: "1px solid #78350F",
-					borderLeft: "4px solid #F59E0B",
+					backgroundColor: "var(--ds-warn-bg)",
+					border: "1px solid var(--ds-warn-dark)",
+					borderLeft: "4px solid var(--ds-warn)",
 					borderRadius: "3px",
-					color: "#FDE68A",
+					color: "var(--ds-warn-text)",
 					"& .MuiAlert-message": { width: "100%" },
 				}}
 			>
 				<Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
 					INICIALIZACIÓN DEL SISTEMA
 				</Typography>
-				<Typography variant="body2" sx={{ fontSize: "12px", color: "#FBBF24" }}>
+				<Typography variant="body2" sx={{ fontSize: "12px", color: "var(--ds-warn-light)" }}>
 					No se detectaron usuarios en el reino. Las credenciales configuradas aquí se asignarán al <strong>Administrador Principal</strong>.
 				</Typography>
 			</Alert>
@@ -141,11 +141,11 @@ export default function LoginPage() {
 				severity="error"
 				sx={{
 					mb: 3,
-					backgroundColor: "#1C0303",
-					border: "1px solid #660B0B",
-					borderLeft: "4px solid #C21818",
+					backgroundColor: "var(--ds-red-deep)",
+					border: "1px solid var(--ds-red-dark)",
+					borderLeft: "4px solid var(--ds-red)",
 					borderRadius: "3px",
-					color: "#FF5C5C",
+					color: "var(--ds-red-soft)",
 				}}
 			>
 				<Typography variant="body2" sx={{ fontSize: "12px" }}>
@@ -159,11 +159,11 @@ export default function LoginPage() {
 				severity="info"
 				sx={{
 					mb: 3,
-					backgroundColor: "#11131C",
-					border: "1px solid #282C38",
-					borderLeft: "4px solid #C21818",
+					backgroundColor: "var(--ds-bg-panel)",
+					border: "1px solid var(--ds-border)",
+					borderLeft: "4px solid var(--ds-red)",
 					borderRadius: "3px",
-					color: "#F0F2F6",
+					color: "var(--ds-platinum)",
 				}}
 			>
 				<Typography variant="body2" sx={{ fontSize: "12px" }}>
@@ -182,22 +182,28 @@ export default function LoginPage() {
 				flexDirection: "column",
 				alignItems: "center",
 				justifyContent: "center",
-				backgroundColor: "#050508",
+				backgroundColor: "var(--ds-bg)",
 				backgroundImage: `
-					radial-gradient(circle at 50% 15%, rgba(194, 24, 24, 0.12) 0%, transparent 65%),
-					linear-gradient(to right, rgba(194, 24, 24, 0.03) 1px, transparent 1px),
-					linear-gradient(to bottom, rgba(194, 24, 24, 0.03) 1px, transparent 1px)
+					radial-gradient(ellipse 120% 90% at 50% 5%,
+						rgba(var(--ds-red-rgb), 0.12) 0%,
+						rgba(var(--ds-red-rgb), 0.078) 26%,
+						rgba(var(--ds-red-rgb), 0.042) 48%,
+						rgba(var(--ds-red-rgb), 0.017) 68%,
+						rgba(var(--ds-red-rgb), 0) 100%),
+					linear-gradient(to right, var(--ds-grid-line) 1px, transparent 1px),
+					linear-gradient(to bottom, var(--ds-grid-line) 1px, transparent 1px)
 				`,
 				backgroundSize: "100% 100%, 40px 40px, 40px 40px",
 				p: 2,
 				position: "relative",
 			}}
 		>
+			<Box className="ds-noise" />
 			<Card
 				sx={{
 					width: "100%",
 					maxWidth: 460,
-					boxShadow: "0 12px 50px rgba(0, 0, 0, 0.9)",
+					boxShadow: "var(--ds-shadow-dialog)",
 					overflow: "hidden",
 				}}
 			>
@@ -206,8 +212,8 @@ export default function LoginPage() {
 				<Box
 					sx={{
 						height: 42,
-						background: "#0A0B0E",
-						borderBottom: "1px solid #232733",
+						background: "var(--ds-bg-sunken)",
+						borderBottom: "1px solid var(--ds-border-head)",
 						display: "flex",
 						alignItems: "center",
 						justifyContent: "space-between",
@@ -217,9 +223,9 @@ export default function LoginPage() {
 					<Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
 						<Box
 							sx={{
-								background: "#1B1E26",
-								color: "#FF2E2E",
-								border: "1px solid #660B0B",
+								background: "var(--ds-bg-pill)",
+								color: "var(--ds-red-glow)",
+								border: "1px solid var(--ds-red-dark)",
 								fontFamily: "'JetBrains Mono', monospace",
 								fontSize: 11,
 								fontWeight: 700,
@@ -235,7 +241,7 @@ export default function LoginPage() {
 								fontWeight: 700,
 								fontSize: 12,
 								letterSpacing: "1.5px",
-								color: "#8E95A5",
+								color: "var(--ds-muted)",
 								textTransform: "uppercase",
 							}}
 						>
@@ -246,7 +252,7 @@ export default function LoginPage() {
 						sx={{
 							fontFamily: "'JetBrains Mono', monospace",
 							fontSize: 10,
-							color: "#636B7C",
+							color: "var(--ds-subtle)",
 							letterSpacing: "1px",
 						}}
 					>
@@ -266,11 +272,11 @@ export default function LoginPage() {
 									fontSize: "26px",
 									fontWeight: 900,
 									letterSpacing: "2.5px",
-									color: "#FFFFFF",
+									color: "var(--ds-text-strong)",
 									lineHeight: 1.1,
 								}}
 							>
-								DIAR<Box component="span" sx={{ color: "#FF2E2E" }}>SPEICHER</Box>
+								DIAR<Box component="span" sx={{ color: "var(--ds-red-glow)" }}>SPEICHER</Box>
 							</Typography>
 							<Typography
 								sx={{
@@ -278,7 +284,7 @@ export default function LoginPage() {
 									fontSize: "12px",
 									fontWeight: 700,
 									letterSpacing: "3.5px",
-									color: "#8E95A5",
+									color: "var(--ds-muted)",
 									textTransform: "uppercase",
 									mt: 0.75,
 								}}
@@ -294,9 +300,9 @@ export default function LoginPage() {
 								gap: 1,
 								px: 1.5,
 								py: 0.5,
-								background: "#11131C",
-								border: "1px solid #2B303E",
-								borderLeft: "3px solid #C21818",
+								background: "var(--ds-bg-panel)",
+								border: "1px solid var(--ds-metal-2)",
+								borderLeft: "3px solid var(--ds-red)",
 								borderRadius: "2px",
 							}}
 						>
@@ -304,18 +310,18 @@ export default function LoginPage() {
 								sx={{
 									fontFamily: "'JetBrains Mono', monospace",
 									fontSize: "10px",
-									color: "#FF3E3E",
+									color: "var(--ds-red-light)",
 									fontWeight: 700,
 								}}
 							>
 								DIARMUND ARCHIVE PROTOCOL
 							</Typography>
-							<Typography sx={{ color: "#636B7C", fontSize: "10px" }}>|</Typography>
+							<Typography sx={{ color: "var(--ds-subtle)", fontSize: "10px" }}>|</Typography>
 							<Typography
 								sx={{
 									fontFamily: "'Rajdhani', sans-serif",
 									fontSize: "11px",
-									color: "#D1D5DB",
+									color: "var(--ds-platinum)",
 									letterSpacing: "1px",
 									fontWeight: 600,
 								}}
@@ -339,7 +345,7 @@ export default function LoginPage() {
 										fontWeight: 700,
 										fontSize: "12px",
 										letterSpacing: "1px",
-										color: "#A3ABB8",
+										color: "var(--ds-text-2)",
 										textTransform: "uppercase",
 										mb: 0.75,
 									}}
@@ -378,7 +384,7 @@ export default function LoginPage() {
 										fontWeight: 700,
 										fontSize: "12px",
 										letterSpacing: "1px",
-										color: "#A3ABB8",
+										color: "var(--ds-text-2)",
 										textTransform: "uppercase",
 										mb: 0.75,
 									}}
@@ -408,7 +414,7 @@ export default function LoginPage() {
 														onClick={() => setShowPassword(!showPassword)}
 														edge="end"
 														size="small"
-														sx={{ color: "#8E95A5" }}
+														sx={{ color: "var(--ds-muted)" }}
 													>
 														{visibilityIcon}
 													</IconButton>
@@ -428,9 +434,9 @@ export default function LoginPage() {
 								sx={{
 									mt: 1.5,
 									py: 1.3,
-									backgroundColor: "#151821",
-									color: "#F0F2F6",
-									border: "1px solid #383E4C",
+									backgroundColor: "var(--ds-bg-btn)",
+									color: "var(--ds-platinum)",
+									border: "1px solid var(--ds-border-hi)",
 									fontFamily: "'Rajdhani', sans-serif",
 									fontWeight: 700,
 									fontSize: "15px",
@@ -439,10 +445,10 @@ export default function LoginPage() {
 									clipPath: "polygon(6px 0%, 100% 0%, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0% 100%, 0% 6px)",
 									transition: "all 0.2s ease",
 									"&:hover": {
-										backgroundColor: "#C21818",
-										borderColor: "#FF2E2E",
+										backgroundColor: "var(--ds-red)",
+										borderColor: "var(--ds-red-glow)",
 										color: "#FFFFFF",
-										boxShadow: "0 0 16px rgba(194, 24, 24, 0.55)",
+										boxShadow: "0 0 16px rgba(var(--ds-red-rgb), var(--ds-glow-a))",
 									},
 								}}
 							>
@@ -455,7 +461,7 @@ export default function LoginPage() {
 						sx={{
 							mt: 3.5,
 							pt: 2,
-							borderTop: "1px solid #1C1F28",
+							borderTop: "1px solid var(--ds-border-soft)",
 							display: "flex",
 							alignItems: "center",
 							justifyContent: "space-between",
@@ -466,7 +472,7 @@ export default function LoginPage() {
 							sx={{
 								fontFamily: "'JetBrains Mono', monospace",
 								fontSize: "10px",
-								color: "#636B7C",
+								color: "var(--ds-subtle)",
 							}}
 						>
 							GATEWAY: <code>{URL_ACCESS}</code>
@@ -476,7 +482,7 @@ export default function LoginPage() {
 							sx={{
 								fontFamily: "'JetBrains Mono', monospace",
 								fontSize: "10px",
-								color: "#80060A",
+								color: "var(--ds-red-hover)",
 								fontWeight: 700,
 							}}
 						>

@@ -5,7 +5,13 @@ import {
 	Chip,
 	CircularProgress,
 	Collapse,
+	Dialog,
+	DialogActions,
+	DialogContent,
+	DialogTitle,
+	FormControlLabel,
 	IconButton,
+	Switch,
 	Stack,
 	Tab,
 	Tabs,
@@ -19,12 +25,14 @@ import TravelExploreIcon from "@mui/icons-material/TravelExplore";
 import LinkOffIcon from "@mui/icons-material/LinkOff";
 import EditIcon from "@mui/icons-material/Edit";
 import ImageIcon from "@mui/icons-material/Image";
+import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
 import { useEffect, useMemo, useState } from "react";
-import { Link as RouterLink, useParams } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import HudFrame from "../components/HudFrame";
 import MediaCard from "../components/MediaCard";
 import MetadataMatchDialog from "../components/MetadataMatchDialog";
 import RenameSeriesDialog from "../components/RenameSeriesDialog";
+import DeleteScopeNotice from "../components/DeleteScopeNotice";
 import SeriesCoverDialog from "../components/SeriesCoverDialog";
 import { mediaApi, metadataApi, seriesApi, type MediaItem, type SeriesItem } from "../api/endpoints";
 import {
@@ -124,6 +132,10 @@ export default function SeriesDetailPage() {
 	const [matchOpen, setMatchOpen] = useState(false);
 	const [renameOpen, setRenameOpen] = useState(false);
 	const [coverOpen, setCoverOpen] = useState(false);
+	const [confirmDelete, setConfirmDelete] = useState(false);
+	const [deleteFiles, setDeleteFiles] = useState(false);
+	const [deleting, setDeleting] = useState(false);
+	const navigate = useNavigate();
 	// Se incrementa tras emparejar o revertir: fuerza a releer la ficha con lo nuevo.
 	const [reloadToken, setReloadToken] = useState(0);
 
@@ -215,7 +227,7 @@ export default function SeriesDetailPage() {
 				component={RouterLink}
 				to="/series"
 				startIcon={<ArrowBackIcon />}
-				sx={{ color: DS.muted, mb: 2, "&:hover": { color: "#FFFFFF" } }}
+				sx={{ color: DS.muted, mb: 2, "&:hover": { color: "var(--ds-text-strong)" } }}
 			>
 				SERIES
 			</Button>
@@ -254,7 +266,7 @@ export default function SeriesDetailPage() {
 								fontWeight: 700,
 								letterSpacing: "1.5px",
 								textTransform: "uppercase",
-								color: "#FFFFFF",
+								color: "var(--ds-text-strong)",
 								lineHeight: 1.15,
 							}}
 						>
@@ -268,7 +280,7 @@ export default function SeriesDetailPage() {
 									color: DS.muted,
 									border: `1px solid ${DS.border}`,
 									borderRadius: 0,
-									"&:hover": { color: "#FFFFFF", borderColor: DS.red },
+									"&:hover": { color: "var(--ds-text-strong)", borderColor: DS.red },
 								}}
 							>
 								<EditIcon fontSize="small" />
@@ -282,10 +294,24 @@ export default function SeriesDetailPage() {
 									color: DS.muted,
 									border: `1px solid ${DS.border}`,
 									borderRadius: 0,
-									"&:hover": { color: "#FFFFFF", borderColor: DS.red },
+									"&:hover": { color: "var(--ds-text-strong)", borderColor: DS.red },
 								}}
 							>
 								<ImageIcon fontSize="small" />
+							</IconButton>
+						</Tooltip>
+						<Tooltip title="Eliminar serie">
+							<IconButton
+								size="small"
+								onClick={() => { setConfirmDelete(true); }}
+								sx={{
+									color: DS.muted,
+									border: `1px solid ${DS.border}`,
+									borderRadius: 0,
+									"&:hover": { color: DS.redGlow, borderColor: DS.redDark },
+								}}
+							>
+								<DeleteOutlinedIcon fontSize="small" />
 							</IconButton>
 						</Tooltip>
 					</Stack>
@@ -309,9 +335,9 @@ export default function SeriesDetailPage() {
 								label={completeness.label}
 								sx={{
 									fontFamily: "'JetBrains Mono', monospace",
-									backgroundColor: completeness.complete ? "rgba(34, 197, 94, 0.12)" : "rgba(245, 158, 11, 0.15)",
-									color: completeness.complete ? "#4ADE80" : "#FBBF24",
-									border: `1px solid ${completeness.complete ? "#14532D" : "#78350F"}`,
+									backgroundColor: completeness.complete ? "rgba(var(--ds-ok-rgb), 0.12)" : "rgba(var(--ds-warn-rgb), 0.15)",
+									color: completeness.complete ? "var(--ds-ok-light)" : "var(--ds-warn-light)",
+									border: `1px solid ${completeness.complete ? "var(--ds-ok-dark)" : "var(--ds-warn-dark)"}`,
 								}}
 							/>
 						)}
@@ -322,7 +348,7 @@ export default function SeriesDetailPage() {
 								<Chip
 									size="small"
 									label={`SEGÚN ${(external.source ?? "CATÁLOGO EXTERNO").toUpperCase()}`}
-									sx={{ backgroundColor: "rgba(194, 24, 24, 0.15)", color: DS.redLight, border: `1px solid ${DS.redDark}` }}
+									sx={{ backgroundColor: "rgba(var(--ds-red-rgb), 0.15)", color: DS.redLight, border: `1px solid ${DS.redDark}` }}
 								/>
 								<Button
 									size="small"
@@ -363,10 +389,10 @@ export default function SeriesDetailPage() {
 							startIcon={<TravelExploreIcon />}
 							onClick={() => setMatchOpen(true)}
 							sx={{
-								color: "#A3ABB8",
+								color: "var(--ds-text-2)",
 								border: `1px solid ${DS.border}`,
 								backgroundColor: DS.bgSunken,
-								"&:hover": { borderColor: DS.redGlow, color: "#FFFFFF" },
+								"&:hover": { borderColor: DS.redGlow, color: "var(--ds-text-strong)" },
 							}}
 						>
 							{external ? "CAMBIAR EMPAREJADO" : "BUSCAR METADATA"}
@@ -376,7 +402,7 @@ export default function SeriesDetailPage() {
 					{summary && (
 						<Box sx={{ mt: 2.5 }}>
 							<Collapse in={summaryOpen} collapsedSize={44}>
-								<Typography sx={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", color: "#A3ABB8", lineHeight: 1.7 }}>
+								<Typography sx={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", color: "var(--ds-text-2)", lineHeight: 1.7 }}>
 									{summary}
 								</Typography>
 							</Collapse>
@@ -438,7 +464,7 @@ export default function SeriesDetailPage() {
 						fontWeight: 700,
 						letterSpacing: "1.5px",
 						color: DS.muted,
-						"&.Mui-selected": { color: "#FFFFFF" },
+						"&.Mui-selected": { color: "var(--ds-text-strong)" },
 					},
 					"& .MuiTabs-indicator": { backgroundColor: DS.red, height: 2 },
 				}}
@@ -478,6 +504,62 @@ export default function SeriesDetailPage() {
 					<DetailRow label="Ficha de origen" value={external?.link} />
 							</Box>
 						)}
+
+						<Dialog open={confirmDelete} onClose={() => { setConfirmDelete(false); }} maxWidth="sm" fullWidth>
+							<HudFrame />
+							<DialogTitle>// Eliminar serie</DialogTitle>
+							<DialogContent sx={{ p: 3 }}>
+								<Typography sx={{ color: DS.platinum, mb: 2 }}>
+									¿Seguro que quieres eliminar <strong>{series.name}</strong> y sus {volumes.length} tomos?
+								</Typography>
+
+								{!deleteFiles && (
+									<Alert severity="info">
+										Solo se quita del índice. La carpeta sigue en el disco y volverá a aparecer en el próximo escaneo.
+									</Alert>
+								)}
+
+								<FormControlLabel
+									sx={{ mt: 2 }}
+									control={
+										<Switch
+											checked={deleteFiles}
+											onChange={(e) => { setDeleteFiles(e.target.checked); }}
+											disabled={deleting}
+										/>
+									}
+									label={
+										<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, letterSpacing: "1px" }}>
+											ELIMINAR TAMBIÉN LA CARPETA DEL DISCO
+										</Typography>
+									}
+								/>
+
+								{deleteFiles && <DeleteScopeNotice path={series.path} />}
+							</DialogContent>
+							<DialogActions>
+								<Button onClick={() => { setConfirmDelete(false); }} sx={{ color: DS.muted }}>
+									CANCELAR
+								</Button>
+								<Button
+									variant="contained"
+									disabled={deleting}
+									onClick={() => {
+										setDeleting(true);
+										void seriesApi
+											.delete(series.id, deleteFiles)
+											.then(() => {
+												void navigate(series.libraryId ? `/libraries/${series.libraryId}` : "/series");
+											})
+											.catch(() => {
+												setDeleting(false);
+											});
+									}}
+								>
+									{deleting ? "ELIMINANDO..." : "ELIMINAR"}
+								</Button>
+							</DialogActions>
+						</Dialog>
 
 						<MetadataMatchDialog
 							open={matchOpen}

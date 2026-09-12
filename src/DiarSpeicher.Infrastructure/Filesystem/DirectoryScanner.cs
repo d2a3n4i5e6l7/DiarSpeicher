@@ -112,7 +112,6 @@ public class DirectoryScanner : IDirectoryScanner
             var normalizedFile = Path.GetFullPath(file);
             if (existingMediaMap.TryGetValue(normalizedFile, out var existing))
             {
-                // Check if updated since last scan
                 var diskMtime = new DateTimeOffset(File.GetLastWriteTimeUtc(normalizedFile));
                 if (existing.ModifiedAt is null || diskMtime > existing.ModifiedAt.Value)
                 {
@@ -181,7 +180,6 @@ public class DirectoryScanner : IDirectoryScanner
             return;
         }
 
-        // Process files in this directory
         try
         {
             foreach (var fullPath in dirInfo.EnumerateFiles().Select(f => f.FullName))
@@ -198,10 +196,10 @@ public class DirectoryScanner : IDirectoryScanner
         }
         catch (Exception)
         {
-            // Inaccessible
+            // Una carpeta sin permiso o borrada a mitad del recorrido se queda sin
+            // indexar; tumbar el escaneo entero por ella seria peor.
         }
 
-        // Process subdirectories
         try
         {
             foreach (var subDirFullName in dirInfo.EnumerateDirectories().Select(d => d.FullName))
@@ -222,7 +220,7 @@ public class DirectoryScanner : IDirectoryScanner
         }
         catch (Exception)
         {
-            // Inaccessible
+            // Igual que arriba: lo que no se pueda leer se omite y el resto sigue.
         }
     }
 
@@ -237,7 +235,8 @@ public class DirectoryScanner : IDirectoryScanner
         }
         catch (Exception)
         {
-            // Inaccessible
+            // Se devuelve al menos la raiz: una biblioteca ilegible se marca Missing
+            // mas adelante, aqui no se decide nada.
         }
 
         return dirsToEvaluate;

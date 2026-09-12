@@ -31,7 +31,6 @@ public class DiarSpeicherDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // Library & Config (1-to-1)
         modelBuilder.Entity<Library>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -66,7 +65,6 @@ public class DiarSpeicherDbContext : DbContext
             entity.Property(e => e.DefaultLibraryViewMode).HasConversion<string>();
         });
 
-        // Series & SeriesMetadata (1-to-1, series_id as PK)
         modelBuilder.Entity<Series>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -94,7 +92,6 @@ public class DiarSpeicherDbContext : DbContext
             entity.Property(e => e.SeriesId).HasMaxLength(32);
         });
 
-        // Media & MediaMetadata (1-to-1)
         modelBuilder.Entity<Media>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -142,7 +139,6 @@ public class DiarSpeicherDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // Tags & Relations
         modelBuilder.Entity<Tag>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -176,14 +172,12 @@ public class DiarSpeicherDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // ScannedDirectory (Cache mtime)
         modelBuilder.Entity<ScannedDirectory>(entity =>
         {
             entity.HasKey(e => e.Path);
             entity.Property(e => e.Path).IsRequired();
         });
 
-        // ReadingSession
         modelBuilder.Entity<ReadingSession>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -201,7 +195,6 @@ public class DiarSpeicherDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // User & Preferences
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasKey(e => e.Id);

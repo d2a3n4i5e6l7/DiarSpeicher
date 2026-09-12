@@ -1,10 +1,26 @@
-import { Alert, Box, Button, Chip, CircularProgress, Stack, Typography } from "@mui/material";
+import {
+	Alert,
+	Box,
+	Button,
+	Chip,
+	CircularProgress,
+	Dialog,
+	DialogActions,
+	DialogContent,
+	DialogTitle,
+	FormControlLabel,
+	Stack,
+	Switch,
+	Typography,
+} from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import DownloadIcon from "@mui/icons-material/Download";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
 import { useEffect, useState } from "react";
-import { Link as RouterLink, useParams } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import HudFrame from "../components/HudFrame";
+import DeleteScopeNotice from "../components/DeleteScopeNotice";
 import MediaCard from "../components/MediaCard";
 import { mediaApi, seriesApi, type MediaItem, type SeriesItem } from "../api/endpoints";
 import {
@@ -56,6 +72,10 @@ export default function MediaDetailPage() {
 	// El resultado se guarda con el id que lo pidió, de modo que al saltar de un tomo
 	// a otro se deriva si lo que hay en pantalla corresponde a la ruta actual.
 	const [result, setResult] = useState<Result | null>(null);
+	const [confirmDelete, setConfirmDelete] = useState(false);
+	const [deleteFile, setDeleteFile] = useState(false);
+	const [deleting, setDeleting] = useState(false);
+	const navigate = useNavigate();
 
 	useEffect(() => {
 		let mounted = true;
@@ -113,7 +133,7 @@ export default function MediaDetailPage() {
 				component={RouterLink}
 				to={series ? `/series/${series.id}` : "/"}
 				startIcon={<ArrowBackIcon />}
-				sx={{ color: DS.muted, mb: 2, "&:hover": { color: "#FFFFFF" } }}
+				sx={{ color: DS.muted, mb: 2, "&:hover": { color: "var(--ds-text-strong)" } }}
 			>
 				{series ? series.name.toUpperCase() : "ARCHIVO"}
 			</Button>
@@ -150,7 +170,7 @@ export default function MediaDetailPage() {
 							fontWeight: 700,
 							letterSpacing: "1.5px",
 							textTransform: "uppercase",
-							color: "#FFFFFF",
+							color: "var(--ds-text-strong)",
 							lineHeight: 1.15,
 						}}
 					>
@@ -167,7 +187,7 @@ export default function MediaDetailPage() {
 
 					{summary && (
 						<Typography
-							sx={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", color: "#A3ABB8", lineHeight: 1.7, mt: 2 }}
+							sx={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", color: "var(--ds-text-2)", lineHeight: 1.7, mt: 2 }}
 						>
 							{summary}
 						</Typography>
@@ -190,17 +210,87 @@ export default function MediaDetailPage() {
 							download
 							startIcon={<DownloadIcon />}
 							sx={{
-								color: "#A3ABB8",
+								color: "var(--ds-text-2)",
 								border: `1px solid ${DS.border}`,
 								backgroundColor: DS.bgSunken,
-								"&:hover": { borderColor: DS.redGlow, color: "#FFFFFF" },
+								"&:hover": { borderColor: DS.redGlow, color: "var(--ds-text-strong)" },
 							}}
 						>
 							DESCARGAR
 						</Button>
+						<Button
+							startIcon={<DeleteOutlinedIcon />}
+							onClick={() => {
+								setConfirmDelete(true);
+							}}
+							sx={{
+								color: "var(--ds-text-2)",
+								border: `1px solid ${DS.border}`,
+								backgroundColor: DS.bgSunken,
+								"&:hover": { borderColor: DS.redGlow, color: DS.redGlow },
+							}}
+						>
+							ELIMINAR
+						</Button>
 					</Stack>
 				</Box>
 			</Box>
+
+			<Dialog open={confirmDelete} onClose={() => { setConfirmDelete(false); }} maxWidth="sm" fullWidth>
+				<HudFrame />
+				<DialogTitle>// Eliminar tomo</DialogTitle>
+				<DialogContent sx={{ p: 3 }}>
+					<Typography sx={{ color: DS.platinum, mb: 2 }}>
+						¿Seguro que quieres eliminar <strong>{media.name}</strong>?
+					</Typography>
+
+					{!deleteFile && (
+						<Alert severity="info">
+							Solo se quita del índice. El fichero sigue en el disco y volverá a aparecer en el próximo escaneo.
+						</Alert>
+					)}
+
+					<FormControlLabel
+						sx={{ mt: 2 }}
+						control={
+							<Switch
+								checked={deleteFile}
+								onChange={(e) => { setDeleteFile(e.target.checked); }}
+								disabled={deleting}
+							/>
+						}
+						label={
+							<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, letterSpacing: "1px" }}>
+								ELIMINAR TAMBIÉN EL FICHERO DEL DISCO
+							</Typography>
+						}
+					/>
+
+					{deleteFile && <DeleteScopeNotice path={media.path} />}
+				</DialogContent>
+				<DialogActions>
+					<Button onClick={() => { setConfirmDelete(false); }} sx={{ color: DS.muted }}>
+						CANCELAR
+					</Button>
+					<Button
+						variant="contained"
+						disabled={deleting}
+						onClick={() => {
+							setDeleting(true);
+							void mediaApi
+								.delete(media.id, deleteFile)
+								.then(() => {
+									void navigate(media.seriesId ? `/series/${media.seriesId}` : "/series");
+								})
+								.catch(() => {
+									setDeleting(false);
+								});
+						}}
+					>
+						{deleting ? "ELIMINANDO..." : "ELIMINAR"}
+					</Button>
+				</DialogActions>
+			</Dialog>
 
 			<Box sx={{ mt: 4, maxWidth: READABLE_WIDTH }}>
 				<Typography
@@ -211,7 +301,7 @@ export default function MediaDetailPage() {
 						fontWeight: 700,
 						letterSpacing: "2px",
 						textTransform: "uppercase",
-						color: "#FFFFFF",
+						color: "var(--ds-text-strong)",
 						mb: 1.5,
 					}}
 				>

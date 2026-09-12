@@ -140,7 +140,7 @@ export default function MetadataMatchDialog({ open, seriesId, seriesName, onClos
 										fontSize: "16px",
 										fontWeight: 700,
 										letterSpacing: "0.5px",
-										color: "#FFFFFF",
+										color: "var(--ds-text-strong)",
 									}}
 								>
 									{candidate.title}
@@ -178,7 +178,7 @@ export default function MetadataMatchDialog({ open, seriesId, seriesName, onClos
 										sx={{
 											fontFamily: "'Inter', sans-serif",
 											fontSize: "12px",
-											color: "#A3ABB8",
+											color: "var(--ds-text-2)",
 											lineHeight: 1.6,
 											mt: 1,
 											display: "-webkit-box",

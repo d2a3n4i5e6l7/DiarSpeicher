@@ -5,6 +5,8 @@ using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Data.Extensions;
+using DiarSpeicher.Infrastructure.Filesystem;
+using Microsoft.Extensions.Options;
 using DiarSpeicher.Core.Domain.StumpV2;
 using DiarSpeicher.Infrastructure.StumpV2;
 using Microsoft.EntityFrameworkCore;
@@ -16,10 +18,18 @@ public class Mutation
     public async Task<Library> CreateLibrary(
         DiarSpeicherDbContext db,
         AuthUserResolver auth,
+        IOptions<LibraryRootsOptions> libraryRoots,
         CreateLibraryInput input,
         CancellationToken ct)
     {
-        if (!Directory.Exists(input.Path))
+        // Misma jaula que en REST: si esta puerta no la comprueba, la lista blanca de
+        // carpetas no sirve de nada porque se entra por la de al lado.
+        if (!libraryRoots.Value.TryResolve(input.Path, out var fullPath))
+        {
+            throw new GraphQLException($"The path '{input.Path}' is outside the allowed library roots.");
+        }
+
+        if (!Directory.Exists(fullPath))
         {
             throw new GraphQLException($"The path '{input.Path}' does not exist.");
         }
@@ -27,7 +37,7 @@ public class Mutation
         var library = new Library
         {
             Name = input.Name,
-            Path = Path.GetFullPath(input.Path),
+            Path = fullPath,
             Description = input.Description,
             Config = new LibraryConfig()
         };

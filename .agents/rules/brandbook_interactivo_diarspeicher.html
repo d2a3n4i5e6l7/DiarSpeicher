@@ -399,6 +399,130 @@
       position: relative;
     }
 
+    /* ============================================================
+       MODO DÍA // TAGESLICHT — paleta derivada del uniforme de
+       Iron Blood: porcelana, gris acero del equipamiento, rojo
+       opaco de la capa y el azul del iris como único acento frío.
+       ============================================================ */
+    :root {
+      --day-porzellan: #ECEEF2;
+      --day-surface:   #F7F8FA;
+      --day-sunken:    #DFE3EA;
+      --day-stahl:     #9AA3B0;
+      --day-stahl-tief:#4A505C;
+      --day-linie:     #B7BEC9;
+      --day-tinte:     #16181D;
+      --day-rot:       #A32020;
+      --day-rot-tief:  #6E1616;
+      --day-eisblau:   #2F5C90;
+      --day-eisblau-h: #6C9BD2;
+      --day-bevel: inset 0 1px 0 rgba(255,255,255,0.95),
+                   inset 0 -1px 0 rgba(74,80,92,0.22),
+                   0 1px 2px rgba(22,24,29,0.10);
+    }
+
+    /* Contenedor autónomo: todo lo que viva dentro se pinta en día
+       sin tocar el resto del manual, que sigue en modo noche. */
+    .day-scope {
+      background: var(--day-porzellan);
+      background-image:
+        linear-gradient(to right, rgba(74,80,92,0.05) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(74,80,92,0.05) 1px, transparent 1px);
+      background-size: 40px 40px;
+      color: var(--day-tinte);
+      border: 1px solid var(--day-linie);
+      border-radius: 4px;
+      padding: 16px;
+      position: relative;
+    }
+
+    .day-card {
+      background: var(--day-surface);
+      border: 1px solid var(--day-linie);
+      box-shadow: var(--day-bevel);
+      border-radius: 3px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      clip-path: polygon(8px 0%, 100% 0%, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0% 100%, 0% 8px);
+    }
+
+    .day-swatch {
+      height: 84px;
+      display: flex;
+      align-items: flex-end;
+      padding: 8px;
+      font-family: var(--font-tactical);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+
+    .day-info {
+      padding: 10px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--day-stahl-tief);
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .day-info .row {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px dashed var(--day-linie);
+      padding-bottom: 2px;
+    }
+
+    .day-btn {
+      font-family: var(--font-tactical);
+      font-weight: 700;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 6px 14px;
+      border: 1px solid var(--day-rot-tief);
+      background: var(--day-rot);
+      color: #FFF;
+      cursor: default;
+      clip-path: polygon(6px 0%, 100% 0%, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0% 100%, 0% 6px);
+    }
+
+    .day-btn.steel {
+      background: linear-gradient(180deg, #FFFFFF 0%, var(--day-sunken) 100%);
+      border-color: var(--day-stahl);
+      color: var(--day-stahl-tief);
+    }
+
+    .day-chip {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 2px 8px;
+      border: 1px solid var(--day-eisblau);
+      color: var(--day-eisblau);
+      background: rgba(47, 92, 144, 0.08);
+      letter-spacing: 1px;
+    }
+
+    /* Marcas HUD: en día el rojo pierde el resplandor y se comporta
+       como tinta impresa, no como luz. */
+    .day-hud-tl, .day-hud-br {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+    }
+    .day-hud-tl {
+      top: 0; left: 0;
+      border-top: 2px solid var(--day-rot);
+      border-left: 2px solid var(--day-rot);
+    }
+    .day-hud-br {
+      bottom: 0; right: 0;
+      border-bottom: 2px solid var(--day-rot);
+      border-right: 2px solid var(--day-rot);
+    }
+
     @media print {
       body {
         background: #fff !important;
@@ -434,7 +558,7 @@
 
     <div class="toolbar-controls">
       <button class="btn-tactical" id="btn-prev" onclick="prevSlide()">◀ Anterior</button>
-      <span class="page-indicator" id="page-display">PÁG 01 / 17</span>
+      <span class="page-indicator" id="page-display">PÁG 01 / 19</span>
       <button class="btn-tactical" id="btn-next" onclick="nextSlide()">Siguiente ▶</button>
       <div style="width: 1px; height: 24px; background: #282C38; margin: 0 4px;"></div>
       <button class="btn-tactical" id="btn-view-mode" onclick="toggleViewMode()">Modo: Presentación</button>
@@ -1140,14 +1264,209 @@
         </div>
       </section>
 
-      <!-- SLIDE 17: CONTRAPORTADA -->
+      <!-- SLIDE 17: PALETA MODO DÍA -->
       <section class="brand-slide" id="slide-17" data-page="17">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">17</span>
+            <span class="slide-section-title">MODO DÍA // PALETA TAGESLICHT</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 17</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">Paleta Diurna — Porcelana, Acero y Tinta Roja</h2>
+          <p class="lead-text">
+            El modo día no aclara el modo noche: lo invierte de material. El rojo deja de ser luz
+            (nada de <code>box-shadow</code> ni resplandor) y pasa a comportarse como tinta impresa sobre
+            porcelana. El gris acero del equipamiento asume las separaciones y los biseles, y el azul
+            del iris entra como único acento frío, reservado a información y selección — nunca a alertas.
+          </p>
+
+          <div class="day-scope" style="flex: 1; display: flex; flex-direction: column; gap: 14px;">
+            <div class="day-hud-tl"></div>
+            <div class="day-hud-br"></div>
+
+            <div class="four-col-grid" style="flex: 0 0 auto;">
+              <div class="day-card">
+                <div class="day-swatch" style="background: #ECEEF2; border-bottom: 1px solid var(--day-linie);">
+                  <span style="color: var(--day-tinte);">PORZELLAN</span>
+                </div>
+                <div class="day-info">
+                  <div class="row"><span>HEX</span><strong style="color: var(--day-tinte);">#ECEEF2</strong></div>
+                  <div class="row"><span>USO</span><span>Fondo base</span></div>
+                  <div class="row"><span>RATIO</span><span>—</span></div>
+                </div>
+              </div>
+
+              <div class="day-card">
+                <div class="day-swatch" style="background: #9AA3B0;">
+                  <span style="color: #FFF;">STAHLGRAU</span>
+                </div>
+                <div class="day-info">
+                  <div class="row"><span>HEX</span><strong style="color: var(--day-tinte);">#9AA3B0</strong></div>
+                  <div class="row"><span>USO</span><span>Bordes / biseles</span></div>
+                  <div class="row"><span>TEXTO</span><span>#4A505C · 6.97:1</span></div>
+                </div>
+              </div>
+
+              <div class="day-card">
+                <div class="day-swatch" style="background: #A32020;">
+                  <span style="color: #FFF;">ROT GEDÄMPFT</span>
+                </div>
+                <div class="day-info">
+                  <div class="row"><span>HEX</span><strong style="color: var(--day-rot);">#A32020</strong></div>
+                  <div class="row"><span>USO</span><span>Acción / marca</span></div>
+                  <div class="row"><span>RATIO</span><span>6.49:1</span></div>
+                </div>
+              </div>
+
+              <div class="day-card">
+                <div class="day-swatch" style="background: #2F5C90;">
+                  <span style="color: #FFF;">EISBLAU</span>
+                </div>
+                <div class="day-info">
+                  <div class="row"><span>HEX</span><strong style="color: var(--day-eisblau);">#2F5C90</strong></div>
+                  <div class="row"><span>USO</span><span>Info / selección</span></div>
+                  <div class="row"><span>RATIO</span><span>5.92:1</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 14px; flex: 1;">
+              <div style="background: var(--day-surface); border: 1px solid var(--day-linie); box-shadow: var(--day-bevel); padding: 14px; display: flex; flex-direction: column; justify-content: center; gap: 8px;">
+                <span style="font-family: var(--font-tactical); font-size: 13px; font-weight: 700; letter-spacing: 2px; color: var(--day-rot);">GRADIENTE DIURNO DE INTERFAZ</span>
+                <div style="height: 26px; background: linear-gradient(135deg, #A32020 0%, #DFE3EA 78%); border: 1px solid var(--day-linie);"></div>
+                <div style="font-family: var(--font-mono); font-size: 10px; color: var(--day-stahl-tief);">
+                  <code>linear-gradient(135deg, #A32020 0%, #DFE3EA 78%)</code>
+                </div>
+                <span style="font-family: var(--font-tactical); font-size: 13px; font-weight: 700; letter-spacing: 2px; color: var(--day-stahl-tief); margin-top: 6px;">BISEL METÁLICO DIURNO</span>
+                <div style="font-family: var(--font-mono); font-size: 10px; color: var(--day-stahl-tief); line-height: 1.5;">
+                  <code>inset 0 1px 0 rgba(255,255,255,.95)</code><br>
+                  <code>inset 0 -1px 0 rgba(74,80,92,.22)</code>
+                </div>
+              </div>
+
+              <div style="background: var(--day-sunken); border: 1px solid var(--day-linie); padding: 14px; font-size: 11px; line-height: 1.6; color: var(--day-stahl-tief);">
+                <strong style="color: var(--day-rot); font-family: var(--font-tactical); letter-spacing: 1px;">REGLAS DEL MODO DÍA</strong>
+                <ul style="margin-top: 8px; padding-left: 16px; display: flex; flex-direction: column; gap: 5px;">
+                  <li>El rojo nunca lleva resplandor: en día es tinta, no luz.</li>
+                  <li>La luz cae desde arriba — brillo blanco en el borde superior, sombra acero en el inferior.</li>
+                  <li>El azul del iris jamás señala error. Error es siempre rojo.</li>
+                  <li>El fondo no es blanco puro: <code>#ECEEF2</code> evita el deslumbramiento en pantallas grandes.</li>
+                  <li>Los chaflanes y las marcas HUD no cambian de geometría, solo de color.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>DAY MODE PALETTE</span>
+          <span>PAGE 17</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 18: MODO DÍA APLICADO -->
+      <section class="brand-slide" id="slide-18" data-page="18">
+        <div class="slide-header">
+          <div class="slide-meta-left">
+            <span class="slide-num-pill">18</span>
+            <span class="slide-section-title">MODO DÍA // APLICACIÓN Y LECTOR</span>
+          </div>
+          <div class="slide-meta-right">DIARSPEICHER SPEC PÁG 18</div>
+        </div>
+
+        <div class="slide-body">
+          <h2 class="section-heading">La Biblioteca Bajo Luz Diurna</h2>
+
+          <div style="display: grid; grid-template-columns: 1.35fr 0.65fr; gap: 16px; flex: 1;">
+            <!-- Maqueta de aplicación -->
+            <div class="day-scope" style="padding: 0; display: flex; flex-direction: column; overflow: hidden;">
+              <!-- Barra superior -->
+              <div style="height: 40px; background: linear-gradient(180deg, #FFFFFF 0%, var(--day-sunken) 100%); border-bottom: 2px solid var(--day-rot); display: flex; align-items: center; justify-content: space-between; padding: 0 14px;">
+                <span style="font-family: var(--font-display); font-size: 13px; font-weight: 700; letter-spacing: 2px; color: var(--day-tinte);">DIAR<span style="color: var(--day-rot);">SPEICHER</span></span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="day-chip">FTS5 · 559.776</span>
+                  <div style="width: 22px; height: 22px; border-radius: 50%; background: var(--day-rot); border: 1px solid var(--day-rot-tief);"></div>
+                </div>
+              </div>
+
+              <div style="flex: 1; display: flex; min-height: 0;">
+                <!-- Barra lateral -->
+                <div style="width: 132px; background: var(--day-surface); border-right: 1px solid var(--day-linie); padding: 10px 8px; display: flex; flex-direction: column; gap: 4px; font-family: var(--font-tactical); font-size: 11px; font-weight: 600; letter-spacing: 1px;">
+                  <div style="padding: 6px 8px; background: var(--day-rot); color: #FFF; clip-path: polygon(5px 0%, 100% 0%, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0% 100%, 0% 5px);">BIBLIOTECAS</div>
+                  <div style="padding: 6px 8px; color: var(--day-stahl-tief);">SERIES</div>
+                  <div style="padding: 6px 8px; color: var(--day-stahl-tief);">EN CURSO</div>
+                  <div style="padding: 6px 8px; color: var(--day-stahl-tief);">METADATOS</div>
+                  <div style="margin-top: auto; padding: 6px 8px; font-family: var(--font-mono); font-size: 9px; color: var(--day-stahl);">v2.0.0 · /data</div>
+                </div>
+
+                <!-- Rejilla de tomos -->
+                <div style="flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <div class="day-btn">EMPAREJAR</div>
+                    <div class="day-btn steel">FILTRAR</div>
+                    <span style="margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--day-stahl-tief);">ORDEN: AÑADIDO ▼</span>
+                  </div>
+
+                  <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+                    <div class="day-card">
+                      <div style="aspect-ratio: 2/3; background: linear-gradient(160deg, #C8CED8 0%, #9AA3B0 100%); position: relative;">
+                        <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: var(--day-rot);"></div>
+                      </div>
+                      <div style="padding: 6px; font-family: var(--font-tactical); font-size: 10px; font-weight: 700; color: var(--day-tinte);">TOMO 01</div>
+                    </div>
+                    <div class="day-card">
+                      <div style="aspect-ratio: 2/3; background: linear-gradient(160deg, #D6DAE2 0%, #A9B1BD 100%); position: relative;">
+                        <div style="position: absolute; bottom: 0; left: 0; width: 60%; height: 3px; background: var(--day-rot);"></div>
+                      </div>
+                      <div style="padding: 6px; font-family: var(--font-tactical); font-size: 10px; font-weight: 700; color: var(--day-tinte);">TOMO 02</div>
+                    </div>
+                    <div class="day-card">
+                      <div style="aspect-ratio: 2/3; background: linear-gradient(160deg, #C8CED8 0%, #9AA3B0 100%);"></div>
+                      <div style="padding: 6px; font-family: var(--font-tactical); font-size: 10px; font-weight: 700; color: var(--day-stahl-tief);">TOMO 03</div>
+                    </div>
+                    <div class="day-card" style="outline: 2px solid var(--day-eisblau); outline-offset: -2px;">
+                      <div style="aspect-ratio: 2/3; background: linear-gradient(160deg, #D6DAE2 0%, #A9B1BD 100%);"></div>
+                      <div style="padding: 6px; font-family: var(--font-tactical); font-size: 10px; font-weight: 700; color: var(--day-eisblau);">SELECCIONADO</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Lector -->
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <div style="background: #3A3F48; border: 1px solid var(--day-linie); flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px; gap: 8px;">
+                <div style="width: 58%; aspect-ratio: 2/3; background: #F2F3F5; border: 1px solid #2A2E35;"></div>
+                <span style="font-family: var(--font-mono); font-size: 9px; color: #C8CED8; letter-spacing: 1px;">PÁG 014 / 187</span>
+              </div>
+              <p style="font-size: 11px; line-height: 1.55; color: #A6AFBF;">
+                El lector <strong style="color: var(--ds-red-glow);">no tiene modo día</strong>. La página ya es la
+                imagen más clara de la pantalla; rodearla de porcelana la haría flotar y cansaría la vista.
+                En ambos modos el marco del visor se mantiene en gris acero oscuro
+                <code style="font-family: var(--font-mono);">#3A3F48</code>, y solo la barra de controles
+                adopta la paleta del modo activo.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="slide-footer">
+          <span>DAY MODE APPLIED</span>
+          <span>PAGE 18</span>
+        </div>
+      </section>
+
+      <!-- SLIDE 19: CONTRAPORTADA -->
+      <section class="brand-slide" id="slide-19" data-page="19">
         <div class="grid-lines-bg"></div>
         <div class="hud-corner-tl"></div>
         <div class="hud-corner-br"></div>
         <div class="slide-header">
           <div class="slide-meta-left">
-            <span class="slide-num-pill">17</span>
+            <span class="slide-num-pill">19</span>
             <span class="slide-section-title">CONTRAPORTADA // CIERRE OFICIAL</span>
           </div>
           <div class="slide-meta-right">FINAL DE ESPECIFICACIÓN</div>
@@ -1177,7 +1496,7 @@
         <div class="slide-footer">
           <span>END OF DIARSPEICHER MANUAL</span>
           <span>© 2026 ALL RIGHTS RESERVED</span>
-          <span>PAGE 17</span>
+          <span>PAGE 19</span>
         </div>
       </section>
 
@@ -1186,7 +1505,7 @@
 
   <script>
     let currentSlide = 1;
-    const totalSlides = 17;
+    const totalSlides = 19;
     let isContinuousView = false;
 
     function updateDeckDisplay() {
@@ -1204,7 +1523,7 @@
         pageDisplay.innerText = `PÁG ${String(currentSlide).padStart(2, '0')} / ${totalSlides}`;
       } else {
         slides.forEach(slide => slide.style.display = 'flex');
-        pageDisplay.innerText = `TODAS (17)`;
+        pageDisplay.innerText = `TODAS (${totalSlides})`;
       }
     }
 

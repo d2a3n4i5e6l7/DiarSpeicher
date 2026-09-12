@@ -12,9 +12,11 @@ public interface IScannerQueue
 public class ScannerQueue : IScannerQueue
 {
     private readonly Channel<ScanRequest> _channel;
+    private readonly IScanProgressHub _hub;
 
-    public ScannerQueue(int capacity = 100)
+    public ScannerQueue(IScanProgressHub hub, int capacity = 100)
     {
+        _hub = hub;
         var options = new BoundedChannelOptions(capacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
@@ -26,6 +28,8 @@ public class ScannerQueue : IScannerQueue
 
     public ValueTask QueueScanAsync(ScanRequest request, CancellationToken cancellationToken = default)
     {
+        _hub.MarkQueued(request.LibraryId);
+
         return _channel.Writer.WriteAsync(request, cancellationToken);
     }
 

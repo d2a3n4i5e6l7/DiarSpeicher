@@ -380,6 +380,15 @@ public sealed class StumpUpdateLibraryInput
     [JsonPropertyName("name")]
     public string? Name { get; set; }
 
+    /// <summary>
+    /// Mueve la biblioteca a otra carpeta. No copia ni mueve ficheros: reapunta el registro
+    /// a donde ya estan. Las rutas absolutas guardadas en Series y Media se reescriben en la
+    /// misma transaccion, porque el escaner empareja por ruta y sin eso cada serie pasaria a
+    /// "Missing" y el progreso de lectura se quedaria colgando de filas duplicadas.
+    /// </summary>
+    [JsonPropertyName("path")]
+    public string? Path { get; set; }
+
     [JsonPropertyName("description")]
     public string? Description { get; set; }
 
@@ -469,4 +478,77 @@ public sealed class StumpUploadFileInput
     public Stream Content { get; set; } = Stream.Null;
 }
 
+/// <summary>Estado de un escaneo, tal y como viaja por SSE y por el sondeo de respaldo.</summary>
+public sealed class StumpScanStatusDto
+{
+    [JsonPropertyName("libraryId")]
+    public string LibraryId { get; set; } = string.Empty;
 
+    [JsonPropertyName("phase")]
+    public string Phase { get; set; } = string.Empty;
+
+    [JsonPropertyName("completedSeries")]
+    public int CompletedSeries { get; set; }
+
+    [JsonPropertyName("totalSeries")]
+    public int TotalSeries { get; set; }
+
+    [JsonPropertyName("currentSeries")]
+    public string? CurrentSeries { get; set; }
+
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
+
+    [JsonPropertyName("percentage")]
+    public double Percentage { get; set; }
+
+    [JsonPropertyName("elapsedSeconds")]
+    public int ElapsedSeconds { get; set; }
+
+    /// <summary>Null mientras no haya una serie terminada: sin muestras no hay estimacion.</summary>
+    [JsonPropertyName("etaSeconds")]
+    public int? EtaSeconds { get; set; }
+
+    [JsonPropertyName("finished")]
+    public bool Finished { get; set; }
+
+    /// <summary>Esperando turno: hay otro escaneo delante en la cola.</summary>
+    [JsonPropertyName("queued")]
+    public bool Queued { get; set; }
+}
+
+/// <summary>Una serie del indice cuya carpeta ya no esta en el disco.</summary>
+public sealed class StumpMissingSeriesDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = string.Empty;
+
+    [JsonPropertyName("volumeCount")]
+    public int VolumeCount { get; set; }
+
+    /// <summary>Sesiones de lectura que se perderian al purgarla.</summary>
+    [JsonPropertyName("readingSessions")]
+    public int ReadingSessions { get; set; }
+}
+
+public sealed class StumpMissingReportDto
+{
+    [JsonPropertyName("series")]
+    public List<StumpMissingSeriesDto> Series { get; set; } = [];
+
+    /// <summary>Tomos perdidos cuya serie si sigue en disco.</summary>
+    [JsonPropertyName("orphanVolumes")]
+    public int OrphanVolumes { get; set; }
+
+    [JsonPropertyName("totalVolumes")]
+    public int TotalVolumes { get; set; }
+
+    [JsonPropertyName("totalReadingSessions")]
+    public int TotalReadingSessions { get; set; }
+}

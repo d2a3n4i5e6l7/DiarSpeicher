@@ -42,7 +42,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 					justifyContent: "center",
 					gap: 2,
 					p: 4,
-					backgroundColor: "#050508",
+					backgroundColor: "var(--ds-bg)",
 					textAlign: "center",
 				}}
 			>
@@ -52,7 +52,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 						fontSize: "20px",
 						fontWeight: 900,
 						letterSpacing: "2px",
-						color: "#FF2E2E",
+						color: "var(--ds-red-glow)",
 					}}
 				>
 					FALLO DEL NODO
@@ -62,7 +62,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 					sx={{
 						fontFamily: "'JetBrains Mono', monospace",
 						fontSize: "12px",
-						color: "#A3ABB8",
+						color: "var(--ds-text-2)",
 						maxWidth: 700,
 						wordBreak: "break-word",
 					}}
@@ -75,7 +75,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 					onClick={() => {
 						window.location.reload();
 					}}
-					sx={{ backgroundColor: "#C21818", mt: 1 }}
+					sx={{ backgroundColor: "var(--ds-red)", mt: 1 }}
 				>
 					RECARGAR
 				</Button>

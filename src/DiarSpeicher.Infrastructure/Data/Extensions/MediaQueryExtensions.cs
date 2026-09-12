@@ -20,13 +20,11 @@ public static class MediaQueryExtensions
             return q;
         }
 
-        // apply_library_hidden_filter: oculta libros de bibliotecas excluidas
         if (user.ExcludedLibraryIds.Count > 0)
         {
             q = q.Where(m => m.Series == null || m.Series.LibraryId == null || !user.ExcludedLibraryIds.Contains(m.Series.LibraryId));
         }
 
-        // apply_age_restriction_filter: control parental exacto de Stump
         if (user.AgeRestriction.HasValue)
         {
             q = ApplyMediaAgeFilter(q, user.AgeRestriction.Value, user.RestrictOnUnset);

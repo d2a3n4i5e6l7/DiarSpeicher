@@ -1,4 +1,15 @@
-import { Alert, Box, Button, Chip, CircularProgress, Stack, Tab, Tabs, Typography } from "@mui/material";
+import {
+	Alert,
+	Box,
+	Button,
+	Chip,
+	CircularProgress,
+	LinearProgress,
+	Stack,
+	Tab,
+	Tabs,
+	Typography,
+} from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import SyncIcon from "@mui/icons-material/Sync";
 import EditIcon from "@mui/icons-material/Edit";
@@ -6,6 +17,8 @@ import LibraryBooksIcon from "@mui/icons-material/LibraryBooks";
 import { useEffect, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import HudFrame from "../components/HudFrame";
+import MissingEntriesDialog from "../components/MissingEntriesDialog";
+import { useScanProgress, formatDuration, scanLabel } from "../catalog/useScanProgress";
 import MediaCard from "../components/MediaCard";
 import CatalogToolbar, { type SortDirection } from "../components/CatalogToolbar";
 import {
@@ -13,6 +26,10 @@ import {
 	mediaApi,
 	seriesApi,
 	MAX_PAGE_SIZE,
+	type ScanStatus,
+	type MissingReport,
+	filesystemApi,
+	type PreviewSeries,
 	type LibraryItem,
 	type MediaItem,
 	type SeriesItem,
@@ -48,7 +65,7 @@ function Stat({ label, value }: Readonly<{ label: string; value: string }>) {
 			>
 				{label}
 			</Typography>
-			<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "16px", color: "#FFFFFF" }}>
+			<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "16px", color: "var(--ds-text-strong)" }}>
 				{value}
 			</Typography>
 		</Box>
@@ -65,6 +82,20 @@ export default function LibraryDetailPage() {
 	const [seriesDir, setSeriesDir] = useState<SortDirection>("asc");
 	const [mediaSort, setMediaSort] = useState("createdAt");
 	const [mediaDir, setMediaDir] = useState<SortDirection>("desc");
+	const [reloadToken, setReloadToken] = useState(0);
+
+	const progress = useScanProgress(id, true);
+
+	// La clave lleva el numero de series ya hechas. El progreso baja por SSE, pero las
+	// series y los tomos se leen de la base de datos, asi que la recarga se engancha a que
+	// haya algo nuevo que enseñar en vez de a un reloj. El estado final cuenta aparte:
+	// el ultimo lote de tomos entra despues del evento de la ultima serie.
+	const requestKey = [
+		id,
+		String(reloadToken),
+		String(progress?.completedSeries ?? 0),
+		progress?.finished ? "done" : "live",
+	].join("#");
 
 	useEffect(() => {
 		let mounted = true;
@@ -90,26 +121,53 @@ export default function LibraryDetailPage() {
 			);
 
 			if (mounted) {
-				setLoaded({ key: id, library, series, volumes: perSeries.flat() });
+				setLoaded({ key: requestKey, library, series, volumes: perSeries.flat() });
 			}
 		};
 
 		void load().catch((err: unknown) => {
 			if (mounted) {
-				setLoaded({ key: id, error: err instanceof Error ? err.message : "No se pudo cargar la biblioteca." });
+				setLoaded({ key: requestKey, error: err instanceof Error ? err.message : "No se pudo cargar la biblioteca." });
 			}
 		});
 
 		return () => {
 			mounted = false;
 		};
-	}, [id]);
+	}, [id, requestKey]);
 
-	const fresh = loaded?.key === id ? loaded : null;
+	const fresh = loaded?.key === requestKey ? loaded : null;
 	const loading = fresh === null;
 	const library = fresh?.library ?? null;
 	const series = fresh?.series ?? EMPTY_SERIES;
 	const volumes = fresh?.volumes ?? EMPTY_VOLUMES;
+	// El estado de escaneo vive en memoria, no en la base de datos: si el proceso muere,
+	// la verdad es que ya no escanea nada, y una fila persistida mentiria para siempre.
+	const scanning = progress !== null && !progress.finished;
+
+	// Se relee cuando termina un escaneo: es cuando aparecen las entradas perdidas.
+	const [missing, setMissing] = useState<MissingReport | null>(null);
+	const [missingOpen, setMissingOpen] = useState(false);
+	const [purging, setPurging] = useState(false);
+
+	useEffect(() => {
+		let cancelled = false;
+		librariesApi.missing(id).then(
+			(report) => {
+				if (!cancelled) setMissing(report);
+			},
+			() => {
+				if (!cancelled) setMissing(null);
+			},
+		);
+
+		return () => {
+			cancelled = true;
+		};
+	}, [id, requestKey]);
+
+	const missingCount = (missing?.series.length ?? 0) + (missing?.orphanVolumes ?? 0);
+	const pending = usePendingSeries(library, scanning, series);
 
 	if (loading) {
 		return (
@@ -141,7 +199,7 @@ export default function LibraryDetailPage() {
 				component={RouterLink}
 				to="/libraries"
 				startIcon={<ArrowBackIcon />}
-				sx={{ color: DS.muted, mb: 2, "&:hover": { color: "#FFFFFF" } }}
+				sx={{ color: DS.muted, mb: 2, "&:hover": { color: "var(--ds-text-strong)" } }}
 			>
 				BIBLIOTECAS
 			</Button>
@@ -156,6 +214,23 @@ export default function LibraryDetailPage() {
 				}}
 			>
 				<HudFrame />
+				{scanning && <Box className="ds-scanline" />}
+				{scanning && progress && <ScanBanner progress={progress} />}
+
+				{!scanning && missingCount > 0 && (
+					<Alert
+						severity="warning"
+						sx={{ mt: 2 }}
+						action={
+							<Button color="inherit" size="small" onClick={() => { setMissingOpen(true); }}>
+								REVISAR
+							</Button>
+						}
+					>
+						{missing?.series.length ?? 0} series y {missing?.totalVolumes ?? 0} tomos siguen en el índice pero
+						ya no están en el disco.
+					</Alert>
+				)}
 
 				<Stack
 					direction={{ xs: "column", md: "row" }}
@@ -171,7 +246,7 @@ export default function LibraryDetailPage() {
 									display: "flex",
 									alignItems: "center",
 									justifyContent: "center",
-									background: "linear-gradient(145deg, #1C0303 0%, #0D0E12 100%)",
+									background: "linear-gradient(145deg, var(--ds-red-deep) 0%, var(--ds-bg-deep) 100%)",
 									border: `1px solid ${DS.borderRed}`,
 								}}
 							>
@@ -186,7 +261,7 @@ export default function LibraryDetailPage() {
 										fontWeight: 700,
 										letterSpacing: "1.5px",
 										textTransform: "uppercase",
-										color: "#FFFFFF",
+										color: "var(--ds-text-strong)",
 										lineHeight: 1.1,
 									}}
 								>
@@ -202,7 +277,7 @@ export default function LibraryDetailPage() {
 
 						{library.description && (
 							<Typography
-								sx={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", color: "#A3ABB8", mt: 1.5, maxWidth: 700 }}
+								sx={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", color: "var(--ds-text-2)", mt: 1.5, maxWidth: 700 }}
 							>
 								{library.description}
 							</Typography>
@@ -226,14 +301,17 @@ export default function LibraryDetailPage() {
 					<Stack direction="row" spacing={1.5} sx={{ flexShrink: 0 }}>
 						<Button
 							startIcon={<SyncIcon />}
+							disabled={scanning}
 							onClick={() => {
-								void librariesApi.scan(library.id);
+								void librariesApi.scan(library.id).then(() => {
+									setReloadToken((prev) => prev + 1);
+								});
 							}}
 							sx={{
-								color: "#A3ABB8",
+								color: "var(--ds-text-2)",
 								border: `1px solid ${DS.border}`,
 								backgroundColor: DS.bgSunken,
-								"&:hover": { borderColor: DS.redGlow, color: "#FFFFFF" },
+								"&:hover": { borderColor: DS.redGlow, color: "var(--ds-text-strong)" },
 							}}
 						>
 							ESCANEAR
@@ -243,10 +321,10 @@ export default function LibraryDetailPage() {
 							to="/libraries"
 							startIcon={<EditIcon />}
 							sx={{
-								color: "#A3ABB8",
+								color: "var(--ds-text-2)",
 								border: `1px solid ${DS.border}`,
 								backgroundColor: DS.bgSunken,
-								"&:hover": { borderColor: DS.redGlow, color: "#FFFFFF" },
+								"&:hover": { borderColor: DS.redGlow, color: "var(--ds-text-strong)" },
 							}}
 						>
 							CONFIGURAR
@@ -273,7 +351,7 @@ export default function LibraryDetailPage() {
 						fontWeight: 700,
 						letterSpacing: "1.5px",
 						color: DS.muted,
-						"&.Mui-selected": { color: "#FFFFFF" },
+						"&.Mui-selected": { color: "var(--ds-text-strong)" },
 					},
 					"& .MuiTabs-indicator": { backgroundColor: DS.red, height: 2 },
 				}}
@@ -281,6 +359,27 @@ export default function LibraryDetailPage() {
 				<Tab label={`Series (${String(series.length)})`} />
 				<Tab label={`Tomos (${String(volumes.length)})`} />
 			</Tabs>
+
+			{missingOpen && missing && (
+				<MissingEntriesDialog
+					report={missing}
+					working={purging}
+					onClose={() => { setMissingOpen(false); }}
+					onPurge={() => {
+						setPurging(true);
+						librariesApi
+							.purgeMissing(id)
+							.then(() => {
+								setMissingOpen(false);
+								setReloadToken((prev) => prev + 1);
+							})
+							.finally(() => {
+								setPurging(false);
+							})
+							.catch(() => undefined);
+					}}
+				/>
+			)}
 
 			{tab === 0 ? (
 				<>
@@ -305,7 +404,17 @@ export default function LibraryDetailPage() {
 								subtitle={`${String(item.mediaCount)} TOMOS`}
 								coverUrl={seriesApi.thumbnailUrl(item.id)}
 								width="100%"
+								// Solo la que el escaner esta leyendo ahora: encenderlas todas
+								// diria menos, porque no señalaria donde va.
+								scanning={scanning && item.name === progress?.currentSeries}
 							/>
+						))}
+
+						{/* Huecos de lo que el escaner todavia no ha creado. Salen del mismo ensayo
+						    que la vista previa del formulario, asi que la rejilla no esta vacia
+						    mientras se indexa. */}
+						{pending.map((item) => (
+							<PendingCard key={item.path} name={item.name} volumeCount={item.volumeCount} />
 						))}
 					</Box>
 				</>
@@ -338,6 +447,119 @@ export default function LibraryDetailPage() {
 					</Box>
 				</>
 			)}
+		</Box>
+	);
+}
+
+/** Lo que el escaner esta haciendo ahora mismo, con lo que falta si se puede estimar. */
+function ScanBanner({ progress }: Readonly<{ progress: ScanStatus }>) {
+	const known = progress.totalSeries > 0;
+
+	return (
+		<Box sx={{ mt: 2, pt: 2, borderTop: `1px solid ${DS.borderSoft}` }}>
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 1, mb: 1 }}
+			>
+				<Typography
+					noWrap
+					sx={{ fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, fontSize: "13px", letterSpacing: "1px", color: DS.redGlow }}
+				>
+					{scanLabel(progress)}
+				</Typography>
+
+				<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: DS.muted }}>
+					{known
+						? `${String(progress.completedSeries)} / ${String(progress.totalSeries)} series`
+						: "explorando el disco"}
+					{progress.etaSeconds !== undefined && ` · quedan ~${formatDuration(progress.etaSeconds)}`}
+					{progress.etaSeconds === undefined && !progress.queued && (
+						<>
+							{" · calculando ETA"}
+							<Box component="span" className="ds-dots">
+								<span>.</span>
+								<span>.</span>
+								<span>.</span>
+							</Box>
+						</>
+					)}
+				</Typography>
+			</Stack>
+
+			<LinearProgress
+				variant={known ? "determinate" : "indeterminate"}
+				value={progress.percentage}
+				sx={{ height: 4 }}
+			/>
+		</Box>
+	);
+}
+
+/**
+ * Series que el ensayo del disco ve pero la base de datos todavia no. Se pide una sola vez
+ * al arrancar el escaneo: recorrer el disco cuesta y el resultado no cambia mientras dura.
+ */
+function usePendingSeries(library: LibraryItem | null, scanning: boolean, existing: SeriesItem[]) {
+	const [expected, setExpected] = useState<{ key: string; series: PreviewSeries[] } | null>(null);
+	const path = library?.path ?? "";
+	const pattern = library?.config?.libraryPattern ?? "SeriesBased";
+	const key = scanning ? `${path}#${pattern}` : "";
+
+	useEffect(() => {
+		if (!key || !path) return;
+
+		let cancelled = false;
+		filesystemApi.preview(path, pattern).then(
+			(data) => {
+				if (!cancelled) setExpected({ key, series: data.series });
+			},
+			() => {
+				if (!cancelled) setExpected({ key, series: [] });
+			},
+		);
+
+		return () => {
+			cancelled = true;
+		};
+	}, [key, path, pattern]);
+
+	if (!scanning || expected?.key !== key) return EMPTY_PENDING;
+
+	const done = new Set(existing.map((item) => item.name));
+
+	return expected.series.filter((item) => !done.has(item.name));
+}
+
+const EMPTY_PENDING: PreviewSeries[] = [];
+
+/** Hueco de una serie aun sin indexar: sin portada porque todavia no se ha abierto ningun tomo. */
+function PendingCard({ name, volumeCount }: Readonly<{ name: string; volumeCount: number }>) {
+	return (
+		<Box sx={{ opacity: 0.55 }}>
+			<Box
+				sx={{
+					position: "relative",
+					aspectRatio: "2 / 3",
+					backgroundImage: DS.gradientCard,
+					border: `1px dashed ${DS.border}`,
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "center",
+				}}
+			>
+				<Box className="ds-scanline" />
+				<LibraryBooksIcon sx={{ fontSize: 30, color: DS.borderRed }} />
+			</Box>
+			<Typography
+				noWrap
+				sx={{ mt: 1, fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, fontSize: "13px", color: DS.muted }}
+			>
+				{name}
+			</Typography>
+			<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: DS.subtle }}>
+				{volumeCount} TOMOS · EN COLA
+			</Typography>
 		</Box>
 	);
 }

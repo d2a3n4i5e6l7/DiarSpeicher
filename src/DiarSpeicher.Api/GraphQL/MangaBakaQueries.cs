@@ -6,7 +6,7 @@ namespace DiarSpeicher.Api.GraphQL;
 /// <summary>
 /// El catalogo externo entra en el esquema que ya existe, junto a Series, Media y Library.
 /// El frontend no aprende un protocolo nuevo para esto ni habla con mangabaka.org: pregunta
-/// al mismo sitio que para todo lo demas.
+/// al mismo sitio que para el resto.
 /// </summary>
 [ExtendObjectType<Query>]
 public class MangaBakaQueries

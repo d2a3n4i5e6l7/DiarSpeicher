@@ -113,7 +113,7 @@ export default function SeriesCoverDialog({ open, seriesId, onClose, onChanged }
 							fontWeight: 700,
 							letterSpacing: "1px",
 							color: DS.muted,
-							"&.Mui-selected": { color: "#FFFFFF" },
+							"&.Mui-selected": { color: "var(--ds-text-strong)" },
 						},
 						"& .MuiTabs-indicator": { backgroundColor: DS.red, height: 2 },
 					}}

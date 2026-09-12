@@ -72,7 +72,6 @@ export default function ReaderPage() {
 		pageRef.current = page;
 	}, [page]);
 
-	// --- Carga del tomo y de los valores por defecto de su biblioteca ---------
 	useEffect(() => {
 		let mounted = true;
 
@@ -106,7 +105,6 @@ export default function ReaderPage() {
 		};
 	}, [mediaId]);
 
-	// --- Persistencia del progreso -------------------------------------------
 	const pushProgress = useCallback(
 		(value: number) => {
 			if (!mediaId || totalPages <= 0) return;
@@ -149,7 +147,6 @@ export default function ReaderPage() {
 		};
 	}, [pushProgress]);
 
-	// --- Precarga -------------------------------------------------------------
 	useEffect(() => {
 		if (!media || totalPages <= 0) return;
 		for (let offset = 1; offset <= PRELOAD_AHEAD; offset += 1) {
@@ -160,7 +157,6 @@ export default function ReaderPage() {
 		}
 	}, [media, page, totalPages]);
 
-	// --- Interfaz que se esconde sola ----------------------------------------
 	const wakeUi = useCallback(() => {
 		setUiVisible(true);
 		if (hideTimer.current !== null) {
@@ -178,7 +174,6 @@ export default function ReaderPage() {
 		};
 	}, []);
 
-	// --- Navegación -----------------------------------------------------------
 	const goTo = useCallback(
 		(next: number) => {
 			if (totalPages <= 0) return;
@@ -248,7 +243,6 @@ export default function ReaderPage() {
 		return () => window.removeEventListener("keydown", onKey);
 	}, [goNext, goPrev, rtl, toggleFullscreen, exit]);
 
-	// --- Gestos táctiles ------------------------------------------------------
 	const onTouchStart = (e: React.TouchEvent) => {
 		const t = e.touches[0];
 		touchStart.current = { x: t.clientX, y: t.clientY };
@@ -273,7 +267,6 @@ export default function ReaderPage() {
 		else goPrev();
 	};
 
-	// --- Render de páginas ----------------------------------------------------
 	const rememberRatio = (pageNumber: number, img: HTMLImageElement) => {
 		if (img.naturalWidth <= 0 || img.naturalHeight <= 0) return;
 		const ratio = img.naturalWidth / img.naturalHeight;
@@ -354,7 +347,7 @@ export default function ReaderPage() {
 
 	if (loading) {
 		return (
-			<Box sx={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#000000" }}>
+			<Box className="ds-force-dark" sx={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#000000" }}>
 				<CircularProgress size={32} thickness={5} />
 			</Box>
 		);
@@ -363,6 +356,7 @@ export default function ReaderPage() {
 	if (error || !media) {
 		return (
 			<Box
+				className="ds-force-dark"
 				sx={{
 					height: "100vh",
 					display: "flex",
@@ -421,6 +415,7 @@ export default function ReaderPage() {
 	return (
 		<Box
 			ref={containerRef}
+			className="ds-force-dark"
 			onMouseMove={wakeUi}
 			onTouchStart={onTouchStart}
 			onTouchEnd={onTouchEnd}

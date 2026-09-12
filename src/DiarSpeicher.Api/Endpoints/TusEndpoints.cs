@@ -260,7 +260,6 @@ public static class TusEndpoints
             return Results.StatusCode(StatusCodes.Status409Conflict);
         }
 
-        // Escritura directa al offset indicado con buffer optimizado de 80 KB
         await using (var fs = new FileStream(partPath, FileMode.Open, FileAccess.Write, FileShare.None, 81920, useAsync: true))
         {
             fs.Seek(requestedOffset, SeekOrigin.Begin);
@@ -271,7 +270,6 @@ public static class TusEndpoints
         var updatedOffset = fileInfo.Length;
         ctx.Response.Headers.Append(HeaderUploadOffset, updatedOffset.ToString());
 
-        // Comprobar si se completó la subida total
         if (updatedOffset >= meta.TotalBytes)
         {
             var destinationExisted = File.Exists(meta.FinalPath);
@@ -408,6 +406,8 @@ public static class TusEndpoints
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Fichero bloqueado o sin permiso: el temporal se queda, que es preferible a
+            // tapar el error que provoco la limpieza.
         }
     }
 

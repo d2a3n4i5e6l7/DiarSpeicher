@@ -17,7 +17,7 @@ import {
 } from "@mui/material";
 import PeopleIcon from "@mui/icons-material/People";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
-import CloudUploadIcon from "@mui/icons-material/CloudUpload";
+import RestoreIcon from "@mui/icons-material/Restore";
 import LibraryBooksIcon from "@mui/icons-material/LibraryBooks";
 import HomeIcon from "@mui/icons-material/Home";
 import CollectionsBookmarkIcon from "@mui/icons-material/CollectionsBookmark";
@@ -40,7 +40,7 @@ const DRAWER_WIDTH = 250;
 const ICONS: Record<string, typeof PeopleIcon> = {
 	People: PeopleIcon,
 	AdminPanelSettings: AdminPanelSettingsIcon,
-	CloudUpload: CloudUploadIcon,
+	Restore: RestoreIcon,
 	LibraryBooks: LibraryBooksIcon,
 	Home: HomeIcon,
 	CollectionsBookmark: CollectionsBookmarkIcon,
@@ -72,9 +72,9 @@ export default function AppLayout() {
 					fontFamily: "'JetBrains Mono', monospace",
 					fontSize: "11px",
 					fontWeight: 700,
-					backgroundColor: "#11131C",
-					color: user.is_admin ? "#FF2E2E" : "#F0F2F6",
-					border: `1px solid ${user.is_admin ? "#C21818" : "#282C38"}`,
+					backgroundColor: "var(--ds-bg-panel)",
+					color: user.is_admin ? "var(--ds-red-glow)" : "var(--ds-platinum)",
+					border: `1px solid ${user.is_admin ? "var(--ds-red)" : "var(--ds-border)"}`,
 					borderRadius: "2px",
 					mr: 1.5,
 					px: 0.5,
@@ -96,14 +96,14 @@ export default function AppLayout() {
 				display: "flex",
 				flexDirection: "column",
 				height: "100%",
-				backgroundColor: "#0A0B0E",
-				color: "#F0F2F6",
+				backgroundColor: "var(--ds-bg-sunken)",
+				color: "var(--ds-platinum)",
 			}}
 		>
 			<Toolbar
 				sx={{
 					px: 2.5,
-					borderBottom: "1px solid #232733",
+					borderBottom: "1px solid var(--ds-border-head)",
 					display: "flex",
 					alignItems: "center",
 					justifyContent: "flex-start",
@@ -123,7 +123,7 @@ export default function AppLayout() {
 									fontWeight: 700,
 									fontSize: "11px",
 									letterSpacing: "2px",
-									color: "#636B7C",
+									color: "var(--ds-subtle)",
 									textTransform: "uppercase",
 								}}
 							>
@@ -149,14 +149,14 @@ export default function AppLayout() {
 											py: 1,
 											px: 1.5,
 											transition: "all 0.15s ease",
-											borderLeft: isSelected ? "3px solid #C21818" : "3px solid transparent",
-											backgroundColor: isSelected ? "rgba(194, 24, 24, 0.12) !important" : "transparent",
-											color: isSelected ? "#FFFFFF" : "#A3ABB8",
+											borderLeft: isSelected ? "3px solid var(--ds-red)" : "3px solid transparent",
+											backgroundColor: isSelected ? "rgba(var(--ds-red-rgb), 0.12) !important" : "transparent",
+											color: isSelected ? "var(--ds-text-strong)" : "var(--ds-text-2)",
 											"&:hover": {
-												backgroundColor: "rgba(194, 24, 24, 0.08)",
-												color: "#FFFFFF",
+												backgroundColor: "rgba(var(--ds-red-rgb), 0.08)",
+												color: "var(--ds-text-strong)",
 												"& .MuiListItemIcon-root": {
-													color: "#FF2E2E",
+													color: "var(--ds-red-glow)",
 												},
 											},
 										}}
@@ -164,7 +164,7 @@ export default function AppLayout() {
 										<ListItemIcon
 											sx={{
 												minWidth: 36,
-												color: isSelected ? "#FF2E2E" : "#7B8496",
+												color: isSelected ? "var(--ds-red-glow)" : "var(--ds-subtle)",
 												transition: "color 0.15s ease",
 											}}
 										>
@@ -192,24 +192,24 @@ export default function AppLayout() {
 				))}
 			</Box>
 
-			<Divider sx={{ borderColor: "#1C1F28" }} />
+			<Divider sx={{ borderColor: "var(--ds-border-soft)" }} />
 
-			<Box sx={{ p: 2, backgroundColor: "#07080A" }}>
+			<Box sx={{ p: 2, backgroundColor: "var(--ds-bg-deep)" }}>
 				<Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
 					<Box
 						sx={{
 							width: 6,
 							height: 6,
 							borderRadius: "50%",
-							backgroundColor: "#22C55E",
-							boxShadow: "0 0 6px #22C55E",
+							backgroundColor: "var(--ds-ok)",
+							boxShadow: "0 0 6px var(--ds-ok)",
 						}}
 					/>
 					<Typography
 						sx={{
 							fontFamily: "'JetBrains Mono', monospace",
 							fontSize: "10px",
-							color: "#8E95A5",
+							color: "var(--ds-muted)",
 						}}
 					>
 						NODE: ONLINE
@@ -220,7 +220,7 @@ export default function AppLayout() {
 					sx={{
 						fontFamily: "'JetBrains Mono', monospace",
 						fontSize: "10px",
-						color: "#636B7C",
+						color: "var(--ds-subtle)",
 						display: "block",
 						overflow: "hidden",
 						textOverflow: "ellipsis",
@@ -234,13 +234,13 @@ export default function AppLayout() {
 	);
 
 	return (
-		<Box sx={{ display: "flex", height: "100vh", overflow: "hidden", backgroundColor: "#050508" }}>
+		<Box sx={{ display: "flex", height: "100vh", overflow: "hidden", backgroundColor: "var(--ds-bg)" }}>
 			<AppBar
 				position="fixed"
 				elevation={0}
 				sx={{
-					borderBottom: "1px solid #232733",
-					background: "linear-gradient(90deg, #1C0303 0%, #050508 100%)",
+					borderBottom: "1px solid var(--ds-border-head)",
+					background: "linear-gradient(90deg, var(--ds-red-deep) 0%, var(--ds-bg) 100%)",
 					width: { md: `calc(100% - ${DRAWER_WIDTH}px)` },
 					ml: { md: `${DRAWER_WIDTH}px` },
 					zIndex: (appBarTheme) => appBarTheme.zIndex.drawer + 1,
@@ -251,7 +251,7 @@ export default function AppLayout() {
 						<IconButton
 							edge="start"
 							onClick={() => setMobileOpen(true)}
-							sx={{ mr: 1.5, color: "#F0F2F6" }}
+							sx={{ mr: 1.5, color: "var(--ds-platinum)" }}
 						>
 							<MenuIcon />
 						</IconButton>
@@ -266,7 +266,7 @@ export default function AppLayout() {
 								fontSize: "18px",
 								letterSpacing: "1.5px",
 								textTransform: "uppercase",
-								color: "#FFFFFF",
+								color: "var(--ds-text-strong)",
 							}}
 						>
 							{currentTitle}
@@ -275,8 +275,8 @@ export default function AppLayout() {
 							sx={{
 								px: 1,
 								py: 0.25,
-								backgroundColor: "#11131C",
-								border: "1px solid #282C38",
+								backgroundColor: "var(--ds-bg-panel)",
+								border: "1px solid var(--ds-border)",
 								borderRadius: "2px",
 								display: { xs: "none", sm: "block" },
 							}}
@@ -285,7 +285,7 @@ export default function AppLayout() {
 								sx={{
 									fontFamily: "'JetBrains Mono', monospace",
 									fontSize: "10px",
-									color: "#8E95A5",
+									color: "var(--ds-muted)",
 								}}
 							>
 								DS-NODE-01
@@ -301,12 +301,12 @@ export default function AppLayout() {
 						<IconButton
 							onClick={toggle}
 							sx={{
-								color: "#A3ABB8",
-								border: "1px solid #282C38",
+								color: "var(--ds-text-2)",
+								border: "1px solid var(--ds-border)",
 								borderRadius: "2px",
 								p: 0.75,
 								mr: 1,
-								"&:hover": { color: "#FFFFFF", borderColor: "#C21818" },
+								"&:hover": { color: "var(--ds-text-strong)", borderColor: "var(--ds-red)" },
 							}}
 						>
 							{themeToggleIcon}
@@ -320,11 +320,11 @@ export default function AppLayout() {
 								void logout();
 							}}
 							sx={{
-								color: "#A3ABB8",
-								border: "1px solid #282C38",
+								color: "var(--ds-text-2)",
+								border: "1px solid var(--ds-border)",
 								borderRadius: "2px",
 								p: 0.75,
-								"&:hover": { color: "#FF2E2E", borderColor: "#C21818", backgroundColor: "rgba(194, 24, 24, 0.1)" },
+								"&:hover": { color: "var(--ds-red-glow)", borderColor: "var(--ds-red)", backgroundColor: "rgba(var(--ds-red-rgb), 0.1)" },
 							}}
 						>
 							<LogoutIcon fontSize="small" />
@@ -343,7 +343,7 @@ export default function AppLayout() {
 						"& .MuiDrawer-paper": {
 							width: DRAWER_WIDTH,
 							boxSizing: "border-box",
-							borderRight: "1px solid #232733",
+							borderRight: "1px solid var(--ds-border-head)",
 						},
 					}}
 				>
@@ -362,29 +362,34 @@ export default function AppLayout() {
 					flexDirection: "column",
 					overflow: "hidden",
 					position: "relative",
-					backgroundColor: "#050508",
+					backgroundColor: "var(--ds-bg)",
 					/* Rejilla tactica y halo carmesi: fijos, no arrastran con el scroll. */
 					"&::before": {
 						content: '""',
 						position: "absolute",
 						inset: 0,
 						backgroundImage:
-							"linear-gradient(to right, rgba(194, 24, 24, 0.03) 1px, transparent 1px), linear-gradient(to bottom, rgba(194, 24, 24, 0.03) 1px, transparent 1px)",
+							"linear-gradient(to right, var(--ds-grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--ds-grid-line) 1px, transparent 1px)",
 						backgroundSize: "40px 40px",
 						pointerEvents: "none",
 						zIndex: 0,
 					},
+					/* El halo se cierra en el mismo rojo con alfa 0, no en `transparent`:
+					 * `transparent` es rgba(0,0,0,0) y al interpolar deja un aro gris
+					 * que Firefox, que no aplica dithering, dibuja como un circulo.
+					 * La capa de ruido remata las bandas que queden. */
 					"&::after": {
 						content: '""',
 						position: "absolute",
 						inset: 0,
 						backgroundImage:
-							"radial-gradient(circle at 50% 0%, rgba(194, 24, 24, 0.08) 0%, transparent 55%)",
+							"radial-gradient(ellipse 130% 80% at 50% -20%, rgba(var(--ds-red-rgb), 0.10) 0%, rgba(var(--ds-red-rgb), 0.065) 26%, rgba(var(--ds-red-rgb), 0.035) 48%, rgba(var(--ds-red-rgb), 0.014) 68%, rgba(var(--ds-red-rgb), 0) 100%)",
 						pointerEvents: "none",
 						zIndex: 0,
 					},
 				}}
 			>
+				<Box className="ds-noise" />
 				<Toolbar sx={{ minHeight: "64px !important" }} />
 				<Box
 					sx={{

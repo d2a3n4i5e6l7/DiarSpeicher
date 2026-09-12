@@ -29,10 +29,10 @@ export const NAV_GROUPS: NavGroup[] = [
 		title: "// SECTOR CONTROL",
 		items: [
 			{ path: "/libraries", label: "Bibliotecas", icon: "LibraryBooks", section: "admin" },
-			{ path: "/upload", label: "Subida de Ficheros", icon: "CloudUpload", section: "admin" },
 			{ path: "/users", label: "Usuarios del Reino", icon: "People", section: "admin" },
 			{ path: "/roles", label: "Roles y Permisos", icon: "AdminPanelSettings", section: "admin" },
 			{ path: "/metadata", label: "Metadata Externa", icon: "Storage", section: "admin" },
+			{ path: "/trash", label: "Restaurar", icon: "Restore", section: "admin" },
 		],
 	},
 ];

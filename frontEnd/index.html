@@ -7,8 +7,24 @@
 		<title>DIARSPEICHER · Iron Blood Archive</title>
 		<!-- Fuentes locales autónomas (sin llamadas externas) -->
 		<link rel="stylesheet" href="./fonts/fonts.css" />
+		<script>
+			/* Pinta el fondo antes de que monte React. Sin esto el modo dia
+			   arranca con un fogonazo negro en cada recarga. */
+			(function () {
+				var dark = { bg: "#050508", fg: "#F0F2F6" };
+				var day = { bg: "#ECEEF2", fg: "#16181D" };
+				var c = dark;
+				try {
+					if (localStorage.getItem("diarspeicher-theme-mode") === "light") c = day;
+				} catch (e) {
+					/* storage bloqueado: se queda en noche */
+				}
+				document.documentElement.style.backgroundColor = c.bg;
+				document.documentElement.style.color = c.fg;
+			})();
+		</script>
 	</head>
-	<body style="background-color: #050508; color: #F0F2F6; margin: 0;">
+	<body style="margin: 0">
 		<div id="root"></div>
 		<script type="module" src="/src/main.tsx"></script>
 	</body>

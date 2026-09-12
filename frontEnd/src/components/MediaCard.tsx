@@ -15,13 +15,24 @@ interface Props {
 	badge?: string;
 	/** Ancho fijo del carrusel, o "100%" para que la rejilla mande. */
 	width?: number | string;
+	/** Barre la portada mientras el escaner esta leyendo justo esta serie. */
+	scanning?: boolean;
 }
 
 /**
  * Tarjeta de portada del catálogo. La relación 2:3 se reserva antes de que llegue la
  * imagen: sin ella la rejilla salta al cargar cada miniatura.
  */
-export default function MediaCard({ to, title, subtitle, coverUrl, progress, badge, width = 160 }: Readonly<Props>) {
+export default function MediaCard({
+	to,
+	title,
+	subtitle,
+	coverUrl,
+	progress,
+	badge,
+	width = 160,
+	scanning = false,
+}: Readonly<Props>) {
 	const [failed, setFailed] = useState(false);
 	const pct = Math.max(0, Math.min(100, progress ?? 0));
 
@@ -36,7 +47,7 @@ export default function MediaCard({ to, title, subtitle, coverUrl, progress, bad
 				display: "block",
 				"&:hover .ds-cover": {
 					backgroundImage: DS.bevelMetalHot,
-					boxShadow: "0 10px 30px rgba(194, 24, 24, 0.28)",
+					boxShadow: "0 10px 30px rgba(var(--ds-red-rgb), var(--ds-glow-a))",
 				},
 				"&:hover .ds-cover-title": { color: DS.redLight },
 			}}
@@ -47,7 +58,7 @@ export default function MediaCard({ to, title, subtitle, coverUrl, progress, bad
 					position: "relative",
 					aspectRatio: "2 / 3",
 					width: "100%",
-					backgroundColor: "#121318",
+					backgroundColor: "var(--ds-metal-lo)",
 					backgroundImage: DS.bevelMetal,
 					clipPath: "polygon(12px 0%, 100% 0%, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0% 100%, 0% 12px)",
 					transition: "background-image 0.25s ease, box-shadow 0.25s ease",
@@ -79,6 +90,8 @@ export default function MediaCard({ to, title, subtitle, coverUrl, progress, bad
 					)}
 				</Box>
 
+				{scanning && <Box className="ds-scanline" />}
+
 				<Box className="hud-corner-tl" />
 				<Box className="hud-corner-br" />
 
@@ -103,7 +116,7 @@ export default function MediaCard({ to, title, subtitle, coverUrl, progress, bad
 							right: 0,
 							height: 3,
 							zIndex: 2,
-							"& .MuiLinearProgress-bar": { backgroundColor: pct >= 100 ? "#22C55E" : DS.redGlow },
+							"& .MuiLinearProgress-bar": { backgroundColor: pct >= 100 ? "var(--ds-ok)" : DS.redGlow },
 						}}
 					/>
 				)}

@@ -11,7 +11,6 @@ import LoginPage from "./pages/LoginPage";
 import AppLayout from "./layout/AppLayout";
 import UsersPage from "./pages/UsersPage";
 import RolesPage from "./pages/RolesPage";
-import UploadPage from "./pages/UploadPage";
 import LibrariesPage from "./pages/LibrariesPage";
 import HomePage from "./pages/HomePage";
 import SeriesGridPage from "./pages/SeriesGridPage";
@@ -19,6 +18,7 @@ import SeriesDetailPage from "./pages/SeriesDetailPage";
 import MediaDetailPage from "./pages/MediaDetailPage";
 import LibraryDetailPage from "./pages/LibraryDetailPage";
 import MetadataPage from "./pages/MetadataPage";
+import TrashPage from "./pages/TrashPage";
 import ReaderPage from "./pages/ReaderPage";
 import { LibraryFilterContext, LIBRARY_FILTER_KEY } from "./catalog/LibraryFilterContext";
 
@@ -163,7 +163,7 @@ export default function App() {
 		void initSession();
 	}, [refreshUser]);
 
-	const theme = useMemo(() => buildTheme(), []);
+	const theme = useMemo(() => buildTheme(mode), [mode]);
 	const colorMode = useMemo(() => ({ mode, toggle: toggleTheme }), [mode, toggleTheme]);
 
 	const libraryFilter = useMemo(() => ({ libraryId, setLibraryId }), [libraryId, setLibraryId]);
@@ -210,9 +210,9 @@ export default function App() {
 					<Route path="/users" element={<UsersPage />} />
 					<Route path="/roles" element={<RolesPage />} />
 					<Route path="/metadata" element={<MetadataPage />} />
+					<Route path="/trash" element={<TrashPage />} />
 					<Route path="/libraries" element={<LibrariesPage />} />
 					<Route path="/libraries/:id" element={<LibraryDetailPage />} />
-					<Route path="/upload" element={<UploadPage />} />
 					<Route path="*" element={<Navigate to="/" replace />} />
 				</Route>
 			</Routes>
