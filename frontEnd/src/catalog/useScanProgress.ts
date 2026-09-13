@@ -30,7 +30,9 @@ export function useScanProgress(libraryId: string, trigger = 0): ScanStatus | nu
 		// Sin biblioteca no hay nada que preguntar: la ficha de serie monta el hook antes de
 		// saber a que biblioteca pertenece, y preguntarlo con el id vacio es un 404 seguro.
 		if (libraryId.length === 0) {
-			setStatus({ key: libraryId, value: null });
+			queueMicrotask(() => {
+				setStatus({ key: libraryId, value: null });
+			});
 			return;
 		}
 

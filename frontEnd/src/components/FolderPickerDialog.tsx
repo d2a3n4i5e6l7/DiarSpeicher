@@ -132,6 +132,20 @@ export default function FolderPickerDialog({ onClose, onSelect, initialPath }: R
 	const error = fresh?.error ?? null;
 	const current = listing?.path ?? "";
 
+	// Una raiz es el contenedor de las bibliotecas, no una biblioteca, y el backend rechaza
+	// darla de alta. Se bloquea aqui para que el error no aparezca despues de rellenar el
+	// formulario entero.
+	const sameFolder = (a: string, b: string) =>
+		(a.length > 1 ? a.replace(/\/+$/, "") : a) === (b.length > 1 ? b.replace(/\/+$/, "") : b);
+	const isRoot = (path: string) => roots.some((root) => sameFolder(root.path, path));
+	const currentIsRoot = current !== "" && isRoot(current);
+
+	const choose = (path: string) => {
+		if (isRoot(path)) return;
+		onSelect(path);
+		onClose();
+	};
+
 	return (
 		<Dialog open onClose={onClose} maxWidth="md" fullWidth>
 			<HudFrame />
@@ -293,10 +307,8 @@ export default function FolderPickerDialog({ onClose, onSelect, initialPath }: R
 								</Button>
 								<Button
 									size="small"
-									onClick={() => {
-										onSelect(hit.path);
-										onClose();
-									}}
+									disabled={isRoot(hit.path)}
+									onClick={() => choose(hit.path)}
 									sx={{ minWidth: 0, px: 1.5 }}
 								>
 									Usar
@@ -321,10 +333,7 @@ export default function FolderPickerDialog({ onClose, onSelect, initialPath }: R
 								onEnter={() => {
 									setRequested(entry.path);
 								}}
-								onPick={() => {
-									onSelect(entry.path);
-									onClose();
-								}}
+								onPick={() => choose(entry.path)}
 							/>
 						))}
 				</Box>
@@ -340,13 +349,15 @@ export default function FolderPickerDialog({ onClose, onSelect, initialPath }: R
 				<Button onClick={onClose} sx={{ color: DS.muted }}>
 					Cancelar
 				</Button>
+				{currentIsRoot && (
+					<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: DS.warn, mr: "auto" }}>
+						Una raíz no puede ser una biblioteca. Entra o crea una carpeta dentro.
+					</Typography>
+				)}
 				<Button
 					variant="contained"
-					disabled={!current || loading}
-					onClick={() => {
-						onSelect(current);
-						onClose();
-					}}
+					disabled={!current || loading || currentIsRoot}
+					onClick={() => choose(current)}
 				>
 					Usar esta carpeta
 				</Button>

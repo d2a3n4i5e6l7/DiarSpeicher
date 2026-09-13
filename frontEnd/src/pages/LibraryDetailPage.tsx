@@ -414,6 +414,7 @@ export default function LibraryDetailPage() {
 							<MediaCard
 								key={item.id}
 								to={`/series/${item.id}`}
+								state={{ from: `/libraries/${id}`, label: library.name.toUpperCase() }}
 								title={item.name}
 								subtitle={`${String(item.mediaCount)} TOMOS`}
 								coverUrl={seriesApi.thumbnailUrl(item.id)}
@@ -451,6 +452,7 @@ export default function LibraryDetailPage() {
 							<MediaCard
 								key={item.id}
 								to={`/media/${item.id}`}
+								state={{ from: `/libraries/${id}`, label: library.name.toUpperCase() }}
 								title={mediaTitle(item)}
 								subtitle={mediaSubtitle(item)}
 								coverUrl={mediaApi.thumbnailUrl(item.id)}

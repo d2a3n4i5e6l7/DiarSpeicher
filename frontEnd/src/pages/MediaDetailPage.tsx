@@ -18,7 +18,7 @@ import DownloadIcon from "@mui/icons-material/Download";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
 import { useEffect, useState } from "react";
-import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
+import { Link as RouterLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import HudFrame from "../components/HudFrame";
 import DeleteScopeNotice from "../components/DeleteScopeNotice";
 import MediaCard from "../components/MediaCard";
@@ -76,6 +76,7 @@ export default function MediaDetailPage() {
 	const [deleteFile, setDeleteFile] = useState(false);
 	const [deleting, setDeleting] = useState(false);
 	const navigate = useNavigate();
+	const location = useLocation();
 
 	useEffect(() => {
 		let mounted = true;
@@ -112,12 +113,33 @@ export default function MediaDetailPage() {
 		);
 	}
 
+	const locationState = location.state as { from?: string; label?: string } | null;
+	const backUrl = locationState?.from ?? (series ? `/series/${series.id}` : "/");
+	const backLabel = locationState?.label ?? (series ? series.name.toUpperCase() : "ARCHIVO");
+
+	const handleBack = (e: React.MouseEvent) => {
+		const historyState = window.history.state as { idx?: number } | null;
+		const hasHistory = typeof historyState?.idx === "number" && historyState.idx > 0;
+		if (hasHistory && locationState?.from) {
+			e.preventDefault();
+			void navigate(-1);
+		}
+	};
+
 	if (error || !media) {
+		const errorBackUrl = locationState?.from ?? "/";
+		const errorBackText = locationState?.label ? `VOLVER A ${locationState.label}` : "VOLVER AL ARCHIVO";
 		return (
 			<Box sx={{ maxWidth: 800, mx: "auto" }}>
 				<Alert severity="error">{error ?? "El tomo no existe o no es accesible."}</Alert>
-				<Button component={RouterLink} to="/" startIcon={<ArrowBackIcon />} sx={{ mt: 2 }}>
-					VOLVER AL ARCHIVO
+				<Button
+					component={RouterLink}
+					to={errorBackUrl}
+					onClick={handleBack}
+					startIcon={<ArrowBackIcon />}
+					sx={{ mt: 2 }}
+				>
+					{errorBackText}
 				</Button>
 			</Box>
 		);
@@ -131,11 +153,12 @@ export default function MediaDetailPage() {
 		<Box>
 			<Button
 				component={RouterLink}
-				to={series ? `/series/${series.id}` : "/"}
+				to={backUrl}
+				onClick={handleBack}
 				startIcon={<ArrowBackIcon />}
 				sx={{ color: DS.muted, mb: 2, "&:hover": { color: "var(--ds-text-strong)" } }}
 			>
-				{series ? series.name.toUpperCase() : "ARCHIVO"}
+				{backLabel}
 			</Button>
 
 			<Box

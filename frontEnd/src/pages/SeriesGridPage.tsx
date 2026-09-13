@@ -94,6 +94,7 @@ export default function SeriesGridPage() {
 					<MediaCard
 						key={item.id}
 						to={`/series/${item.id}`}
+						state={{ from: "/series", label: "SERIES" }}
 						title={item.name}
 						subtitle={`${String(item.mediaCount)} TOMOS`}
 						coverUrl={seriesApi.thumbnailUrl(item.id)}

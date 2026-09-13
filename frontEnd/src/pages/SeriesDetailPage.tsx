@@ -28,7 +28,7 @@ import ImageIcon from "@mui/icons-material/Image";
 import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useScanProgress } from "../catalog/useScanProgress";
-import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
+import { Link as RouterLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import HudFrame from "../components/HudFrame";
 import MediaCard from "../components/MediaCard";
 import MetadataMatchDialog from "../components/MetadataMatchDialog";
@@ -137,6 +137,7 @@ export default function SeriesDetailPage() {
 	const [deleteFiles, setDeleteFiles] = useState(false);
 	const [deleting, setDeleting] = useState(false);
 	const navigate = useNavigate();
+	const location = useLocation();
 	// Se incrementa tras emparejar o revertir: fuerza a releer la ficha con lo nuevo.
 	const [reloadToken, setReloadToken] = useState(0);
 
@@ -198,13 +199,17 @@ export default function SeriesDetailPage() {
 	useEffect(() => {
 		if (completedMedia !== null) {
 			wasIndexing.current = true;
-			setReloadToken((token) => token + 1);
+			queueMicrotask(() => {
+				setReloadToken((token) => token + 1);
+			});
 			return;
 		}
 
 		if (wasIndexing.current) {
 			wasIndexing.current = false;
-			setReloadToken((token) => token + 1);
+			queueMicrotask(() => {
+				setReloadToken((token) => token + 1);
+			});
 		}
 	}, [completedMedia]);
 
@@ -224,12 +229,33 @@ export default function SeriesDetailPage() {
 		setReloadToken((token) => token + 1);
 	};
 
+	const locationState = location.state as { from?: string; label?: string } | null;
+	const backUrl = locationState?.from ?? (series?.libraryId ? `/libraries/${series.libraryId}` : "/series");
+	const backLabel = locationState?.label ?? (series?.libraryId ? "BIBLIOTECA" : "SERIES");
+
+	const handleBack = (e: React.MouseEvent) => {
+		const historyState = window.history.state as { idx?: number } | null;
+		const hasHistory = typeof historyState?.idx === "number" && historyState.idx > 0;
+		if (hasHistory && locationState?.from) {
+			e.preventDefault();
+			void navigate(-1);
+		}
+	};
+
 	if (error || !series) {
+		const errorBackUrl = locationState?.from ?? "/series";
+		const errorBackText = locationState?.label ? `VOLVER A ${locationState.label}` : "VOLVER A SERIES";
 		return (
 			<Box sx={{ maxWidth: 800, mx: "auto" }}>
 				<Alert severity="error">{error ?? "La serie no existe o no es accesible."}</Alert>
-				<Button component={RouterLink} to="/series" startIcon={<ArrowBackIcon />} sx={{ mt: 2 }}>
-					VOLVER A SERIES
+				<Button
+					component={RouterLink}
+					to={errorBackUrl}
+					onClick={handleBack}
+					startIcon={<ArrowBackIcon />}
+					sx={{ mt: 2 }}
+				>
+					{errorBackText}
 				</Button>
 			</Box>
 		);
@@ -256,11 +282,12 @@ export default function SeriesDetailPage() {
 		<Box>
 			<Button
 				component={RouterLink}
-				to="/series"
+				to={backUrl}
+				onClick={handleBack}
 				startIcon={<ArrowBackIcon />}
 				sx={{ color: DS.muted, mb: 2, "&:hover": { color: "var(--ds-text-strong)" } }}
 			>
-				SERIES
+				{backLabel}
 			</Button>
 
 			<Box
@@ -510,6 +537,7 @@ export default function SeriesDetailPage() {
 						<MediaCard
 							key={volume.id}
 							to={`/media/${volume.id}`}
+							state={{ from: `/series/${id}`, label: series.name.toUpperCase() }}
 							title={mediaTitle(volume)}
 							subtitle={mediaSubtitle(volume)}
 							coverUrl={mediaApi.thumbnailUrl(volume.id)}

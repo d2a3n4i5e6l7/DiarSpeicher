@@ -604,6 +604,15 @@ public sealed class StumpV2Service : IStumpV2Service
                 "Esa ruta esta fuera de las carpetas permitidas para bibliotecas.");
         }
 
+        // Una raiz es donde viven las bibliotecas, no una biblioteca. Registrarla deja una
+        // entrada imposible de retirar del disco: borrar esa carpeta arrastraria todas las
+        // demas que cuelgan de ella.
+        if (_libraryRoots.IsRoot(fullPath))
+        {
+            throw new InvalidOperationException(
+                "Esa ruta es una raiz de bibliotecas. Elige o crea una carpeta dentro de ella.");
+        }
+
         if (!Directory.Exists(fullPath))
         {
             Directory.CreateDirectory(fullPath);
@@ -699,6 +708,12 @@ public sealed class StumpV2Service : IStumpV2Service
         {
             throw new InvalidOperationException(
                 "Esa ruta esta fuera de las carpetas permitidas para bibliotecas.");
+        }
+
+        if (_libraryRoots.IsRoot(resolved))
+        {
+            throw new InvalidOperationException(
+                "Esa ruta es una raiz de bibliotecas. Elige o crea una carpeta dentro de ella.");
         }
 
         if (string.Equals(resolved, library.Path, StringComparison.Ordinal)) return null;

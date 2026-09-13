@@ -69,6 +69,32 @@ public class LibraryRootsOptions
         return false;
     }
 
+    /// <summary>
+    /// Una raiz es el contenedor de las bibliotecas, no una biblioteca. Registrarla como tal
+    /// deja una entrada que despues no se puede retirar del disco, porque borrar la carpeta
+    /// se llevaria por delante todas las demas bibliotecas que cuelgan de ella.
+    /// </summary>
+    public bool IsRoot(string? candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate)) return false;
+
+        string full;
+        try
+        {
+            full = Normalize(candidate);
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        return ResolveRoots().Any(root => string.Equals(full, root, comparison));
+    }
+
     private static string Normalize(string path) =>
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim()));
 

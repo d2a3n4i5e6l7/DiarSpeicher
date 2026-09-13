@@ -100,6 +100,7 @@ export default function HomePage() {
 					<MediaCard
 						key={media.id}
 						to={`/media/${media.id}`}
+						state={{ from: "/", label: "INICIO" }}
 						title={mediaTitle(media)}
 						subtitle={mediaSubtitle(media)}
 						coverUrl={mediaApi.thumbnailUrl(media.id)}
@@ -118,6 +119,7 @@ export default function HomePage() {
 					<MediaCard
 						key={media.id}
 						to={`/media/${media.id}`}
+						state={{ from: "/", label: "INICIO" }}
 						title={mediaTitle(media)}
 						subtitle={mediaSubtitle(media)}
 						coverUrl={mediaApi.thumbnailUrl(media.id)}
@@ -136,6 +138,7 @@ export default function HomePage() {
 					<MediaCard
 						key={item.id}
 						to={`/series/${item.id}`}
+						state={{ from: "/", label: "INICIO" }}
 						title={item.name}
 						subtitle={`${String(item.mediaCount)} TOMOS`}
 						coverUrl={seriesApi.thumbnailUrl(item.id)}

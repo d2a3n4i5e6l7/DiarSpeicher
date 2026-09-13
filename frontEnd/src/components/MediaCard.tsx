@@ -17,6 +17,8 @@ interface Props {
 	width?: number | string;
 	/** Barre la portada mientras el escaner esta leyendo justo esta serie. */
 	scanning?: boolean;
+	/** Estado de navegación que se preserva en RouterLink. */
+	state?: unknown;
 }
 
 /**
@@ -32,6 +34,7 @@ export default function MediaCard({
 	badge,
 	width = 160,
 	scanning = false,
+	state,
 }: Readonly<Props>) {
 	const [failed, setFailed] = useState(false);
 	const pct = Math.max(0, Math.min(100, progress ?? 0));
@@ -40,6 +43,7 @@ export default function MediaCard({
 		<Box
 			component={RouterLink}
 			to={to}
+			state={state}
 			sx={{
 				width,
 				flexShrink: 0,
