@@ -1,5 +1,8 @@
 using System.IO.Compression;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Metadata;
 using SharpCompress.Archives;
@@ -392,6 +395,13 @@ public class RarBookProcessor : IBookProcessor
 
 public class EpubBookProcessor : IBookProcessor
 {
+    private readonly IEpubProfileProvider? _profileProvider;
+
+    public EpubBookProcessor(IEpubProfileProvider? profileProvider = null)
+    {
+        _profileProvider = profileProvider;
+    }
+
     public bool CanProcess(string extension)
     {
         var clean = extension.TrimStart('.').ToLowerInvariant();
@@ -414,9 +424,6 @@ public class EpubBookProcessor : IBookProcessor
                 var opfEntry = archive.GetEntry(opfPath);
                 if (opfEntry is not null)
                 {
-                    // El OPF trae a la vez el recuento de capitulos y los metadatos. Se lee
-                    // siempre, pero lo extraido solo se conserva si la biblioteca lo pide:
-                    // sin el recuento el EPUB se quedaria sin paginas.
                     chapterCount = await ReadOpfDataAsync(opfEntry, metadata, tags, cancellationToken);
                 }
             }
@@ -458,15 +465,113 @@ public class EpubBookProcessor : IBookProcessor
 
     public async Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
     {
-        // For EPUB, page 1 is the cover image
+        if (pageNumber < 1) return null;
+
         await using var archive = await ZipFile.OpenReadAsync(path, cancellationToken);
         var coverEntry = await FindCoverEntryAsync(archive, cancellationToken);
-        if (coverEntry is null)
+
+        var spineEntries = await GetSpineEntriesAsync(archive, cancellationToken);
+        if (spineEntries.Count == 0)
+        {
+            spineEntries = GetFallbackHtmlEntries(archive);
+        }
+
+        if (spineEntries.Count == 0)
+        {
+            return (pageNumber == 1 && coverEntry != null) ? await ReadEntryAsync(coverEntry, cancellationToken) : null;
+        }
+
+        var profile = _profileProvider != null
+            ? await _profileProvider.GetCurrentProfileAsync(cancellationToken)
+            : EpubDeviceProfile.GetDefaults()[0];
+
+        var map = await EpubRasterizer.GetOrBuildPageMapAsync(
+            archive,
+            path,
+            spineEntries,
+            coverEntry,
+            profile,
+            cancellationToken);
+
+        if (pageNumber < 1 || pageNumber > map.TotalPages)
         {
             return null;
         }
 
-        return await ReadEntryAsync(coverEntry, cancellationToken);
+        var target = map.Pages[pageNumber - 1];
+        var bookTitle = Path.GetFileNameWithoutExtension(path);
+
+        return await EpubRasterizer.RenderSubpageAsync(
+            archive,
+            target,
+            pageNumber,
+            map.TotalPages,
+            bookTitle,
+            profile,
+            cancellationToken);
+    }
+
+    public static async Task<List<ZipArchiveEntry>> GetSpineEntriesAsync(ZipArchive archive, CancellationToken cancellationToken)
+    {
+        var opfPath = await FindOpfPathAsync(archive, cancellationToken);
+        if (string.IsNullOrEmpty(opfPath)) return [];
+
+        var opfEntry = archive.GetEntry(opfPath);
+        if (opfEntry == null) return [];
+
+        try
+        {
+            var doc = await LoadXmlAsync(opfEntry, cancellationToken);
+            var opfDir = Path.GetDirectoryName(opfPath)?.Replace('\\', '/') ?? "";
+            return ResolveSpineItems(archive, doc, opfDir);
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static List<ZipArchiveEntry> ResolveSpineItems(ZipArchive archive, XDocument doc, string opfDir)
+    {
+        var manifest = doc.Descendants()
+            .Where(e => e.Name.LocalName == "item")
+            .Select(e => new { Id = e.Attribute("id")?.Value, Href = e.Attribute("href")?.Value })
+            .Where(x => !string.IsNullOrEmpty(x.Id) && !string.IsNullOrEmpty(x.Href))
+            .ToDictionary(x => x.Id!, x => x.Href!);
+
+        var spine = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "spine");
+        if (spine == null) return [];
+
+        var entries = new List<ZipArchiveEntry>();
+        var itemrefs = spine.Descendants().Where(e => e.Name.LocalName == "itemref");
+
+        foreach (var itemref in itemrefs)
+        {
+            var idref = itemref.Attribute("idref")?.Value;
+            if (string.IsNullOrEmpty(idref) || !manifest.TryGetValue(idref, out var href)) continue;
+
+            var fullHref = string.IsNullOrEmpty(opfDir) ? href : $"{opfDir}/{href}";
+            var entry = archive.GetEntry(fullHref) ??
+                archive.Entries.FirstOrDefault(e => string.Equals(e.FullName.Replace('\\', '/'), fullHref.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase));
+            if (entry != null)
+            {
+                entries.Add(entry);
+            }
+        }
+
+        return entries;
+    }
+
+    public static List<ZipArchiveEntry> GetFallbackHtmlEntries(ZipArchive archive)
+    {
+        return archive.Entries
+            .Where(e =>
+            {
+                var ext = Path.GetExtension(e.FullName).ToLowerInvariant();
+                return ext is ".html" or ".xhtml";
+            })
+            .OrderBy(e => e.FullName, NaturalSortComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static async Task<ExtractedPage> ReadEntryAsync(ZipArchiveEntry entry, CancellationToken cancellationToken)
@@ -562,7 +667,7 @@ public class EpubBookProcessor : IBookProcessor
     private static string? FirstOpfEntryName(ZipArchive archive) =>
         archive.Entries.FirstOrDefault(e => e.FullName.EndsWith(".opf", StringComparison.OrdinalIgnoreCase))?.FullName;
 
-    private static async Task<ZipArchiveEntry?> FindCoverEntryAsync(ZipArchive archive, CancellationToken cancellationToken)
+    public static async Task<ZipArchiveEntry?> FindCoverEntryAsync(ZipArchive archive, CancellationToken cancellationToken)
     {
         var opfPath = await FindOpfPathAsync(archive, cancellationToken);
         if (!string.IsNullOrEmpty(opfPath))

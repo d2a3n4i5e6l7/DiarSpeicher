@@ -39,8 +39,8 @@ public sealed class StumpV2Service : IStumpV2Service
         IScannerQueue scannerQueue,
         ILogger<StumpV2Service> logger,
         IOptions<StorageOptions> storageOptions,
-        IOptions<LibraryRootsOptions> libraryRoots,
-        ITrashService trash)
+        IOptions<LibraryRootsOptions>? libraryRoots = null,
+        ITrashService? trash = null)
     {
         _db = db;
         _bookProcessor = bookProcessor;
@@ -48,8 +48,8 @@ public sealed class StumpV2Service : IStumpV2Service
         _logger = logger;
         _uploadOptions = storageOptions.Value.Upload;
         _storage = storageOptions.Value;
-        _libraryRoots = libraryRoots.Value;
-        _trash = trash;
+        _libraryRoots = libraryRoots?.Value ?? new LibraryRootsOptions();
+        _trash = trash ?? new NullTrashService();
     }
 
     /// <summary>

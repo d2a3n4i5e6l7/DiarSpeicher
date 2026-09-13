@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Metadata;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
@@ -268,6 +269,81 @@ public class MediaProcessingTests : IDisposable
         Assert.Equal(ContentType.Jpeg, coverPage.ContentType);
         Assert.Equal(5, coverPage.Data.Length);
         Assert.Equal(0x42, coverPage.Data[4]);
+
+        // Extract Page 2 (Chapter 1 rasterized in RAM as WebP)
+        var chapter1 = await processor.ExtractPageAsync(epubPath, 2);
+        Assert.NotNull(chapter1);
+        Assert.Equal(ContentType.Webp, chapter1.ContentType);
+        Assert.True(chapter1.Data.Length > 0);
+    }
+
+    [Fact]
+    public async Task EpubProcessor_PaginatesLongChapterIntoMultipleSubpages()
+    {
+        var epubPath = Path.Combine(_tempDir, "long_story.epub");
+        using (var zip = ZipFile.Open(epubPath, ZipArchiveMode.Create))
+        {
+            var opf = zip.CreateEntry("OEBPS/content.opf");
+            var opfContent = """
+                <?xml version="1.0" encoding="utf-8"?>
+                <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id">
+                  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                    <dc:title>Subpage Test Novel</dc:title>
+                    <dc:creator>Commander Diarmund</dc:creator>
+                  </metadata>
+                  <manifest>
+                    <item id="chap1" href="chap1.xhtml" media-type="application/xhtml+xml"/>
+                  </manifest>
+                  <spine>
+                    <itemref idref="chap1"/>
+                  </spine>
+                </package>
+                """;
+            using (var s = opf.Open()) s.Write(Encoding.UTF8.GetBytes(opfContent));
+
+            // Generate enough text so that it must split into multiple subpages (e.g. 50 long paragraphs)
+            var sb = new StringBuilder();
+            sb.Append("<html><body><h1>Chapter One: Tactical Awakening</h1>");
+            for (int i = 1; i <= 60; i++)
+            {
+                sb.Append($"<p>Paragraph {i}: Iron Blood protocol engaged. Testing memory rasterization and automated page division without cutting words across screen boundaries. Subpage mapping engine handles tactical pagination smoothly.</p>");
+            }
+            sb.Append("</body></html>");
+
+            var chap1 = zip.CreateEntry("OEBPS/chap1.xhtml");
+            using (var s = chap1.Open()) s.Write(Encoding.UTF8.GetBytes(sb.ToString()));
+        }
+
+        var customProfile = new EpubDeviceProfile
+        {
+            Width = 1200,
+            Height = 1920,
+            AutoHeight = false,
+            FontSize = 40
+        };
+        var processor = new EpubBookProcessor(new TestEpubProfileProvider(customProfile));
+
+        // Check page 1 extraction
+        var page1 = await processor.ExtractPageAsync(epubPath, 1);
+        Assert.NotNull(page1);
+        Assert.Equal(ContentType.Webp, page1.ContentType);
+        Assert.True(page1.Data.Length > 0);
+
+        // Check page 2 extraction (subpage 2 of the same chapter)
+        var page2 = await processor.ExtractPageAsync(epubPath, 2);
+        Assert.NotNull(page2);
+        Assert.Equal(ContentType.Webp, page2.ContentType);
+        Assert.True(page2.Data.Length > 0);
+
+        // Bytes must differ because content is partitioned
+        Assert.False(page1.Data.SequenceEqual(page2.Data));
+    }
+
+    private sealed class TestEpubProfileProvider : IEpubProfileProvider
+    {
+        private readonly EpubDeviceProfile _profile;
+        public TestEpubProfileProvider(EpubDeviceProfile profile) => _profile = profile;
+        public Task<EpubDeviceProfile> GetCurrentProfileAsync(CancellationToken ct = default) => Task.FromResult(_profile);
     }
 
     [Fact]

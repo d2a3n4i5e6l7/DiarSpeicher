@@ -7,6 +7,7 @@ import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import EpubReader from "../reader/EpubReader";
 import ReaderSettingsPanel from "../reader/ReaderSettingsPanel";
 import {
 	DEFAULT_READER_SETTINGS,
@@ -399,6 +400,11 @@ export default function ReaderPage() {
 				</IconButton>
 			</Box>
 		);
+	}
+
+	const isEpub = media.extension.trim().toLowerCase().replace(/^\./, "") === "epub";
+	if (isEpub) {
+		return <EpubReader media={media} onExit={exit} />;
 	}
 
 	let canvas: React.ReactNode;

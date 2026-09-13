@@ -113,6 +113,67 @@ function makeClient(base: string) {
 	};
 }
 
+export async function downloadBinary(
+	path: string,
+	onProgress?: (loaded: number, total: number) => void
+): Promise<ArrayBuffer> {
+	const method = "GET";
+	const fullPath = path.startsWith("http") || (API_BASE.length > 0 && path.startsWith(API_BASE)) ? path : `${API_BASE}${path}`;
+
+	let dpopHeaders: Partial<ClientProofHeaders> = {};
+	if (typeof window !== "undefined") {
+		try {
+			dpopHeaders = await signRequestProof(method, fullPath);
+		} catch {
+			dpopHeaders = {};
+		}
+	}
+
+	const response = await fetch(fullPath, {
+		method,
+		credentials: "include",
+		headers: {
+			...dpopHeaders,
+		},
+	});
+
+	if (response.status === 401) {
+		unauthorizedHandler?.();
+		throw await toApiError(response);
+	}
+
+	if (!response.ok) {
+		throw await toApiError(response);
+	}
+
+	const contentLength = Number(response.headers.get("content-length")) || 0;
+	if (!onProgress || !contentLength || !response.body) {
+		return await response.arrayBuffer();
+	}
+
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let loaded = 0;
+
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		if (value) {
+			chunks.push(value);
+			loaded += value.length;
+			onProgress(loaded, contentLength);
+		}
+	}
+
+	const allChunks = new Uint8Array(loaded);
+	let position = 0;
+	for (const chunk of chunks) {
+		allChunks.set(chunk, position);
+		position += chunk.length;
+	}
+	return allChunks.buffer;
+}
+
 export const http = makeClient(API_BASE);
 
 /**

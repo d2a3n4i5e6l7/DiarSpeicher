@@ -27,6 +27,12 @@ public class CachingBookProcessor : ICompositeBookProcessor
 
     public async Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
     {
+        // Las paginas de EPUB se rasterizan en caliente en RAM segun la resolucion del dispositivo y no se persisten a disco
+        if (string.Equals(Path.GetExtension(path), ".epub", StringComparison.OrdinalIgnoreCase))
+        {
+            return await _inner.ExtractPageAsync(path, pageNumber, cancellationToken);
+        }
+
         var key = BuildKey(path, pageNumber);
         if (key is null)
         {

@@ -91,6 +91,14 @@ export default function RolesPage() {
 		};
 	}, []);
 
+	useEffect(() => {
+		if (!successMsg) return;
+		const timer = setTimeout(() => {
+			setSuccessMsg(null);
+		}, 6000);
+		return () => clearTimeout(timer);
+	}, [successMsg]);
+
 	const handleCreateRole = async (e: React.SyntheticEvent) => {
 		e.preventDefault();
 		if (!newName.trim()) {

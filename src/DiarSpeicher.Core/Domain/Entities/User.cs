@@ -28,6 +28,7 @@ public class UserPreferences
     public string AppTheme { get; set; } = "dark";
     public string AppFont { get; set; } = "inter";
     public bool EnableCompactDisplay { get; set; }
+    public string? EpubProfilesJson { get; set; }
 }
 
 public class AgeRestriction

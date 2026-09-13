@@ -18,6 +18,7 @@ import {
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import FolderIcon from "@mui/icons-material/Folder";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
+import CreateNewFolderIcon from "@mui/icons-material/CreateNewFolder";
 import LockIcon from "@mui/icons-material/Lock";
 import SearchIcon from "@mui/icons-material/Search";
 import RefreshIcon from "@mui/icons-material/Refresh";
@@ -58,6 +59,10 @@ export default function FolderPickerDialog({ onClose, onSelect, initialPath }: R
 	const [query, setQuery] = useState("");
 	const [found, setFound] = useState<{ key: string; hits: FolderHit[] } | null>(null);
 	const [indexing, setIndexing] = useState(false);
+	const [newFolderOpen, setNewFolderOpen] = useState(false);
+	const [newFolderName, setNewFolderName] = useState("");
+	const [creatingFolder, setCreatingFolder] = useState(false);
+	const [folderCreateError, setFolderCreateError] = useState<string | null>(null);
 
 	const requestKey = requested ?? "@root";
 
@@ -144,6 +149,25 @@ export default function FolderPickerDialog({ onClose, onSelect, initialPath }: R
 		if (isRoot(path)) return;
 		onSelect(path);
 		onClose();
+	};
+
+	const handleCreateFolder = async (e: React.SyntheticEvent) => {
+		e.preventDefault();
+		const trimmed = newFolderName.trim();
+		if (!trimmed || !current) return;
+
+		setCreatingFolder(true);
+		setFolderCreateError(null);
+		try {
+			const entry = await filesystemApi.createFolder(current, trimmed);
+			setNewFolderOpen(false);
+			setNewFolderName("");
+			setRequested(entry.path);
+		} catch (err: unknown) {
+			setFolderCreateError(err instanceof Error ? err.message : "Error al crear la carpeta.");
+		} finally {
+			setCreatingFolder(false);
+		}
 	};
 
 	return (
@@ -241,6 +265,32 @@ export default function FolderPickerDialog({ onClose, onSelect, initialPath }: R
 					>
 						{current || "—"}
 					</Typography>
+
+					<Button
+						size="small"
+						startIcon={<CreateNewFolderIcon fontSize="small" />}
+						disabled={!current || loading}
+						onClick={() => {
+							setFolderCreateError(null);
+							setNewFolderName("");
+							setNewFolderOpen(true);
+						}}
+						sx={{
+							fontFamily: "'Rajdhani', sans-serif",
+							fontWeight: 700,
+							fontSize: "12px",
+							letterSpacing: "1px",
+							color: DS.platinum,
+							border: `1px solid ${DS.border}`,
+							borderRadius: "2px",
+							px: 1.5,
+							py: 0.5,
+							whiteSpace: "nowrap",
+							"&:hover": { borderColor: DS.red, color: DS.redLight },
+						}}
+					>
+						NUEVA CARPETA
+					</Button>
 				</Stack>
 
 				<Box
@@ -258,11 +308,33 @@ export default function FolderPickerDialog({ onClose, onSelect, initialPath }: R
 					)}
 
 					{hits === null && !loading && listing?.entries.length === 0 && (
-						<Stack sx={{ height: "100%", gap: 1, alignItems: "center", justifyContent: "center" }}>
-							<FolderOpenIcon sx={{ fontSize: 34, color: DS.borderRed }} />
-							<Typography sx={{ fontSize: "12px", color: DS.muted }}>
+						<Stack sx={{ height: "100%", gap: 1.5, alignItems: "center", justifyContent: "center", p: 3 }}>
+							<FolderOpenIcon sx={{ fontSize: 38, color: DS.borderRed }} />
+							<Typography sx={{ fontSize: "13px", color: DS.muted, textAlign: "center" }}>
 								Esta carpeta no tiene subcarpetas.
 							</Typography>
+							<Button
+								size="small"
+								variant="outlined"
+								startIcon={<CreateNewFolderIcon fontSize="small" />}
+								onClick={() => {
+									setFolderCreateError(null);
+									setNewFolderName("");
+									setNewFolderOpen(true);
+								}}
+								sx={{
+									fontFamily: "'Rajdhani', sans-serif",
+									fontWeight: 700,
+									fontSize: "13px",
+									letterSpacing: "1.5px",
+									color: DS.redGlow,
+									borderColor: DS.borderRed,
+									mt: 1,
+									"&:hover": { borderColor: DS.redLight, backgroundColor: "rgba(var(--ds-red-rgb), 0.1)" },
+								}}
+							>
+								CREAR CARPETA AQUÍ
+							</Button>
 						</Stack>
 					)}
 
@@ -362,6 +434,59 @@ export default function FolderPickerDialog({ onClose, onSelect, initialPath }: R
 					Usar esta carpeta
 				</Button>
 			</DialogActions>
+
+			<Dialog
+				open={newFolderOpen}
+				onClose={() => {
+					if (!creatingFolder) setNewFolderOpen(false);
+				}}
+				maxWidth="xs"
+				fullWidth
+			>
+				<HudFrame />
+				<DialogTitle>// Nueva carpeta</DialogTitle>
+				<form onSubmit={(e) => { void handleCreateFolder(e); }}>
+					<DialogContent sx={{ p: 3 }}>
+						<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: DS.muted, mb: 2 }}>
+							Ubicación: {current}
+						</Typography>
+
+						{folderCreateError && (
+							<Alert severity="error" sx={{ mb: 2 }}>
+								{folderCreateError}
+							</Alert>
+						)}
+
+						<TextField
+							autoFocus
+							fullWidth
+							size="small"
+							label="Nombre de la carpeta"
+							value={newFolderName}
+							onChange={(e) => setNewFolderName(e.target.value)}
+							placeholder="ej. Manga, Novelas, Comics"
+							disabled={creatingFolder}
+						/>
+					</DialogContent>
+					<DialogActions sx={{ p: 2 }}>
+						<Button
+							onClick={() => setNewFolderOpen(false)}
+							disabled={creatingFolder}
+							sx={{ color: DS.muted }}
+						>
+							Cancelar
+						</Button>
+						<Button
+							type="submit"
+							variant="contained"
+							disabled={!newFolderName.trim() || creatingFolder}
+							startIcon={creatingFolder ? <CircularProgress size={16} color="inherit" /> : <CreateNewFolderIcon />}
+						>
+							{creatingFolder ? "Creando..." : "Crear"}
+						</Button>
+					</DialogActions>
+				</form>
+			</Dialog>
 		</Dialog>
 	);
 }

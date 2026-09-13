@@ -43,6 +43,16 @@ public interface ITrashService
     void PurgeExpired();
 }
 
+public sealed class NullTrashService : ITrashService
+{
+    public DeletionScope? Inspect(string path) => null;
+    public TrashOutcome TryMoveToTrash(string path, out TrashEntry? entry) { entry = null; return TrashOutcome.NotAllowed; }
+    public IReadOnlyList<TrashEntry> List() => [];
+    public bool Restore(string id) => false;
+    public bool PurgeNow(string id) => false;
+    public void PurgeExpired() { }
+}
+
 /// <summary>
 /// Papelera con caducidad para los borrados que tocan el disco.
 /// <para>

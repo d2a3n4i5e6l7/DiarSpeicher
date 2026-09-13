@@ -70,6 +70,7 @@ builder.Services.PostConfigure<StorageOptions>(ApplyUploadEnvironmentOverrides);
 builder.Services.AddOptions<MangaBakaOptions>().PostConfigure<IOptions<StorageOptions>>(ApplyMangaBakaStorageRoot);
 builder.Services.AddSingleton<IPageCache, DiskPageCache>();
 
+builder.Services.AddSingleton<IEpubProfileProvider, DiarSpeicher.Api.Services.HttpEpubProfileProvider>();
 builder.Services.AddSingleton<IBookProcessor, ZipBookProcessor>();
 builder.Services.AddSingleton<IBookProcessor, RarBookProcessor>();
 builder.Services.AddSingleton<IBookProcessor, EpubBookProcessor>();

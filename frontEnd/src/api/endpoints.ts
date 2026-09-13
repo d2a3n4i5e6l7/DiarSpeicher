@@ -314,6 +314,28 @@ export const usersApi = {
     protocols: () => gatewayHttp.get<ProtocolCatalog>("/protocols"),
 };
 
+export interface EpubDeviceProfile {
+    id: string;
+    name: string;
+    devicePattern: string;
+    width: number;
+    height: number;
+    autoHeight: boolean;
+    fontSize: number;
+    lineHeight: number;
+    fontFamily: string;
+    marginHorizontal: number;
+    marginVertical: number;
+    theme: "light" | "core" | "oled" | "sepia";
+    isDefault: boolean;
+}
+
+export const epubProfilesApi = {
+    getProfiles: (userId: string | number) => http.get<EpubDeviceProfile[]>(`/api/v2/users/${userId}/epub-profiles`),
+    saveProfiles: (userId: string | number, profiles: EpubDeviceProfile[]) =>
+        http.put<{ updated: boolean; count: number }>(`/api/v2/users/${userId}/epub-profiles`, profiles),
+};
+
 export const rolesApi = {
     list: (): Promise<RoleItem[]> =>
         Promise.resolve([

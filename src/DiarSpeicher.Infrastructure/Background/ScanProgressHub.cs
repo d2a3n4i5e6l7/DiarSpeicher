@@ -54,6 +54,18 @@ public interface IScanProgressHub
     IAsyncEnumerable<ScanSnapshot> SubscribeAsync(string libraryId, CancellationToken ct);
 }
 
+public sealed class NullScanProgressHub : IScanProgressHub
+{
+    public ScanSnapshot? GetSnapshot(string libraryId) => null;
+    public IReadOnlyCollection<ScanSnapshot> GetActive() => [];
+    public void MarkQueued(string libraryId) { }
+    public async IAsyncEnumerable<ScanSnapshot> SubscribeAsync(string libraryId, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        await Task.CompletedTask;
+        yield break;
+    }
+}
+
 /// <summary>
 /// Reparte el progreso del escaner a los clientes conectados por SSE.
 /// <para>

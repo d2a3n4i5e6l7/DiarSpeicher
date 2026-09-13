@@ -14,9 +14,9 @@ public class ScannerQueue : IScannerQueue
     private readonly Channel<ScanRequest> _channel;
     private readonly IScanProgressHub _hub;
 
-    public ScannerQueue(IScanProgressHub hub, int capacity = 100)
+    public ScannerQueue(IScanProgressHub? hub = null, int capacity = 100)
     {
-        _hub = hub;
+        _hub = hub ?? new NullScanProgressHub();
         var options = new BoundedChannelOptions(capacity)
         {
             FullMode = BoundedChannelFullMode.Wait,

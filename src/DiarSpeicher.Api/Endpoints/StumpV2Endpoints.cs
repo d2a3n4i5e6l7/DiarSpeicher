@@ -12,6 +12,10 @@ using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 
+using DiarSpeicher.Core.Domain.Entities;
+using DiarSpeicher.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+
 namespace DiarSpeicher.Api.Endpoints;
 
 public static class StumpV2Endpoints
@@ -70,6 +74,7 @@ public static class StumpV2Endpoints
         MapSeriesRoutes(group);
         MapLibraryRoutes(group);
         MapEpubRoutes(group);
+        MapUserProfileRoutes(group);
 
         return group;
     }
@@ -700,5 +705,76 @@ public static class StumpV2Endpoints
             httpContext.Response.Headers.CacheControl = "public, max-age=86400";
             return Results.File(res.Value.Data, res.Value.ContentType);
         });
+    }
+
+    private static void MapUserProfileRoutes(RouteGroupBuilder group)
+    {
+        group.MapGet("/users/{id}/epub-profiles", HandleGetEpubProfiles);
+        group.MapPut("/users/{id}/epub-profiles", HandlePutEpubProfiles);
+    }
+
+    private static async Task<IResult> HandleGetEpubProfiles(
+        string id,
+        HttpContext httpContext,
+        [FromServices] DiarSpeicherDbContext db,
+        CancellationToken ct)
+    {
+        if (httpContext.Items[AuthUserKey] is not AuthUser user) return Results.Unauthorized();
+
+        var targetId = string.Equals(id, "me", StringComparison.OrdinalIgnoreCase) ? user.Id : id;
+        if (user.Id != targetId && !user.IsServerOwner && !user.HasRole("admin"))
+        {
+            return Results.Forbid();
+        }
+
+        var prefs = await db.UserPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == targetId, ct);
+        if (string.IsNullOrWhiteSpace(prefs?.EpubProfilesJson))
+        {
+            return Results.Ok(EpubDeviceProfile.GetDefaults());
+        }
+
+        try
+        {
+            var profiles = JsonSerializer.Deserialize<List<EpubDeviceProfile>>(prefs.EpubProfilesJson);
+            return Results.Ok(profiles ?? EpubDeviceProfile.GetDefaults());
+        }
+        catch
+        {
+            return Results.Ok(EpubDeviceProfile.GetDefaults());
+        }
+    }
+
+    private static async Task<IResult> HandlePutEpubProfiles(
+        string id,
+        [FromBody] List<EpubDeviceProfile> profiles,
+        HttpContext httpContext,
+        [FromServices] DiarSpeicherDbContext db,
+        CancellationToken ct)
+    {
+        if (httpContext.Items[AuthUserKey] is not AuthUser user) return Results.Unauthorized();
+
+        var targetId = string.Equals(id, "me", StringComparison.OrdinalIgnoreCase) ? user.Id : id;
+        if (user.Id != targetId && !user.IsServerOwner && !user.HasRole("admin"))
+        {
+            return Results.Forbid();
+        }
+
+        var prefs = await db.UserPreferences.FirstOrDefaultAsync(p => p.UserId == targetId, ct);
+        if (prefs == null)
+        {
+            prefs = new UserPreferences
+            {
+                UserId = targetId,
+                EpubProfilesJson = JsonSerializer.Serialize(profiles)
+            };
+            db.UserPreferences.Add(prefs);
+        }
+        else
+        {
+            prefs.EpubProfilesJson = JsonSerializer.Serialize(profiles);
+        }
+
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new { updated = true, count = profiles.Count });
     }
 }

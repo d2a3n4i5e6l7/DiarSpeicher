@@ -1,17 +1,10 @@
 services:
     diarspeicher:
-        build:
-            context: .
-            dockerfile: Dockerfile
         image: diarspeicher:latest
         container_name: diarspeicher
-        pull_policy: build
         user: "0:0"
-        cpus: 3.0
-        cpuset: "0-5"
-        mem_limit: 4g
-        mem_reservation: 2g
-        memswap_limit: 4g
+        mem_limit: 2g
+        mem_reservation: 1g
         environment:
             - PUID=${PUID:-1000}
             - PGID=${PGID:-1000}
@@ -20,17 +13,17 @@ services:
             - Storage__Upload__EnableUpload=${ENABLE_UPLOAD:-true}
             - Storage__Backup__Enabled=${ENABLE_BACKUP:-true}
             - Storage__Backup__IntervalHours=${BACKUP_INTERVAL_HOURS:-12}
-            # Cada disco montado abajo necesita su indice aqui, o el explorador
-            # de carpetas lo rechaza por estar fuera de las raices. En cuanto se
-            # declara una, la de por defecto deja de aplicarse.
             - Libraries__Roots__0=/libraries
             - Libraries__Roots__1=/libraries-sdcard
+            - Libraries__Roots__2=/libraries-hdd
             - Logging__LogLevel__Default=${LOG_LEVEL:-Information}
             - Logging__LogLevel__Microsoft=Warning
+            - Storage__Watcher__WatchRootsOnly=true
         volumes:
             - ${STORAGE_PATH:-./storage}:/data
             - ${LIBRARIES_PATH:-./libraries}:/libraries
             - ${SDCARD_PATH:-/mnt/e/Mangas/SDCard}:/libraries-sdcard
+            - ${HDD_PATH:-/mnt/e/Mangas/SDCard}:/libraries-hdd
         restart: unless-stopped
         logging:
             driver: json-file
@@ -43,3 +36,4 @@ services:
 networks:
     default:
         name: ${NETWORK_NAME:-gateway_net}
+        external: true

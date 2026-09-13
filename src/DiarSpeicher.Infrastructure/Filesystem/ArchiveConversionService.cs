@@ -39,10 +39,10 @@ public class ArchiveConversionService : IArchiveConversionService
     private readonly ILogger<ArchiveConversionService> _logger;
     private readonly ITrashService _trash;
 
-    public ArchiveConversionService(ILogger<ArchiveConversionService> logger, ITrashService trash)
+    public ArchiveConversionService(ILogger<ArchiveConversionService> logger, ITrashService? trash = null)
     {
         _logger = logger;
-        _trash = trash;
+        _trash = trash ?? new NullTrashService();
     }
 
     public async Task<IReadOnlyList<ArchiveConversion>> ConvertDirectoryAsync(

@@ -18,12 +18,14 @@ import {
 	Select,
 	Stack,
 	Switch,
+	Tab,
 	Table,
 	TableBody,
 	TableCell,
 	TableContainer,
 	TableHead,
 	TableRow,
+	Tabs,
 	TextField,
 	Tooltip,
 	Typography,
@@ -36,10 +38,13 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import { useCallback, useEffect, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import HudFrame from "../components/HudFrame";
+import EpubProfilesTab from "../components/EpubProfilesTab";
+import { DEFAULT_EPUB_PROFILES } from "../constants/epubProfiles";
 import { DS } from "../theme";
 import {
 	usersApi,
 	rolesApi,
+	epubProfilesApi,
 	DEFAULT_PERMISSIONS,
 	PERMISSION_GROUPS,
 	PERMISSION_WILDCARD,
@@ -51,6 +56,7 @@ import {
 	type ProtocolItem,
 	type UserItem,
 	type RoleItem,
+	type EpubDeviceProfile,
 } from "../api/endpoints";
 
 /**
@@ -275,12 +281,31 @@ export default function UsersPage() {
 	const [openEdit, setOpenEdit] = useState(false);
 	const [editingUser, setEditingUser] = useState<UserItem | null>(null);
 	const [editForm, setEditForm] = useState<UserFormState>(EMPTY_FORM);
+	const [editTab, setEditTab] = useState(0);
+	const [epubProfiles, setEpubProfiles] = useState<EpubDeviceProfile[]>([]);
+	const [loadingProfiles, setLoadingProfiles] = useState(false);
 
 	const [openPassword, setOpenPassword] = useState(false);
 	const [passwordUser, setPasswordUser] = useState<UserItem | null>(null);
 	const [newPasswordVal, setNewPasswordVal] = useState("");
 
 	const [deleteUser, setDeleteUser] = useState<UserItem | null>(null);
+
+	const handleOpenEdit = async (u: UserItem) => {
+		setEditingUser(u);
+		setEditForm(formFromUser(u));
+		setEditTab(0);
+		setOpenEdit(true);
+		setLoadingProfiles(true);
+		try {
+			const loaded = await epubProfilesApi.getProfiles(u.id);
+			setEpubProfiles(loaded && loaded.length > 0 ? loaded : DEFAULT_EPUB_PROFILES);
+		} catch {
+			setEpubProfiles(DEFAULT_EPUB_PROFILES);
+		} finally {
+			setLoadingProfiles(false);
+		}
+	};
 
 	const loadData = useCallback(async () => {
 		setLoading(true);
@@ -331,6 +356,14 @@ export default function UsersPage() {
 		};
 	}, []);
 
+	useEffect(() => {
+		if (!successMsg) return;
+		const timer = setTimeout(() => {
+			setSuccessMsg(null);
+		}, 6000);
+		return () => clearTimeout(timer);
+	}, [successMsg]);
+
 	const handleCreateUser = async (e: React.SyntheticEvent) => {
 		e.preventDefault();
 		if (!createForm.username.trim() || !createForm.password) {
@@ -369,14 +402,17 @@ export default function UsersPage() {
 		setError(null);
 		try {
 			const age = editForm.age.trim();
-			await usersApi.update(editingUser.id, {
-				role: editForm.role || undefined,
-				permissions: serializePermissions(editForm),
-				isEnabled: editForm.isEnabled,
-				allowedProtocols: serializeProtocols(editForm),
-				ageRestriction: age === "" ? undefined : Number(age),
-				clearAgeRestriction: age === "" ? true : undefined,
-			});
+			await Promise.all([
+				usersApi.update(editingUser.id, {
+					role: editForm.role || undefined,
+					permissions: serializePermissions(editForm),
+					isEnabled: editForm.isEnabled,
+					allowedProtocols: serializeProtocols(editForm),
+					ageRestriction: age === "" ? undefined : Number(age),
+					clearAgeRestriction: age === "" ? true : undefined,
+				}),
+				epubProfilesApi.saveProfiles(editingUser.id, epubProfiles),
+			]);
 			setSuccessMsg(`Usuario "${editingUser.username}" actualizado.`);
 			setOpenEdit(false);
 			await loadData();
@@ -420,6 +456,54 @@ export default function UsersPage() {
 			setSavingUser(false);
 		}
 	};
+
+	let editTabContent: React.ReactNode;
+	if (editTab === 0) {
+		editTabContent = (
+			<Stack spacing={2.5} sx={{ mt: 1 }}>
+				<FormControl fullWidth size="small">
+					<InputLabel id="edit-user-role-label">Rol Asignado</InputLabel>
+					<Select
+						labelId="edit-user-role-label"
+						label="Rol Asignado"
+						value={editForm.role}
+						onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+					>
+						{roleOptions(roles, editForm.role).map((name) => (
+							<MenuItem key={name} value={name}>
+								{name}
+							</MenuItem>
+						))}
+					</Select>
+				</FormControl>
+
+				<FormControlLabel
+					control={
+						<Switch
+							checked={editForm.isEnabled}
+							onChange={(e) => setEditForm({ ...editForm, isEnabled: e.target.checked })}
+						/>
+					}
+					label="Cuenta Habilitada"
+				/>
+
+				<AccessFields form={editForm} protocols={protocols} onChange={setEditForm} />
+			</Stack>
+		);
+	} else if (loadingProfiles) {
+		editTabContent = (
+			<Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", p: 6 }}>
+				<CircularProgress size={28} thickness={5} />
+			</Box>
+		);
+	} else {
+		editTabContent = (
+			<EpubProfilesTab
+				profiles={epubProfiles}
+				onChange={setEpubProfiles}
+			/>
+		);
+	}
 
 	let tableContent: React.ReactNode;
 	if (loading) {
@@ -573,9 +657,7 @@ export default function UsersPage() {
 											<IconButton
 												size="small"
 												onClick={() => {
-													setEditingUser(u);
-													setEditForm(formFromUser(u));
-													setOpenEdit(true);
+													void handleOpenEdit(u);
 												}}
 											>
 												<EditIcon fontSize="small" />
@@ -716,44 +798,35 @@ export default function UsersPage() {
 			</Dialog>
 
 			{/* Modal: Editar Usuario */}
-			<Dialog open={openEdit} onClose={() => setOpenEdit(false)} maxWidth="sm" fullWidth>
+			<Dialog open={openEdit} onClose={() => setOpenEdit(false)} maxWidth="lg" fullWidth>
 				<HudFrame />
 				<form
 					onSubmit={(e) => {
 						void handleUpdateUser(e);
 					}}
 				>
-					<DialogTitle>Editar operador: {editingUser?.username}</DialogTitle>
-					<DialogContent dividers>
-						<Stack spacing={2.5} sx={{ mt: 1 }}>
-							<FormControl fullWidth size="small">
-								<InputLabel id="edit-user-role-label">Rol Asignado</InputLabel>
-								<Select
-									labelId="edit-user-role-label"
-									label="Rol Asignado"
-									value={editForm.role}
-									onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-								>
-									{roleOptions(roles, editForm.role).map((name) => (
-										<MenuItem key={name} value={name}>
-											{name}
-										</MenuItem>
-									))}
-								</Select>
-							</FormControl>
-
-							<FormControlLabel
-								control={
-									<Switch
-										checked={editForm.isEnabled}
-										onChange={(e) => setEditForm({ ...editForm, isEnabled: e.target.checked })}
-									/>
-								}
-								label="Cuenta Habilitada"
-							/>
-
-							<AccessFields form={editForm} protocols={protocols} onChange={setEditForm} />
-						</Stack>
+					<DialogTitle sx={{ pb: 1 }}>Editar operador: {editingUser?.username}</DialogTitle>
+					<Tabs
+						value={editTab}
+						onChange={(_, val: number) => setEditTab(val)}
+						sx={{
+							px: 3,
+							borderBottom: `1px solid ${DS.border}`,
+							backgroundColor: DS.bgSunken,
+							"& .MuiTab-root": {
+								fontFamily: "'Rajdhani', sans-serif",
+								fontWeight: 700,
+								fontSize: "13px",
+								letterSpacing: "1px",
+								textTransform: "uppercase",
+							},
+						}}
+					>
+						<Tab label="Protocolos y Permisos" />
+						<Tab label="Perfiles EPUB / Dispositivos" />
+					</Tabs>
+					<DialogContent dividers sx={{ p: editTab === 1 ? 2 : 3 }}>
+						{editTabContent}
 					</DialogContent>
 					<DialogActions>
 						<Button onClick={() => setOpenEdit(false)} disabled={savingUser}>

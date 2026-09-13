@@ -1,4 +1,5 @@
-﻿using DiarSpeicher.Core.Domain.Entities;
+using System.IO.Compression;
+using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Komga;
 using DiarSpeicher.Core.Domain.Models;
@@ -19,6 +20,7 @@ public class KomgaService : IKomgaService
     private readonly ILogger<KomgaService> _logger;
 
     private readonly ICompositeBookProcessor? _pageProcessor;
+    private readonly IEpubProfileProvider? _epubProfileProvider;
 
     /// <summary>
     /// El procesador es opcional: sin el, la lista de paginas sale sin dimensiones, que es
@@ -28,11 +30,13 @@ public class KomgaService : IKomgaService
     public KomgaService(
         DiarSpeicherDbContext db,
         ILogger<KomgaService> logger,
-        ICompositeBookProcessor? pageProcessor = null)
+        ICompositeBookProcessor? pageProcessor = null,
+        IEpubProfileProvider? epubProfileProvider = null)
     {
         _db = db;
         _logger = logger;
         _pageProcessor = pageProcessor;
+        _epubProfileProvider = epubProfileProvider;
     }
 
     public async Task<List<KomgaLibraryDto>> GetLibrariesAsync(AuthUser user, CancellationToken ct = default)
@@ -217,13 +221,28 @@ public class KomgaService : IKomgaService
             ? null
             : await _db.ReadingSessions.FirstOrDefaultAsync(s => s.MediaId == id && s.UserId == user.Id, ct);
 
-        return ToBookDto(book, session);
+        int? overridePages = null;
+        var isEpub = book.Extension.TrimStart('.').Equals("epub", StringComparison.OrdinalIgnoreCase)
+            || book.Path.EndsWith(".epub", StringComparison.OrdinalIgnoreCase);
+        if (isEpub)
+        {
+            overridePages = await GetEpubTotalPagesAsync(book, ct);
+        }
+
+        return ToBookDto(book, session, overridePages);
     }
 
     public async Task<List<KomgaBookPageDto>> GetBookPagesAsync(AuthUser user, string id, CancellationToken ct = default)
     {
         var book = await _db.Media.ForUser(user).FirstOrDefaultAsync(m => m.Id == id, ct);
         if (book == null || book.Pages <= 0) return [];
+
+        var isEpub = book.Extension.TrimStart('.').Equals("epub", StringComparison.OrdinalIgnoreCase)
+            || book.Path.EndsWith(".epub", StringComparison.OrdinalIgnoreCase);
+        if (isEpub)
+        {
+            return await GetEpubBookPagesAsync(book, ct);
+        }
 
         var measured = await _db.MediaPages
             .Where(p => p.MediaId == book.Id)
@@ -253,17 +272,17 @@ public class KomgaService : IKomgaService
 
         // Sin procesador o con el archivo ilegible: la lista sintetizada de siempre. Los
         // clientes de Komga no abriran el libro, pero el resto de la API sigue respondiendo.
-        var pages = new List<KomgaBookPageDto>();
+        var fallbackPages = new List<KomgaBookPageDto>();
         for (var i = 1; i <= book.Pages; i++)
         {
-            pages.Add(new KomgaBookPageDto
+            fallbackPages.Add(new KomgaBookPageDto
             {
                 Number = i,
                 FileName = $"page_{i:D4}.jpg",
                 MediaType = "image/jpeg"
             });
         }
-        return pages;
+        return fallbackPages;
     }
 
     /// <summary>
@@ -274,6 +293,7 @@ public class KomgaService : IKomgaService
     private async Task<List<MediaPage>> MeasurePagesAsync(Media book, CancellationToken ct)
     {
         if (_pageProcessor is null) return [];
+        if (book.Extension.TrimStart('.').Equals("epub", StringComparison.OrdinalIgnoreCase) || book.Path.EndsWith(".epub", StringComparison.OrdinalIgnoreCase)) return [];
 
         _logger.LogInformation(
             "Midiendo {Pages} paginas de {BookId}; la primera apertura de un libro es lenta",
@@ -441,7 +461,7 @@ public class KomgaService : IKomgaService
         };
     }
 
-    private static KomgaBookDto ToBookDto(Media m, ReadingSession? s)
+    private static KomgaBookDto ToBookDto(Media m, ReadingSession? s, int? overridePagesCount = null)
     {
         var title = m.Metadata?.Title ?? m.Name;
         var ext = ContentTypeExtensions.FromExtension(m.Extension);
@@ -486,7 +506,7 @@ public class KomgaService : IKomgaService
             {
                 Status = "READY",
                 MediaType = ext.ToMimeType(),
-                PagesCount = m.Pages
+                PagesCount = overridePagesCount ?? m.Pages
             },
             Metadata = new KomgaBookMetadataDto
             {
@@ -498,4 +518,83 @@ public class KomgaService : IKomgaService
         };
     }
 
+    private async Task<List<KomgaBookPageDto>> GetEpubBookPagesAsync(Media book, CancellationToken ct)
+    {
+        // Limpiar cualquier medición estática previa de este libro EPUB de la base de datos
+        var stalePages = await _db.MediaPages
+            .Where(p => p.MediaId == book.Id)
+            .ToListAsync(ct);
+        if (stalePages.Count > 0)
+        {
+            _db.MediaPages.RemoveRange(stalePages);
+            await _db.SaveChangesAsync(ct);
+        }
+
+        var profile = _epubProfileProvider != null
+            ? await _epubProfileProvider.GetCurrentProfileAsync(ct)
+            : EpubDeviceProfile.GetDefaults()[0];
+
+        await using var archive = await ZipFile.OpenReadAsync(book.Path, ct);
+        var spine = await EpubBookProcessor.GetSpineEntriesAsync(archive, ct);
+        if (spine.Count == 0) spine = EpubBookProcessor.GetFallbackHtmlEntries(archive);
+        var cover = await EpubBookProcessor.FindCoverEntryAsync(archive, ct);
+        var map = await EpubRasterizer.GetOrBuildPageMapAsync(archive, book.Path, spine, cover, profile, ct);
+
+        var pages = new List<KomgaBookPageDto>(map.TotalPages);
+        for (var i = 1; i <= map.TotalPages; i++)
+        {
+            var target = map.Pages[i - 1];
+            int width = profile.Width;
+            int? height = profile.AutoHeight ? null : profile.Height;
+            string mediaType = "image/webp";
+
+            if (target.IsImageOnly && target.ImageWidth.HasValue && target.ImageHeight.HasValue)
+            {
+                width = target.ImageWidth.Value;
+                height = target.ImageHeight.Value;
+                var ext = Path.GetExtension(target.EntryFullName).ToLowerInvariant();
+                mediaType = ext switch
+                {
+                    ".png" => "image/png",
+                    ".webp" => "image/webp",
+                    _ => "image/jpeg"
+                };
+            }
+
+            pages.Add(new KomgaBookPageDto
+            {
+                Number = i,
+                FileName = $"page_{i:D4}.webp",
+                MediaType = mediaType,
+                Width = width,
+                Height = height
+            });
+        }
+        return pages;
+    }
+
+    private async Task<int> GetEpubTotalPagesAsync(Media book, CancellationToken ct)
+    {
+        try
+        {
+            if (File.Exists(book.Path))
+            {
+                var profile = _epubProfileProvider != null
+                    ? await _epubProfileProvider.GetCurrentProfileAsync(ct)
+                    : EpubDeviceProfile.GetDefaults()[0];
+
+                await using var archive = await ZipFile.OpenReadAsync(book.Path, ct);
+                var spine = await EpubBookProcessor.GetSpineEntriesAsync(archive, ct);
+                if (spine.Count == 0) spine = EpubBookProcessor.GetFallbackHtmlEntries(archive);
+                var cover = await EpubBookProcessor.FindCoverEntryAsync(archive, ct);
+                var map = await EpubRasterizer.GetOrBuildPageMapAsync(archive, book.Path, spine, cover, profile, ct);
+                return map.TotalPages;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error calculando mapa de paginas EPUB para {Path}", book.Path);
+        }
+        return book.Pages;
+    }
 }

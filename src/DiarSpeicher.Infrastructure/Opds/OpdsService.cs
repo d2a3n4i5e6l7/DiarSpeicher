@@ -1,4 +1,4 @@
-﻿using DiarSpeicher.Core.Domain.Entities;
+using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Opds;
@@ -428,7 +428,9 @@ public class OpdsService : IOpdsService
         if (book == null) return (null, null);
 
         var correctPage = zeroBased ? pageNumber + 1 : pageNumber;
-        if (correctPage < 1 || (book.Pages > 0 && correctPage > book.Pages))
+        var isEpub = book.Extension.TrimStart('.').Equals("epub", StringComparison.OrdinalIgnoreCase)
+            || book.Path.EndsWith(".epub", StringComparison.OrdinalIgnoreCase);
+        if (correctPage < 1 || (!isEpub && book.Pages > 0 && correctPage > book.Pages))
         {
             return (null, book);
         }
