@@ -8,9 +8,6 @@
     <PackageReference Include="HotChocolate.AspNetCore" Version="16.6.4" />
     <PackageReference Include="HotChocolate.Data.EntityFramework" Version="16.6.4" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11">
-      <!-- "runtime" es obligatorio aunque arrastre Roslyn al publish: dotnet ef necesita
-           el ensamblado de Design en la salida del proyecto de arranque para construir el
-           modelo. Quitarlo ahorra 22 MB y rompe "dotnet ef migrations add". -->
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
@@ -20,14 +17,6 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-
-    <!-- El SDK Web activa el recolector de servidor por defecto: un monton por nucleo y un
-         limite duro del 75% de lo que da el cgroup. Con 4 GB eso son 3 GB antes de que note
-         presion, asi que se queda con lo que pilla aunque no lo use. Esto no es un servidor
-         con miles de peticiones a la vez, es uno personal con rafagas al escanear: el
-         recolector de estacion de trabajo usa un solo monton, recoge mas a menudo y devuelve
-         antes. Se cambia aqui y no por variable de entorno porque la imagen solo copia el
-         binario y los appsettings no llegan. -->
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
   </PropertyGroup>

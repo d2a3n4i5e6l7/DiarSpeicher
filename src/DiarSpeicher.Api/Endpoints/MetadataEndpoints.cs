@@ -39,6 +39,9 @@ public static class MetadataEndpoints
         });
 
         group.MapPost("/import", HandleImportAsync).DisableAntiforgery();
+        group.MapPost("/import/init", HandleImportInitAsync).DisableAntiforgery();
+        group.MapPost("/import/chunk", HandleImportChunkAsync).DisableAntiforgery();
+        group.MapPost("/import/complete", HandleImportCompleteAsync).DisableAntiforgery();
 
         // Sin permiso de gestion a proposito: es una imagen, y la ve cualquiera que ya
         // puede ver la ficha. Lo que si se acota es el host de origen, en IsAllowedCover.
@@ -153,11 +156,7 @@ public static class MetadataEndpoints
             var raw = disposition.FileNameStar.HasValue ? disposition.FileNameStar.Value : disposition.FileName.Value;
             var name = Path.GetFileName(raw ?? string.Empty);
 
-            var accepted = name.EndsWith(".zst", StringComparison.OrdinalIgnoreCase)
-                || name.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase)
-                || name.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase);
-
-            if (!accepted)
+            if (!IsAcceptedDumpExtension(name))
             {
                 return Results.BadRequest(new { error = "Solo se aceptan volcados .zst, .tar.gz o .tgz." });
             }
@@ -167,6 +166,118 @@ public static class MetadataEndpoints
 
         return Results.BadRequest(new { error = "No llegó ningún fichero." });
     }
+
+    public sealed record MetadataImportInitRequest(string FileName, long TotalBytes);
+    public sealed record MetadataImportCompleteRequest(string UploadId, string FileName);
+
+    private static async Task<IResult> HandleImportInitAsync(
+        MetadataImportInitRequest request,
+        HttpContext httpContext,
+        [FromServices] IMangaBakaIngestService ingest,
+        [FromServices] IOptions<MangaBakaOptions> options,
+        CancellationToken ct)
+    {
+        if (!IsAllowed(httpContext)) return Forbidden();
+
+        if (ingest.GetStatus().Busy)
+        {
+            return Results.Conflict(new { error = "Ya hay una ingesta del volcado en curso." });
+        }
+
+        var fileName = Path.GetFileName(request.FileName ?? string.Empty);
+        if (!IsAcceptedDumpExtension(fileName))
+        {
+            return Results.BadRequest(new { error = "Solo se aceptan volcados .zst, .tar.gz o .tgz." });
+        }
+
+        if (request.TotalBytes <= 0 || request.TotalBytes > options.Value.MaxArchiveBytes)
+        {
+            return Results.BadRequest(new { error = $"El tamaño ({request.TotalBytes} bytes) supera el máximo configurado ({options.Value.MaxArchiveBytes})." });
+        }
+
+        var uploadId = Guid.NewGuid().ToString("N");
+        var dbDir = options.Value.ResolveDatabasePath();
+        Directory.CreateDirectory(dbDir);
+        var partPath = Path.Combine(dbDir, $"import_{uploadId}.part");
+
+        await File.WriteAllBytesAsync(partPath, [], ct);
+
+        const int chunkSize = 50 * 1024 * 1024;
+        return Results.Ok(new { uploadId, chunkSize });
+    }
+
+    private static async Task<IResult> HandleImportChunkAsync(
+        [FromQuery] string uploadId,
+        [FromQuery] long offset,
+        HttpContext httpContext,
+        [FromServices] IOptions<MangaBakaOptions> options,
+        CancellationToken ct)
+    {
+        if (!IsAllowed(httpContext)) return Forbidden();
+
+        if (string.IsNullOrWhiteSpace(uploadId) || !uploadId.All(char.IsLetterOrDigit))
+        {
+            return Results.BadRequest(new { error = "Identificador de subida no válido." });
+        }
+
+        var dbDir = options.Value.ResolveDatabasePath();
+        var partPath = Path.Combine(dbDir, $"import_{uploadId}.part");
+        if (!File.Exists(partPath))
+        {
+            return Results.NotFound(new { error = "Sesión de subida no encontrada o expirada." });
+        }
+
+        var fileInfo = new FileInfo(partPath);
+        if (fileInfo.Length != offset)
+        {
+            return Results.Conflict(new { error = "Desincronización de offset.", currentOffset = fileInfo.Length });
+        }
+
+        var sizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (sizeFeature is not null && !sizeFeature.IsReadOnly)
+        {
+            sizeFeature.MaxRequestBodySize = 75 * 1024 * 1024;
+        }
+
+        await using (var fs = new FileStream(partPath, FileMode.Open, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+        {
+            fs.Seek(offset, SeekOrigin.Begin);
+            await httpContext.Request.Body.CopyToAsync(fs, 81920, ct);
+        }
+
+        fileInfo.Refresh();
+        return Results.Ok(new { offset = fileInfo.Length });
+    }
+
+    private static IResult HandleImportCompleteAsync(
+        MetadataImportCompleteRequest request,
+        HttpContext httpContext,
+        [FromServices] IMangaBakaIngestService ingest,
+        [FromServices] IOptions<MangaBakaOptions> options)
+    {
+        if (!IsAllowed(httpContext)) return Forbidden();
+
+        if (string.IsNullOrWhiteSpace(request.UploadId) || !request.UploadId.All(char.IsLetterOrDigit))
+        {
+            return Results.BadRequest(new { error = "Identificador de subida no válido." });
+        }
+
+        var fileName = Path.GetFileName(request.FileName ?? string.Empty);
+        var dbDir = options.Value.ResolveDatabasePath();
+        var partPath = Path.Combine(dbDir, $"import_{request.UploadId}.part");
+        if (!File.Exists(partPath))
+        {
+            return Results.NotFound(new { error = "Fichero de subida no encontrado." });
+        }
+
+        var outcome = ingest.TryStartImportFile(partPath, fileName);
+        return ToResult(outcome, ingest);
+    }
+
+    private static bool IsAcceptedDumpExtension(string name) =>
+        name.EndsWith(".zst", StringComparison.OrdinalIgnoreCase)
+        || name.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase)
+        || name.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Un fallo de la ingesta no es un conflicto: devolver 409 con "ya hay una en curso"

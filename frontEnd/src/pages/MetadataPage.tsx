@@ -11,6 +11,7 @@ import { METADATA_ARCHIVE_EXTENSIONS, metadataApi, type MetadataStatus } from ".
 import { DS } from "../theme";
 
 const POLL_BUSY_MS = 1500;
+const POLL_IDLE_MS = 10000;
 
 const STATE_LABELS: Record<string, string> = {
 	Absent: "SIN VOLCADO",
@@ -33,6 +34,7 @@ export default function MetadataPage() {
 	const [error, setError] = useState<string | null>(null);
 	const [dragging, setDragging] = useState(false);
 	const [uploading, setUploading] = useState(false);
+	const [uploadPercent, setUploadPercent] = useState<number | null>(null);
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
 
 	const refresh = useCallback(async () => {
@@ -46,16 +48,21 @@ export default function MetadataPage() {
 		let timer: number | undefined;
 
 		const tick = async () => {
+			let delay = POLL_IDLE_MS;
+
 			try {
 				const next = await metadataApi.status();
 				if (!mounted) return;
 				setStatus(next);
-				if (next.busy) {
-					timer = window.setTimeout(() => void tick(), POLL_BUSY_MS);
-				}
+				if (next.busy) delay = POLL_BUSY_MS;
 			} catch (err: unknown) {
-				if (mounted) setError(err instanceof Error ? err.message : "No se pudo leer el estado del volcado.");
+				if (!mounted) return;
+				setError(err instanceof Error ? err.message : "No se pudo leer el estado del volcado.");
 			}
+
+			// Reprogramar siempre, tambien tras un fallo: un corte de red de un segundo dejaba
+			// la pantalla congelada en la ultima fase vista hasta recargarla a mano.
+			timer = window.setTimeout(() => void tick(), delay);
 		};
 
 		void tick();
@@ -85,12 +92,16 @@ export default function MetadataPage() {
 		}
 
 		setUploading(true);
+		setUploadPercent(0);
 		try {
-			await metadataApi.import(file);
+			await metadataApi.importChunked(file, (pct) => {
+				setUploadPercent(pct);
+			});
 		} catch (err: unknown) {
 			setError(err instanceof Error ? err.message : "No se pudo ingerir el fichero.");
 		} finally {
 			setUploading(false);
+			setUploadPercent(null);
 			await refresh().catch(() => undefined);
 		}
 	};
@@ -98,6 +109,26 @@ export default function MetadataPage() {
 	const busy = status?.busy === true || uploading;
 	const state = status?.state ?? "Absent";
 	const percent = status?.percent;
+
+	let displayStateLabel = STATE_LABELS[state] ?? state.toUpperCase();
+	if (uploading) {
+		displayStateLabel = `SUBIENDO (${uploadPercent ?? 0}%)`;
+	}
+
+	let displayMessage = status?.message;
+	if (uploading) {
+		displayMessage = `Transfiriendo volcado en fragmentos de 50 MB (${uploadPercent ?? 0}%)`;
+	}
+
+	let progressVariant: "determinate" | "indeterminate" = "indeterminate";
+	let progressValue = 0;
+	if (uploading) {
+		progressVariant = "determinate";
+		progressValue = uploadPercent ?? 0;
+	} else if (percent !== null && percent !== undefined) {
+		progressVariant = "determinate";
+		progressValue = percent;
+	}
 
 	return (
 		<Box sx={READABLE_COLUMN}>
@@ -129,7 +160,7 @@ export default function MetadataPage() {
 						<Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap", gap: 1 }}>
 							<Chip
 								size="small"
-								label={STATE_LABELS[state] ?? state.toUpperCase()}
+								label={displayStateLabel}
 								sx={{ backgroundColor: "rgba(var(--ds-red-rgb), 0.15)", color: stateColor(state), border: `1px solid ${DS.redDark}` }}
 							/>
 							{status && status.seriesCount > 0 && (
@@ -143,9 +174,9 @@ export default function MetadataPage() {
 								</Box>
 							)}
 						</Stack>
-						{status?.message && (
+						{displayMessage && (
 							<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: DS.muted, mt: 1 }}>
-								{status.message}
+								{displayMessage}
 							</Typography>
 						)}
 					</Box>
@@ -153,8 +184,8 @@ export default function MetadataPage() {
 
 				{busy && (
 					<LinearProgress
-						variant={percent === null || percent === undefined ? "indeterminate" : "determinate"}
-						value={percent ?? 0}
+						variant={progressVariant}
+						value={progressValue}
 						sx={{ height: 4, mb: 2 }}
 					/>
 				)}

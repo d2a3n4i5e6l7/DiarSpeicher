@@ -191,6 +191,9 @@ export default function UploadPanel({ libraryId, libraryPath, initialSubpath, on
 		setError(null);
 		const newItems = files.map((f) => createQueueItem(f));
 		setItems((prev) => [...prev, ...newItems]);
+		for (const item of newItems) {
+			void item.tusUpload.start();
+		}
 	};
 
 	const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {

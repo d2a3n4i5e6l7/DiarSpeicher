@@ -1,4 +1,4 @@
-import { http, gatewayHttp, API_BASE } from "./client";
+import { http, gatewayHttp, API_BASE, request } from "./client";
 
 export interface LoginPayload {
     username: string;
@@ -655,6 +655,40 @@ export const metadataApi = {
         const form = new FormData();
         form.append("file", file);
         return http.upload<void>("/api/v2/metadata/import", form);
+    },
+    importChunked: async (file: File, onProgress?: (percentage: number) => void): Promise<void> => {
+        const init = await http.post<{ uploadId: string; chunkSize: number }>("/api/v2/metadata/import/init", {
+            fileName: file.name,
+            totalBytes: file.size,
+        });
+
+        const { uploadId, chunkSize } = init;
+        let offset = 0;
+        const total = file.size;
+
+        while (offset < total) {
+            const nextOffset = Math.min(offset + chunkSize, total);
+            const chunk = file.slice(offset, nextOffset);
+
+            const chunkResult = await request<{ offset: number }>(
+                `/api/v2/metadata/import/chunk?uploadId=${encodeURIComponent(uploadId)}&offset=${String(offset)}`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/octet-stream" },
+                    body: chunk,
+                },
+                API_BASE
+            );
+
+            offset = chunkResult.offset;
+            const pct = Math.min(100, Math.round((offset / total) * 100));
+            onProgress?.(pct);
+        }
+
+        await http.post<void>("/api/v2/metadata/import/complete", {
+            uploadId,
+            fileName: file.name,
+        });
     },
     candidates: (seriesId: string, limit = 10) => http.get<MangaBakaCandidate[]>(`/api/v2/metadata/series/${seriesId}/candidates?limit=${String(limit)}`),
     match: (seriesId: string, mangaBakaId: number) => http.put<{ matched: boolean }>(`/api/v2/metadata/series/${seriesId}/match/${String(mangaBakaId)}`),

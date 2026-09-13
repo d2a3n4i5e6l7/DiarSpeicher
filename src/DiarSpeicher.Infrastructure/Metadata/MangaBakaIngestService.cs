@@ -29,6 +29,9 @@ public interface IMangaBakaIngestService
     /// <summary>Ingiere un volcado que trae el usuario, ya sea `.zst` o `.tar.gz`.</summary>
     Task<MangaBakaIngestOutcome> TryImportAsync(Stream archive, string fileName, CancellationToken cancellationToken);
 
+    /// <summary>Inicia en segundo plano la ingesta de un fichero temporal ya guardado en disco.</summary>
+    MangaBakaIngestOutcome TryStartImportFile(string tempFilePath, string fileName);
+
     /// <summary>Ultimo mensaje de estado, que en un fallo es el motivo.</summary>
     string? LastMessage { get; }
 
@@ -175,6 +178,51 @@ public class MangaBakaIngestService : IMangaBakaIngestService
         {
             lock (_sync) { _busy = false; }
         }
+    }
+
+    public MangaBakaIngestOutcome TryStartImportFile(string tempFilePath, string fileName)
+    {
+        lock (_sync)
+        {
+            if (_busy) return MangaBakaIngestOutcome.Busy;
+            _busy = true;
+            _state = MangaBakaState.Decompressing;
+            _percent = null;
+            _message = $"Descomprimiendo {fileName}";
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                Directory.CreateDirectory(_options.ResolveDatabasePath());
+                await using (var stream = new FileStream(tempFilePath, FileMode.Open, FileAccess.Read, FileShare.None, 81920, useAsync: true))
+                {
+                    await DecompressAsync(stream, fileName, CancellationToken.None);
+                }
+                await BuildSearchIndexAsync(CancellationToken.None);
+                Succeed();
+            }
+            catch (Exception ex)
+            {
+                Fail(ex, $"No se pudo ingerir {fileName}");
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(tempFilePath)) File.Delete(tempFilePath);
+                }
+                catch
+                {
+                    // Ignorar fallo al eliminar fichero temporal
+                }
+
+                lock (_sync) { _busy = false; }
+            }
+        });
+
+        return MangaBakaIngestOutcome.Started;
     }
 
     /// <summary>

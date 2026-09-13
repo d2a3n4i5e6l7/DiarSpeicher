@@ -136,7 +136,7 @@ public static class TusEndpoints
         Directory.CreateDirectory(uploadsDir);
 
         var uploadId = Guid.NewGuid().ToString("N");
-        var partPath = Path.Combine(uploadsDir, $"{uploadId}.part");
+        var partPath = Path.Combine(fullTargetDir, $".{safeFileName}.{uploadId}.part");
         var metaPath = Path.Combine(uploadsDir, $"{uploadId}.meta");
         var finalPath = Path.Combine(fullTargetDir, safeFileName);
 
@@ -148,6 +148,7 @@ public static class TusEndpoints
             FileName = safeFileName,
             TotalBytes = uploadLength,
             FinalPath = finalPath,
+            PartPath = partPath,
             UserId = user.Id,
             CreatedAt = DateTimeOffset.UtcNow
         };
@@ -177,9 +178,8 @@ public static class TusEndpoints
 
         var uploadsDir = storageOptions.Value.ResolveUploadsPath();
         var metaPath = Path.Combine(uploadsDir, $"{id}.meta");
-        var partPath = Path.Combine(uploadsDir, $"{id}.part");
 
-        if (!File.Exists(metaPath) || !File.Exists(partPath))
+        if (!File.Exists(metaPath))
         {
             return Results.NotFound();
         }
@@ -187,6 +187,18 @@ public static class TusEndpoints
         var metaJson = await File.ReadAllTextAsync(metaPath, ct);
         var meta = JsonSerializer.Deserialize<TusUploadMeta>(metaJson);
         if (meta == null) return Results.NotFound();
+
+        // El temporal vive junto al fichero final, dentro de la biblioteca, no en el
+        // directorio de subidas: alli solo esta el .meta. La ruta se lee del meta, igual
+        // que hace el PATCH; el nombre antiguo solo sobrevive para sesiones ya abiertas.
+        var partPath = !string.IsNullOrEmpty(meta.PartPath)
+            ? meta.PartPath
+            : Path.Combine(uploadsDir, $"{id}.part");
+
+        if (!File.Exists(partPath))
+        {
+            return Results.NotFound();
+        }
 
         var currentLength = new FileInfo(partPath).Length;
 
@@ -240,9 +252,8 @@ public static class TusEndpoints
 
         var uploadsDir = storageOptions.Value.ResolveUploadsPath();
         var metaPath = Path.Combine(uploadsDir, $"{id}.meta");
-        var partPath = Path.Combine(uploadsDir, $"{id}.part");
 
-        if (!File.Exists(metaPath) || !File.Exists(partPath))
+        if (!File.Exists(metaPath))
         {
             return Results.NotFound();
         }
@@ -250,6 +261,15 @@ public static class TusEndpoints
         var metaJson = await File.ReadAllTextAsync(metaPath, ct);
         var meta = JsonSerializer.Deserialize<TusUploadMeta>(metaJson);
         if (meta == null) return Results.NotFound();
+
+        var partPath = !string.IsNullOrEmpty(meta.PartPath)
+            ? meta.PartPath
+            : Path.Combine(uploadsDir, $"{id}.part");
+
+        if (!File.Exists(partPath))
+        {
+            return Results.NotFound();
+        }
 
         var fileInfo = new FileInfo(partPath);
         var currentOffset = fileInfo.Length;
@@ -325,10 +345,27 @@ public static class TusEndpoints
 
         var uploadsDir = storageOptions.Value.ResolveUploadsPath();
         var metaPath = Path.Combine(uploadsDir, $"{id}.meta");
-        var partPath = Path.Combine(uploadsDir, $"{id}.part");
 
-        if (File.Exists(partPath)) File.Delete(partPath);
-        if (File.Exists(metaPath)) File.Delete(metaPath);
+        if (File.Exists(metaPath))
+        {
+            try
+            {
+                var metaJson = File.ReadAllText(metaPath);
+                var meta = JsonSerializer.Deserialize<TusUploadMeta>(metaJson);
+                if (meta != null && !string.IsNullOrEmpty(meta.PartPath) && File.Exists(meta.PartPath))
+                {
+                    File.Delete(meta.PartPath);
+                }
+            }
+            catch
+            {
+                // Ignorar error al limpiar partPath
+            }
+            File.Delete(metaPath);
+        }
+
+        var legacyPart = Path.Combine(uploadsDir, $"{id}.part");
+        if (File.Exists(legacyPart)) File.Delete(legacyPart);
 
         return Task.FromResult<IResult>(Results.NoContent());
     }
@@ -442,6 +479,7 @@ public static class TusEndpoints
         public string FileName { get; set; } = string.Empty;
         public long TotalBytes { get; set; }
         public string FinalPath { get; set; } = string.Empty;
+        public string PartPath { get; set; } = string.Empty;
         public string UserId { get; set; } = string.Empty;
         public DateTimeOffset CreatedAt { get; set; }
     }

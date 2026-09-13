@@ -5,7 +5,7 @@ export interface TusUploadOptions {
 	file: File;
 	libraryId: string;
 	subpath?: string;
-	chunkSize?: number; // Tamaño por chunk, por defecto 8 MB (8 * 1024 * 1024)
+	chunkSize?: number; // Tamaño por chunk, por defecto 50 MB (50 * 1024 * 1024)
 	onProgress?: (bytesUploaded: number, bytesTotal: number, percentage: number) => void;
 	onSuccess?: (fileUrl: string) => void;
 	onError?: (error: Error) => void;
@@ -32,7 +32,7 @@ export class TusUpload {
 	constructor(options: TusUploadOptions) {
 		this.options = {
 			...options,
-			chunkSize: options.chunkSize || 8 * 1024 * 1024, // 8 MB
+			chunkSize: options.chunkSize || 50 * 1024 * 1024, // 50 MB
 		};
 	}
 
@@ -134,7 +134,10 @@ export class TusUpload {
 				if (xhr.status === 201) {
 					const location = xhr.getResponseHeader("Location");
 					if (location) {
-						const resolved = location.startsWith("http") ? location : `${API_BASE}${location}`;
+						let resolved = location;
+						if (!location.startsWith("http")) {
+							resolved = (API_BASE && location.startsWith(API_BASE)) ? location : `${API_BASE}${location}`;
+						}
 						resolve(resolved);
 					} else {
 						reject(new Error("El servidor no devolvió la cabecera Location para la subida TUS"));
@@ -179,7 +182,7 @@ export class TusUpload {
 
 	private async uploadChunks(): Promise<void> {
 		const totalBytes = this.options.file.size;
-		const chunkSize = this.options.chunkSize || 8 * 1024 * 1024;
+		const chunkSize = this.options.chunkSize || 50 * 1024 * 1024;
 
 		while (this.currentOffset < totalBytes && !this.isAborted) {
 			const start = this.currentOffset;

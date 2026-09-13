@@ -149,10 +149,10 @@ public class UploadOptions
 {
     /// <summary>
     /// Largest accepted upload request, covering all files in one multipart batch.
-    /// Default 1 GiB: comfortably fits comic and book volumes without letting a single
+    /// Default 10 GiB: comfortably fits comic and book volumes without letting a single
     /// request fill the disk by default.
     /// </summary>
-    public long MaxRequestBytes { get; set; } = 1024L * 1024 * 1024;
+    public long MaxRequestBytes { get; set; } = 10L * 1024 * 1024 * 1024;
 
     /// <summary>Disables the upload endpoint entirely. Environment: DIAR_ENABLE_UPLOAD.</summary>
     public bool EnableUpload { get; set; } = true;
@@ -160,9 +160,9 @@ public class UploadOptions
     /// <summary>
     /// Largest accepted size for a single file, as opposed to
     /// <see cref="MaxRequestBytes"/>, which bounds the whole multipart request.
-    /// Default 500 MB. Environment: DIAR_MAX_FILE_UPLOAD_SIZE.
+    /// Default 5 GB. Environment: DIAR_MAX_FILE_UPLOAD_SIZE.
     /// </summary>
-    public long MaxFileUploadSize { get; set; } = 524_288_000;
+    public long MaxFileUploadSize { get; set; } = 5L * 1024 * 1024 * 1024;
 
     public static readonly string[] DefaultAllowedExtensions = [".cbz", ".cbr", ".epub", ".pdf", ".zip"];
 
