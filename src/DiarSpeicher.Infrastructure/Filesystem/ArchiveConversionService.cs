@@ -3,11 +3,6 @@ using SharpCompress.Archives.Rar;
 
 namespace DiarSpeicher.Infrastructure.Filesystem;
 
-/// <summary>
-/// Un CBR convertido: de dónde salió, en qué CBZ quedó y si el original sigue en disco.
-/// El escáner usa el par de rutas para reapuntar el medio ya indexado en vez de darlo por
-/// perdido y crear otro, que costaría el progreso de lectura del usuario.
-/// </summary>
 public sealed record ArchiveConversion(string SourcePath, string TargetPath, bool SourceDeleted);
 
 public interface IArchiveConversionService

@@ -78,16 +78,7 @@ public static class EpubRasterizer
 
         if (coverEntry != null && !spineEntries.Any(s => string.Equals(s.FullName, coverEntry.FullName, StringComparison.OrdinalIgnoreCase)))
         {
-            int? w = null, h = null;
-            try
-            {
-                await using var s = await coverEntry.OpenAsync(ct);
-                (w, h) = await PageMeasurer.MeasureAsync(s, ct);
-            }
-            catch (Exception)
-            {
-                // Ignorado: si falla la medicion se usa el dimensionamiento por defecto
-            }
+            var (w, h) = await TryMeasureEntryAsync(coverEntry, ct);
             targets.Add(new EpubSubpageTarget(coverEntry.FullName, 0, 0, 1, IsImageOnly: true, w, h));
         }
 
@@ -103,51 +94,78 @@ public static class EpubRasterizer
                 html = await reader.ReadToEndAsync(ct);
             }
 
-            var imgSrc = FindMainImageSrc(html);
             var blocks = ExtractBlocks(html);
-            var totalTextLen = blocks.Sum(b => b.Text.Length);
-
-            if (!string.IsNullOrEmpty(imgSrc) && totalTextLen < 80)
+            var imageOnly = await TryBuildImageOnlyTargetAsync(archive, chapter, html, blocks, i + 1, ct);
+            if (imageOnly != null)
             {
-                int? w = null, h = null;
-                try
-                {
-                    var chapterDir = Path.GetDirectoryName(chapter.FullName)?.Replace('\\', '/') ?? "";
-                    var resolved = ResolveZipPath(chapterDir, imgSrc);
-                    var imgEntry = archive.GetEntry(resolved);
-                    if (imgEntry != null)
-                    {
-                        await using var s = await imgEntry.OpenAsync(ct);
-                        (w, h) = await PageMeasurer.MeasureAsync(s, ct);
-                    }
-                }
-                catch (Exception)
-                {
-                    // Ignorado: si falla la medicion se usa el dimensionamiento por defecto
-                }
-                targets.Add(new EpubSubpageTarget(chapter.FullName, i + 1, 0, 1, IsImageOnly: true, w, h));
+                targets.Add(imageOnly);
                 continue;
             }
 
             if (profile.AutoHeight)
             {
                 targets.Add(new EpubSubpageTarget(chapter.FullName, i + 1, 0, 1, IsImageOnly: false));
+                continue;
             }
-            else
+
+            var (_, totalContentHeight) = MeasureLayout(blocks, textFont, headingFont, metrics);
+            var usableContentHeight = Math.Max(1f, totalContentHeight - headerHeight - marginY);
+            var subpageCount = Math.Max(1, (int)Math.Ceiling(usableContentHeight / availableHeight));
+            for (var p = 0; p < subpageCount; p++)
             {
-                var (_, totalContentHeight) = MeasureLayout(blocks, textFont, headingFont, metrics);
-                var usableContentHeight = Math.Max(1f, totalContentHeight - headerHeight - marginY);
-                var subpageCount = Math.Max(1, (int)Math.Ceiling(usableContentHeight / availableHeight));
-                for (var p = 0; p < subpageCount; p++)
-                {
-                    targets.Add(new EpubSubpageTarget(chapter.FullName, i + 1, p, subpageCount, IsImageOnly: false));
-                }
+                targets.Add(new EpubSubpageTarget(chapter.FullName, i + 1, p, subpageCount, IsImageOnly: false));
             }
         }
 
         var map = new EpubBookPageMap { BookPath = epubPath, Pages = targets };
         PageMapCache[cacheKey] = (map, DateTime.UtcNow);
         return map;
+    }
+
+    /// <summary>
+    /// Mide una imagen del EPUB y devuelve (null, null) si no se puede: un fichero corrupto o
+    /// un formato que Skia no reconozca no debe tumbar el mapa entero del libro, la pagina
+    /// simplemente cae al dimensionamiento por defecto.
+    /// </summary>
+    private static async Task<(int? Width, int? Height)> TryMeasureEntryAsync(
+        ZipArchiveEntry entry,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using var stream = await entry.OpenAsync(ct);
+            return await PageMeasurer.MeasureAsync(stream, ct);
+        }
+        catch (Exception)
+        {
+            return (null, null);
+        }
+    }
+
+    private static async Task<EpubSubpageTarget?> TryBuildImageOnlyTargetAsync(
+        ZipArchive archive,
+        ZipArchiveEntry chapter,
+        string html,
+        List<RenderBlock> blocks,
+        int chapterIndex,
+        CancellationToken ct)
+    {
+        const int MaxTextLengthForImageOnly = 80;
+
+        var imgSrc = FindMainImageSrc(html);
+        if (string.IsNullOrEmpty(imgSrc) || blocks.Sum(b => b.Text.Length) >= MaxTextLengthForImageOnly)
+        {
+            return null;
+        }
+
+        var chapterDir = Path.GetDirectoryName(chapter.FullName)?.Replace('\\', '/') ?? "";
+        var imgEntry = archive.GetEntry(ResolveZipPath(chapterDir, imgSrc));
+
+        var (w, h) = imgEntry == null
+            ? (null, null)
+            : await TryMeasureEntryAsync(imgEntry, ct);
+
+        return new EpubSubpageTarget(chapter.FullName, chapterIndex, 0, 1, IsImageOnly: true, w, h);
     }
 
     public static async Task<ExtractedPage?> RenderSubpageAsync(
