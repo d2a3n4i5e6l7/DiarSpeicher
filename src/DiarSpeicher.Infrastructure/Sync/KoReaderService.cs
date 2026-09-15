@@ -1,11 +1,5 @@
 ﻿using DiarSpeicher.Core.Domain.Entities;
-using DiarSpeicher.Core.Domain.Enums;
-using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Sync;
-using DiarSpeicher.Infrastructure.Data;
-using DiarSpeicher.Infrastructure.Data.Extensions;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace DiarSpeicher.Infrastructure.Sync;
 

@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { HashRouter } from "react-router-dom";
 import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 
@@ -12,9 +12,9 @@ if (!container) {
 createRoot(container).render(
 	<StrictMode>
 		<ErrorBoundary>
-			<MemoryRouter>
+			<HashRouter>
 				<App />
-			</MemoryRouter>
+			</HashRouter>
 		</ErrorBoundary>
 	</StrictMode>
 );

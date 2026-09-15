@@ -6,6 +6,7 @@ public class Media
 {
     public string Id { get; set; } = Ulid.NewUlid().ToString();
     public string Name { get; set; } = null!;
+    public string? SortName { get; set; }
     public long Size { get; set; }
     public string Extension { get; set; } = null!;
     public int Pages { get; set; }

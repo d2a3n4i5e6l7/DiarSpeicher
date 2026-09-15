@@ -1,5 +1,4 @@
 ﻿using DiarSpeicher.Core.Domain.Komga;
-using DiarSpeicher.Core.Domain.Models;
 
 namespace DiarSpeicher.Infrastructure.Komga;
 

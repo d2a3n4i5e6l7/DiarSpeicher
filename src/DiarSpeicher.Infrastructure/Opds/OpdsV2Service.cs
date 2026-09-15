@@ -1,14 +1,6 @@
 ﻿using DiarSpeicher.Core.Domain.Entities;
-using DiarSpeicher.Core.Domain.Enums;
-using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Opds;
-using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Core.Gateway;
-using DiarSpeicher.Infrastructure.Data;
-using DiarSpeicher.Infrastructure.Data.Extensions;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace DiarSpeicher.Infrastructure.Opds;
 
@@ -159,7 +151,7 @@ public class OpdsV2Service : IOpdsV2Service
                 (m.Metadata != null && m.Metadata.Title != null && m.Metadata.Title.Contains(search)) ||
                 (m.Metadata != null && m.Metadata.Summary != null && m.Metadata.Summary.Contains(search)) ||
                 (m.Metadata != null && m.Metadata.Writers != null && m.Metadata.Writers.Contains(search)))
-            .OrderBy(m => m.Name)
+            .OrderBy(m => m.SortName).ThenBy(m => m.Name)
             .Take(PageSize)
             .ToListAsync(ct);
 
@@ -290,7 +282,7 @@ public class OpdsV2Service : IOpdsV2Service
 
         var totalCount = await query.CountAsync(ct);
         var books = await query
-            .OrderBy(m => m.Name)
+            .OrderBy(m => m.SortName).ThenBy(m => m.Name)
             .Skip(page * PageSize)
             .Take(PageSize)
             .ToListAsync(ct);

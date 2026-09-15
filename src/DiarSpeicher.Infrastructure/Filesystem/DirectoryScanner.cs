@@ -1,6 +1,4 @@
 using System.IO;
-using DiarSpeicher.Core.Domain.Enums;
-using DiarSpeicher.Core.Filesystem;
 
 namespace DiarSpeicher.Infrastructure.Filesystem;
 
@@ -204,7 +202,6 @@ public class DirectoryScanner : IDirectoryScanner
             observedMtimes[normalizedCurrent] = currentMtime;
         }
 
-        // Stump rule: Never skip the series root itself, but skip subdirectories if unchanged
         if (!isRoot && !didChange)
         {
             return;

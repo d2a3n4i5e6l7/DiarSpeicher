@@ -1,15 +1,6 @@
 using System.Diagnostics;
 using System.IO;
-using DiarSpeicher.Core.Domain.Entities;
-using DiarSpeicher.Core.Domain.Enums;
-using DiarSpeicher.Core.Filesystem;
-using DiarSpeicher.Infrastructure.Data;
-using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
-using Microsoft.EntityFrameworkCore;
-using DiarSpeicher.Infrastructure.Storage;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace DiarSpeicher.Infrastructure.Filesystem;
 
@@ -714,6 +705,7 @@ public class LibraryScannerService : ILibraryScannerService
                 {
                     Id = newMediaId,
                     Name = analyzed.Metadata?.Title ?? name,
+                    SortName = Core.Filesystem.SortKey.From(analyzed.Metadata?.Title ?? name),
                     Path = mediaPath,
                     Extension = ext,
                     Size = fileInfo.Exists ? fileInfo.Length : 0,

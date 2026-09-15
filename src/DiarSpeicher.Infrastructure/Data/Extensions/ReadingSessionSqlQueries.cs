@@ -1,8 +1,3 @@
-using DiarSpeicher.Core.Domain.Entities;
-using DiarSpeicher.Core.Domain.Enums;
-using DiarSpeicher.Infrastructure.Data;
-using Microsoft.EntityFrameworkCore;
-
 namespace DiarSpeicher.Infrastructure.Data.Extensions;
 
 public static class ReadingSessionSqlQueries

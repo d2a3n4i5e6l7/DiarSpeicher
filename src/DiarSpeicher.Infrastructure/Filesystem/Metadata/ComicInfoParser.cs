@@ -1,5 +1,4 @@
 ﻿using System.Xml.Linq;
-using DiarSpeicher.Core.Filesystem;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Metadata;
 

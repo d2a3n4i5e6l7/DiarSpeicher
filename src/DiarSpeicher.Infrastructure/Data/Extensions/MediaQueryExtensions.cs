@@ -1,14 +1,5 @@
-using DiarSpeicher.Core.Domain.Entities;
-using DiarSpeicher.Core.Domain.Models;
-
 namespace DiarSpeicher.Infrastructure.Data.Extensions;
 
-/// <summary>
-/// Métodos de extensión para replicar las consultas de seguridad y control de acceso de Stump:
-/// - stump/crates/models/src/entity/media.rs (get_age_restriction_filter, apply_library_hidden_filter)
-/// - stump/crates/models/src/entity/series.rs (get_age_restriction_filter, find_for_user)
-/// - stump/crates/models/src/entity/library.rs (find_for_user)
-/// </summary>
 public static class MediaQueryExtensions
 {
     public static IQueryable<Media> ForUser(this IQueryable<Media> query, AuthUser? user)
@@ -33,9 +24,6 @@ public static class MediaQueryExtensions
         return q;
     }
 
-    /// <summary>
-    /// Transcripción 1:1 de `series.rs::get_age_restriction_filter` de Stump.
-    /// </summary>
     public static IQueryable<Series> ForUser(this IQueryable<Series> query, AuthUser? user)
     {
         var q = query.Where(s => s.DeletedAt == null);
@@ -66,9 +54,6 @@ public static class MediaQueryExtensions
         return q;
     }
 
-    /// <summary>
-    /// Transcripción 1:1 de `library.rs::find_for_user` de Stump.
-    /// </summary>
     public static IQueryable<Library> ForUser(this IQueryable<Library> query, AuthUser? user)
     {
         if (user == null || user.IsServerOwner)
@@ -84,22 +69,17 @@ public static class MediaQueryExtensions
         return query;
     }
 
-    /// <summary>
-    /// Transcripción 1:1 de `media.rs::get_age_restriction_filter` de Stump (SeaORM a EF Core).
-    /// </summary>
     private static IQueryable<Media> ApplyMediaAgeFilter(IQueryable<Media> query, int maxAge, bool restrictOnUnset)
     {
         if (restrictOnUnset)
         {
             return query.Where(m =>
-                // Caso 1: El media no tiene age rating, se defiere al age rating de la serie
                 ((m.Metadata == null || m.Metadata.AgeRating == null) &&
                  m.Series != null &&
                  m.Series.Metadata != null &&
                  m.Series.Metadata.AgeRating != null &&
                  m.Series.Metadata.AgeRating <= maxAge)
                 ||
-                // Caso 2: El media tiene age rating explícito, debe ser <= maxAge
                 (m.Metadata != null &&
                  m.Metadata.AgeRating != null &&
                  m.Metadata.AgeRating <= maxAge)
@@ -107,20 +87,15 @@ public static class MediaQueryExtensions
         }
 
         return query.Where(m =>
-            // Caso 1: Sin metadata de media o sin age rating en media
             ((m.Metadata == null || m.Metadata.AgeRating == null) &&
              (
-                 // Subcaso 1a: La serie no tiene metadata -> Permitido
                  (m.Series == null || m.Series.Metadata == null)
                  ||
-                 // Subcaso 1b: La serie tiene age rating <= maxAge -> Permitido
                  (m.Series != null && m.Series.Metadata != null && m.Series.Metadata.AgeRating != null && m.Series.Metadata.AgeRating <= maxAge)
                  ||
-                 // Subcaso 1c: La serie tiene metadata pero no age rating -> Permitido
                  (m.Series != null && m.Series.Metadata != null && m.Series.Metadata.AgeRating == null)
              ))
             ||
-            // Caso 2: El media tiene age rating explícito <= maxAge
             (m.Metadata != null &&
              m.Metadata.AgeRating != null &&
              m.Metadata.AgeRating <= maxAge)

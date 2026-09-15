@@ -1,8 +1,3 @@
-using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Core.Domain.Catalog;
-using DiarSpeicher.Core.Filesystem;
-using DiarSpeicher.Infrastructure.Filesystem.Processors;
-
 namespace DiarSpeicher.Infrastructure.Catalog;
 
 public interface IDiarSpeicherService

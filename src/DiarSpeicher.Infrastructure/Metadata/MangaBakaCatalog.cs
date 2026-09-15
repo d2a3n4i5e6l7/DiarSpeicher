@@ -1,8 +1,5 @@
 using System.Data.Common;
 using DiarSpeicher.Core.Domain.MangaBaka;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace DiarSpeicher.Infrastructure.Metadata;
 

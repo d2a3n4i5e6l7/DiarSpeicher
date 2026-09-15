@@ -1,5 +1,4 @@
 using System.Threading.Channels;
-using DiarSpeicher.Core.Filesystem;
 
 namespace DiarSpeicher.Infrastructure.Background;
 

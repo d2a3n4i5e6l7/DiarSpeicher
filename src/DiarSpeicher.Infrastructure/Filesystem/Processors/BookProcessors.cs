@@ -1,33 +1,15 @@
-using System.IO.Compression;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Xml.Linq;
-using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Metadata;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Processors;
 
-/// <summary>
-/// Qué debe calcular un análisis, tal como lo pide la configuración de la biblioteca.
-/// <para>
-/// Los hashes son lo caro: obligan a leer el fichero entero, y en una biblioteca de miles
-/// de tomos eso es la diferencia entre un escaneo de minutos y uno de horas. Por eso el
-/// interruptor llega hasta aquí en vez de limitarse a descartar el resultado: apagarlo
-/// tiene que ahorrar el trabajo, no solo el campo.
-/// </para>
-/// </summary>
 public sealed record BookAnalysisOptions
 {
-    /// <summary>Hash de contenido que identifica el fichero al margen de su ruta.</summary>
     public bool ComputeFileHash { get; init; } = true;
-
-    /// <summary>Hash que KOReader necesita para sincronizar el progreso.</summary>
     public bool ComputeKoreaderHash { get; init; } = true;
-
-    /// <summary>Leer ComicInfo.xml y los metadatos del OPF de un EPUB.</summary>
     public bool ReadEmbeddedMetadata { get; init; } = true;
 
     public static readonly BookAnalysisOptions Default = new();
@@ -36,23 +18,10 @@ public sealed record BookAnalysisOptions
 public interface IBookProcessor
 {
     bool CanProcess(string extension);
-
-    /// <summary>
-    /// Analyzes a book. When <paramref name="includeCover"/> is set the cover page is
-    /// returned in <see cref="ProcessedBook.Cover"/>, so callers that need both metadata
-    /// and a thumbnail only open and decompress the archive once.
-    /// </summary>
     Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null);
-
     Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
 }
 
-/// <summary>
-/// Picks which sorted image entry is the cover. ComicInfo.xml can declare it with
-/// Type="FrontCover", and that beats guessing: the cover is not always the first image once
-/// the entries are sorted by name. Falls back to the first page when the file declares
-/// nothing, or when the declared index is outside the archive.
-/// </summary>
 internal static class CoverSelection
 {
     public static int SelectCoverIndex(ExtractedMetadata? metadata, int pageCount)
@@ -252,24 +221,14 @@ public class RarBookProcessor : IBookProcessor
         try
         {
             await using var archive = await RarArchive.OpenAsyncArchive(path, cancellationToken: cancellationToken);
-            var imageEntries = new List<IArchiveEntry>();
 
+            var imageEntries = new List<IArchiveEntry>();
             await foreach (var entry in archive.EntriesAsync.WithCancellation(cancellationToken))
             {
-                if (entry.IsDirectory) continue;
-                var key = entry.Key;
-                if (string.IsNullOrEmpty(key) || PathUtils.IsHiddenFile(key)) continue;
-
-                if (analysis.ReadEmbeddedMetadata && string.Equals(Path.GetFileName(key), "ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
+                var comicInfo = await ClassifyEntryAsync(entry, analysis, imageEntries, cancellationToken);
+                if (comicInfo != null)
                 {
-                    await using var entryStream = await entry.OpenEntryStreamAsync(cancellationToken);
-                    using var streamReader = new StreamReader(entryStream);
-                    var xmlContent = await streamReader.ReadToEndAsync(cancellationToken);
-                    (metadata, tags) = ComicInfoParser.Parse(xmlContent);
-                }
-                else if (ContentTypeExtensions.FromExtension(Path.GetExtension(key)).IsImage())
-                {
-                    imageEntries.Add(entry);
+                    (metadata, tags) = comicInfo.Value;
                 }
             }
 
@@ -307,6 +266,40 @@ public class RarBookProcessor : IBookProcessor
             Cover = cover,
             PageDimensions = dimensions
         };
+    }
+
+    /// <summary>
+    /// Reparte una entrada del RAR: la acumula en <paramref name="imageEntries"/> si es pagina,
+    /// devuelve los metadatos si es el ComicInfo.xml, y nada en cualquier otro caso. El flujo
+    /// de entradas es asincrono y de un solo paso, asi que ambas cosas se deciden aqui en vez
+    /// de recorrer el archivo dos veces.
+    /// </summary>
+    private static async Task<(ExtractedMetadata? Metadata, List<string> Tags)?> ClassifyEntryAsync(
+        IArchiveEntry entry,
+        BookAnalysisOptions analysis,
+        List<IArchiveEntry> imageEntries,
+        CancellationToken cancellationToken)
+    {
+        var key = entry.Key;
+        if (entry.IsDirectory || string.IsNullOrEmpty(key) || PathUtils.IsHiddenFile(key))
+        {
+            return null;
+        }
+
+        if (analysis.ReadEmbeddedMetadata &&
+            string.Equals(Path.GetFileName(key), "ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
+        {
+            await using var entryStream = await entry.OpenEntryStreamAsync(cancellationToken);
+            using var streamReader = new StreamReader(entryStream);
+            return ComicInfoParser.Parse(await streamReader.ReadToEndAsync(cancellationToken));
+        }
+
+        if (ContentTypeExtensions.FromExtension(Path.GetExtension(key)).IsImage())
+        {
+            imageEntries.Add(entry);
+        }
+
+        return null;
     }
 
     public async Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)

@@ -1,6 +1,3 @@
-# Stump Rust reference directory
-stump/
-
 # .NET Build artifacts
 **/bin/
 **/obj/

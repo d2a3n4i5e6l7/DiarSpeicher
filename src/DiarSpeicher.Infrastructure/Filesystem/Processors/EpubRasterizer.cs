@@ -1,8 +1,5 @@
 using System.Collections.Concurrent;
-using System.IO.Compression;
 using System.Text.RegularExpressions;
-using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Core.Filesystem;
 using SkiaSharp;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Processors;

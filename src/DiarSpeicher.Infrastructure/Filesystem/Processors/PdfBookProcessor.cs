@@ -1,4 +1,3 @@
-using DiarSpeicher.Core.Filesystem;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 using SkiaSharp;
@@ -6,11 +5,6 @@ using PDFtoImage;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Processors;
 
-/// <summary>
-/// PdfPig extracts embedded images directly for scanned manga and comics with zero transcoding.
-/// When a page is pure vector or text (such as light novels or ebooks), PDFtoImage (Google PDFium)
-/// rasterizes the page into a WebP image, matching the behavior of Stump and Komga.
-/// </summary>
 public class PdfBookProcessor : IBookProcessor
 {
     public bool CanProcess(string extension) =>

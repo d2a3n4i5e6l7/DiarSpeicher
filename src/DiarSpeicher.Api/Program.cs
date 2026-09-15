@@ -151,6 +151,7 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<DiarSpeicherDbContext>();
     await db.Database.MigrateAsync();
     await db.InitializeSqliteWalAsync();
+    await db.BackfillSortNamesAsync();
 }
 
 // El salto gateway -> backend va en claro, asi que el esquema real lo trae la cabecera. Sin

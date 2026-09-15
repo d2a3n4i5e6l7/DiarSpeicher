@@ -1,4 +1,3 @@
-using DiarSpeicher.Core.Filesystem;
 using SkiaSharp;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Processors;
@@ -7,11 +6,6 @@ public static class PageMeasurer
 {
     public const int HeaderBytes = 64 * 1024;
 
-    /// <summary>
-    /// Lee como mucho <see cref="HeaderBytes"/> del stream y decodifica la cabecera.
-    /// Devuelve nulos cuando el formato no se reconoce o la imagen esta corrupta: una
-    /// pagina ilegible no debe tumbar el analisis del libro entero.
-    /// </summary>
     public static async Task<(int? Width, int? Height)> MeasureAsync(
         Stream stream,
         CancellationToken cancellationToken = default)

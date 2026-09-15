@@ -1,5 +1,3 @@
-using System.IO.Compression;
-using Microsoft.Extensions.Logging;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
 

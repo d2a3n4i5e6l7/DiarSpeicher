@@ -1,29 +1,16 @@
 ﻿using DiarSpeicher.Core.Filesystem;
-using DiarSpeicher.Infrastructure.Filesystem.Processors;
-using DiarSpeicher.Infrastructure.Storage;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using SkiaSharp;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
 
 public interface IThumbnailService
 {
-    /// <summary>
-    /// Extracts the cover page from <paramref name="mediaPath"/> and writes it as a thumbnail.
-    /// Callers that already hold the cover should prefer <see cref="SaveThumbnailAsync"/>,
-    /// which avoids opening and decompressing the archive a second time.
-    /// </summary>
     Task<string?> GenerateThumbnailAsync(
         string mediaId,
         string mediaPath,
         string outputDirectory,
         CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Writes an already-extracted cover page as a thumbnail.
-    /// <paramref name="outputDirectory"/> is expected to exist.
-    /// </summary>
     Task<string?> SaveThumbnailAsync(
         string mediaId,
         ExtractedPage? page,
@@ -111,12 +98,6 @@ public class ThumbnailService : IThumbnailService
         return targetFilePath;
     }
 
-    /// <summary>
-    /// Downscales to <see cref="ThumbnailOptions.MaxWidth"/> preserving the aspect ratio and
-    /// re-encodes to WebP, which is where the order-of-magnitude size reduction comes from.
-    /// A cover that cannot be decoded is written through unchanged so a thumbnail still
-    /// exists, rather than failing the scan over an unsupported format.
-    /// </summary>
     private Task<EncodedThumbnail> EncodeAsync(ExtractedPage page, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -149,10 +130,6 @@ public class ThumbnailService : IThumbnailService
         }
     }
 
-    /// <summary>
-    /// Returns null when the cover is already at or below the target width: a thumbnail is
-    /// never upscaled, since that only inflates the file without adding detail.
-    /// </summary>
     private SKBitmap? Downscale(SKBitmap original)
     {
         if (original.Width <= _options.MaxWidth)

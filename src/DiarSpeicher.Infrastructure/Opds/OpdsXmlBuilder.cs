@@ -1,6 +1,5 @@
 using System.Text;
 using System.Xml;
-using System.Xml.Linq;
 using DiarSpeicher.Core.Domain.Opds;
 
 namespace DiarSpeicher.Infrastructure.Opds;

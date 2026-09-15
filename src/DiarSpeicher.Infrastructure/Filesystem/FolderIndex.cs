@@ -1,7 +1,3 @@
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-
 namespace DiarSpeicher.Infrastructure.Filesystem;
 
 public sealed record FolderHit(string Path, string Name, string Parent, int Depth);

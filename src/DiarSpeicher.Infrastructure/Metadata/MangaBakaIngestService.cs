@@ -1,7 +1,4 @@
 using DiarSpeicher.Core.Domain.MangaBaka;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using SharpCompress.Compressors.ZStandard;
 using SharpCompress.Readers;
 

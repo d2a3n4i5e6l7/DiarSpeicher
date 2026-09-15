@@ -1,15 +1,5 @@
-using DiarSpeicher.Core.Domain.Entities;
-using DiarSpeicher.Core.Domain.Enums;
-using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Opds;
-using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Core.Gateway;
-using DiarSpeicher.Infrastructure.Data;
-using DiarSpeicher.Infrastructure.Data.Extensions;
-using DiarSpeicher.Infrastructure.Filesystem.Processors;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace DiarSpeicher.Infrastructure.Opds;
 
@@ -251,7 +241,7 @@ public class OpdsService : IOpdsService
 
         var totalCount = await query.CountAsync(ct);
         var books = await query
-            .OrderBy(m => m.Name)
+            .OrderBy(m => m.SortName).ThenBy(m => m.Name)
             .Skip(page * PageSize)
             .Take(PageSize)
             .ToListAsync(ct);
@@ -288,7 +278,7 @@ public class OpdsService : IOpdsService
 
         var totalCount = await query.CountAsync(ct);
         var books = await query
-            .OrderBy(m => m.Name)
+            .OrderBy(m => m.SortName).ThenBy(m => m.Name)
             .Skip(page * PageSize)
             .Take(PageSize)
             .ToListAsync(ct);
@@ -404,7 +394,7 @@ public class OpdsService : IOpdsService
                 (m.Metadata != null && m.Metadata.Title != null && m.Metadata.Title.Contains(search)) ||
                 (m.Metadata != null && m.Metadata.Summary != null && m.Metadata.Summary.Contains(search)) ||
                 (m.Metadata != null && m.Metadata.Writers != null && m.Metadata.Writers.Contains(search)))
-            .OrderBy(m => m.Name)
+            .OrderBy(m => m.SortName).ThenBy(m => m.Name)
             .ToListAsync(ct);
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);

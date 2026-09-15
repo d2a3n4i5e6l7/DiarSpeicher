@@ -1,12 +1,5 @@
-using DiarSpeicher.Core.Domain.Enums;
-using DiarSpeicher.Core.Filesystem;
-using DiarSpeicher.Infrastructure.Data;
-using DiarSpeicher.Infrastructure.Storage;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace DiarSpeicher.Infrastructure.Background;
 

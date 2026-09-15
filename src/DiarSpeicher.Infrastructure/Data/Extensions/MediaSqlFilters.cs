@@ -1,18 +1,5 @@
-using DiarSpeicher.Core.Domain.Models;
-using Microsoft.Data.Sqlite;
-
 namespace DiarSpeicher.Infrastructure.Data.Extensions;
 
-/// <summary>
-/// The visibility rules of <c>ForUser</c> expressed as raw SQL, for the queries that order by
-/// a timestamp. SQLite stores DateTimeOffset as ISO-8601 text, which EF refuses to translate
-/// into an ORDER BY, so those queries are written by hand instead of forcing the whole model
-/// into a different storage representation.
-///
-/// The clauses must stay equivalent to <see cref="MediaQueryExtensions.ForUser"/>: this is the
-/// filter that keeps an excluded library or an age-restricted book out of a user's results.
-/// Values are always bound as parameters, never interpolated into the SQL text.
-/// </summary>
 public static class MediaSqlFilters
 {
     /// <summary>
@@ -26,11 +13,6 @@ public static class MediaSqlFilters
         LEFT JOIN "SeriesMetadata" AS sm ON s."Id" = sm."SeriesId"
         """;
 
-    /// <summary>
-    /// Returns the values as (name, value) pairs rather than SqliteParameter instances: a
-    /// parameter object cannot be attached to two commands, and the count and the page are
-    /// two separate queries.
-    /// </summary>
     public static (string Where, List<(string Name, object Value)> Parameters) BuildVisibilityFilter(AuthUser? user)
     {
         var clauses = new List<string> { """m."DeletedAt" IS NULL""" };
@@ -58,8 +40,6 @@ public static class MediaSqlFilters
         {
             parameters.Add(("@maxAge", user.AgeRestriction.Value));
 
-            // A book with its own age rating is judged by it; otherwise the series rating
-            // applies. RestrictOnUnset decides what happens when neither carries one.
             clauses.Add(user.RestrictOnUnset
                 ? """
                   (
@@ -78,14 +58,6 @@ public static class MediaSqlFilters
         return (string.Join(" AND ", clauses), parameters);
     }
 
-    /// <summary>
-    /// El SQL se arma con <see cref="string.Concat(string?, string?, string?)"/> y no con una
-    /// cadena interpolada porque EF1002 marca toda interpolacion que llega a SqlQueryRaw o
-    /// FromSqlRaw, sin poder distinguir una constante de una entrada del usuario. Aqui solo se
-    /// concatena SQL literal —<see cref="Joins"/> es const y <paramref name="where"/> viene de
-    /// <see cref="BuildVisibilityFilter"/>, que emite unicamente clausulas y marcadores
-    /// "@nombre"—, de modo que evitar la interpolacion satisface al analizador sin suprimirlo.
-    /// </summary>
     public static string BuildCountSql(string where) => string.Concat(
         """
         SELECT COUNT(*) AS "Value"
@@ -98,10 +70,6 @@ public static class MediaSqlFilters
         """,
         where);
 
-    /// <summary>
-    /// Pagina ordenada por fecha de alta. Vease <see cref="BuildCountSql"/> para el motivo de
-    /// concatenar en vez de interpolar.
-    /// </summary>
     public static string BuildLatestPageSql(string where) => string.Concat(
         """
         SELECT m.*
@@ -119,7 +87,6 @@ public static class MediaSqlFilters
         LIMIT @take OFFSET @skip
         """);
 
-    /// <summary>Fresh SqliteParameter instances, so each command owns its own.</summary>
     public static object[] ToParameters(
         this List<(string Name, object Value)> values,
         params (string Name, object Value)[] extra) =>

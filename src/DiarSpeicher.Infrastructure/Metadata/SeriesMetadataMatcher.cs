@@ -1,7 +1,4 @@
-using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.MangaBaka;
-using DiarSpeicher.Infrastructure.Data;
-using Microsoft.EntityFrameworkCore;
 
 namespace DiarSpeicher.Infrastructure.Metadata;
 

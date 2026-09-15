@@ -1,6 +1,4 @@
-using DiarSpeicher.Infrastructure.Filesystem;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 
 namespace DiarSpeicher.Infrastructure.Background;
 

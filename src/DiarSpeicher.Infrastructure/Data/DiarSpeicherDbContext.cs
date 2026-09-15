@@ -1,6 +1,3 @@
-using DiarSpeicher.Core.Domain.Entities;
-using Microsoft.EntityFrameworkCore;
-
 namespace DiarSpeicher.Infrastructure.Data;
 
 public class DiarSpeicherDbContext : DbContext
@@ -111,6 +108,10 @@ public class DiarSpeicherDbContext : DbContext
             // scans the table and sorts it into a temporary B-tree.
             entity.HasIndex(e => e.CreatedAt);
 
+            // Listar los tomos de una serie filtra por SeriesId y ordena por SortName, asi que
+            // el indice compuesto sirve las dos mitades y evita el sort temporal.
+            entity.HasIndex(e => new { e.SeriesId, e.SortName });
+
             entity.HasOne(e => e.Metadata)
                 .WithOne(m => m.Media)
                 .HasForeignKey<MediaMetadata>(m => m.MediaId)
@@ -212,6 +213,35 @@ public class DiarSpeicherDbContext : DbContext
                 .HasForeignKey<AgeRestriction>(a => a.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+    }
+
+    /// <summary>
+    /// Calcula SortName en los medios que aun no lo tienen. El relleno vive aqui y no en la
+    /// migracion porque el padding se hace en C# con <see cref="Core.Filesystem.SortKey"/>:
+    /// expresarlo en SQL exigiria replicar el algoritmo en dos sitios que luego divergen.
+    /// </summary>
+    public async Task<int> BackfillSortNamesAsync(CancellationToken cancellationToken = default)
+    {
+        var pending = await Media
+            .Where(m => m.SortName == null)
+            .Select(m => new { m.Id, m.Name })
+            .ToListAsync(cancellationToken);
+
+        if (pending.Count == 0)
+        {
+            return 0;
+        }
+
+        foreach (var item in pending)
+        {
+            await Media
+                .Where(m => m.Id == item.Id)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(m => m.SortName, Core.Filesystem.SortKey.From(item.Name)),
+                    cancellationToken);
+        }
+
+        return pending.Count;
     }
 
     public async Task InitializeSqliteWalAsync(CancellationToken cancellationToken = default)

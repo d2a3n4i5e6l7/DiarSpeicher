@@ -1,16 +1,5 @@
-using System.IO.Compression;
-using DiarSpeicher.Core.Domain.Entities;
-using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Komga;
-using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Core.Filesystem;
-using DiarSpeicher.Infrastructure.Data;
-using DiarSpeicher.Infrastructure.Data.Extensions;
-using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using SkiaSharp;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace DiarSpeicher.Infrastructure.Komga;
 
@@ -124,7 +113,7 @@ public class KomgaService : IKomgaService
 
         var totalElements = await query.CountAsync(ct);
         var books = await query
-            .OrderBy(m => m.Name)
+            .OrderBy(m => m.SortName).ThenBy(m => m.Name)
             .Skip(page * size)
             .Take(size)
             .ToListAsync(ct);
@@ -179,7 +168,7 @@ public class KomgaService : IKomgaService
 
         var totalElements = await query.CountAsync(ct);
         var books = await query
-            .OrderBy(m => m.Name)
+            .OrderBy(m => m.SortName).ThenBy(m => m.Name)
             .Skip(page * size)
             .Take(size)
             .ToListAsync(ct);

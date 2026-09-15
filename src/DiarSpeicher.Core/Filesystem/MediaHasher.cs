@@ -7,10 +7,6 @@ public static class MediaHasher
     public const int HashSampleSize = 10000;
     public const int HashSampleCount = 4;
 
-    /// <summary>
-    /// Computes the Stump partial SHA-256 hash for a media file.
-    /// Matches stump/core/src/filesystem/hash.rs generate().
-    /// </summary>
     public static string ComputeDiarSpeicherHash(string path, long totalBytes)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -44,11 +40,6 @@ public static class MediaHasher
         return Convert.ToHexStringLower(hashBytes);
     }
 
-    /// <summary>
-    /// Computes the KOReader MD5 hash algorithm.
-    /// Matches stump/core/src/filesystem/hash.rs generate_koreader_hash().
-    /// Port of https://github.com/koreader/koreader/blob/master/frontend/util.lua#L1046-L1072
-    /// </summary>
     public static string ComputeKoreaderHash(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);

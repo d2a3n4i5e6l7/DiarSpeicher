@@ -1,4 +1,3 @@
-using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Sync;
 
 namespace DiarSpeicher.Infrastructure.Sync;
