@@ -1,8 +1,8 @@
-using DiarSpeicher.Core.Domain.StumpV2;
+using DiarSpeicher.Core.Domain.Catalog;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Infrastructure.Filesystem;
-using DiarSpeicher.Infrastructure.StumpV2;
+using DiarSpeicher.Infrastructure.Catalog;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -115,7 +115,7 @@ public static class FilesystemEndpoints
             [FromQuery] string? path,
             HttpContext httpContext,
             [FromServices] ITrashService trash,
-            [FromServices] IStumpV2Service catalog,
+            [FromServices] IDiarSpeicherService catalog,
             CancellationToken ct) =>
         {
             if (!IsAllowed(httpContext)) return Forbidden();

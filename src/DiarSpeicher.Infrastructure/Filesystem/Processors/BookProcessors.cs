@@ -130,14 +130,14 @@ public class ZipBookProcessor : IBookProcessor
 
         var fileInfo = new FileInfo(path);
         var length = fileInfo.Exists ? fileInfo.Length : 0;
-        var stumpHash = analysis.ComputeFileHash
-            ? await MediaHasher.ComputeStumpHashAsync(path, length, cancellationToken)
+        var diarSpeicherHash = analysis.ComputeFileHash
+            ? await MediaHasher.ComputeDiarSpeicherHashAsync(path, length, cancellationToken)
             : null;
 
         return new ProcessedBook
         {
             Pages = pageCount,
-            Hash = stumpHash,
+            Hash = diarSpeicherHash,
             KoreaderHash = null,
             Metadata = metadata,
             Tags = tags,
@@ -293,14 +293,14 @@ public class RarBookProcessor : IBookProcessor
 
         var fileInfo = new FileInfo(path);
         var length = fileInfo.Exists ? fileInfo.Length : 0;
-        var stumpHash = analysis.ComputeFileHash
-            ? await MediaHasher.ComputeStumpHashAsync(path, length, cancellationToken)
+        var diarSpeicherHash = analysis.ComputeFileHash
+            ? await MediaHasher.ComputeDiarSpeicherHashAsync(path, length, cancellationToken)
             : null;
 
         return new ProcessedBook
         {
             Pages = pageCount,
-            Hash = stumpHash,
+            Hash = diarSpeicherHash,
             KoreaderHash = null,
             Metadata = metadata,
             Tags = tags,
@@ -445,8 +445,8 @@ public class EpubBookProcessor : IBookProcessor
 
         var fileInfo = new FileInfo(path);
         var length = fileInfo.Exists ? fileInfo.Length : 0;
-        var stumpHash = analysis.ComputeFileHash
-            ? await MediaHasher.ComputeStumpHashAsync(path, length, cancellationToken)
+        var diarSpeicherHash = analysis.ComputeFileHash
+            ? await MediaHasher.ComputeDiarSpeicherHashAsync(path, length, cancellationToken)
             : null;
         var koreaderHash = analysis.ComputeKoreaderHash
             ? await MediaHasher.ComputeKoreaderHashAsync(path, cancellationToken)
@@ -455,7 +455,7 @@ public class EpubBookProcessor : IBookProcessor
         return new ProcessedBook
         {
             Pages = Math.Max(1, chapterCount),
-            Hash = stumpHash,
+            Hash = diarSpeicherHash,
             KoreaderHash = koreaderHash,
             Metadata = analysis.ReadEmbeddedMetadata ? metadata : null,
             Tags = analysis.ReadEmbeddedMetadata ? tags.Distinct(StringComparer.OrdinalIgnoreCase).ToList() : [],
@@ -781,7 +781,7 @@ public class CompositeBookProcessor : ICompositeBookProcessor
             return new ProcessedBook
             {
                 Pages = 0,
-                Hash = analysis.ComputeFileHash ? await MediaHasher.ComputeStumpHashAsync(path, len, cancellationToken) : null,
+                Hash = analysis.ComputeFileHash ? await MediaHasher.ComputeDiarSpeicherHashAsync(path, len, cancellationToken) : null,
                 KoreaderHash = analysis.ComputeKoreaderHash ? await MediaHasher.ComputeKoreaderHashAsync(path, cancellationToken) : null
             };
         }

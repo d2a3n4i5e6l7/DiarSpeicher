@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace DiarSpeicher.Infrastructure.Background;
+
 public sealed class ScanRecoveryService : BackgroundService
 {
     /// <summary>

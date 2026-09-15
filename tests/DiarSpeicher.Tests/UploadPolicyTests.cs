@@ -1,11 +1,11 @@
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Core.Domain.StumpV2;
+using DiarSpeicher.Core.Domain.Catalog;
 using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
-using DiarSpeicher.Infrastructure.StumpV2;
+using DiarSpeicher.Infrastructure.Catalog;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -103,10 +103,10 @@ public sealed class UploadPolicyTests : IDisposable
         Assert.False(options.IsExtensionAllowed("notas.txt"));
     }
 
-    private static StumpUploadFileInput File(string name, int bytes) =>
+    private static DiarSpeicherUploadFileInput File(string name, int bytes) =>
         new() { FileName = name, Content = new MemoryStream(new byte[bytes]) };
 
-    private async Task<(StumpV2Service Service, string LibraryId, AuthUser Owner)> ArrangeAsync(
+    private async Task<(DiarSpeicherService Service, string LibraryId, AuthUser Owner)> ArrangeAsync(
         Action<DiarSpeicher.Infrastructure.Storage.UploadOptions> configure)
     {
         var db = new DiarSpeicherDbContext(_options);
@@ -123,11 +123,11 @@ public sealed class UploadPolicyTests : IDisposable
         await db.SaveChangesAsync();
 
         var composite = new CompositeBookProcessor(new IBookProcessor[] { new ZipBookProcessor() });
-        var service = new StumpV2Service(
+        var service = new DiarSpeicherService(
             db,
             composite,
             new ScannerQueue(),
-            NullLogger<StumpV2Service>.Instance,
+            NullLogger<DiarSpeicherService>.Instance,
             TestStorageOptions.With(configure));
 
         return (service, library.Id, new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true });

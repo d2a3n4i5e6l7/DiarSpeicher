@@ -2,18 +2,18 @@
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Core.Domain.StumpV2;
+using DiarSpeicher.Core.Domain.Catalog;
 using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
-using DiarSpeicher.Infrastructure.StumpV2;
+using DiarSpeicher.Infrastructure.Catalog;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DiarSpeicher.Tests;
 
-public sealed class StumpV2ApiTests : IDisposable
+public sealed class DiarSpeicherApiTests : IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly DbContextOptions<DiarSpeicherDbContext> _options;
@@ -22,7 +22,7 @@ public sealed class StumpV2ApiTests : IDisposable
     private string _seriesId = null!;
     private string _epubMediaId = null!;
 
-    public StumpV2ApiTests()
+    public DiarSpeicherApiTests()
     {
         _connection = new SqliteConnection("Data Source=:memory:");
         _connection.Open();
@@ -34,7 +34,7 @@ public sealed class StumpV2ApiTests : IDisposable
         using var context = new DiarSpeicherDbContext(_options);
         context.Database.EnsureCreated();
 
-        _tempEpubPath = Path.Combine(Path.GetTempPath(), $"stump_test_{Guid.NewGuid():N}.epub");
+        _tempEpubPath = Path.Combine(Path.GetTempPath(), $"diarspeicher_test_{Guid.NewGuid():N}.epub");
         CreateSampleEpubWithToc(_tempEpubPath);
 
         SeedTestData(context);
@@ -150,7 +150,7 @@ public sealed class StumpV2ApiTests : IDisposable
         using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new StumpV2Service(context, composite, queue, NullLogger<StumpV2Service>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
 
         var user = new AuthUser { Id = "user_admin", Username = "admin", IsServerOwner = true };
 
@@ -171,7 +171,7 @@ public sealed class StumpV2ApiTests : IDisposable
         using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new StumpV2Service(context, composite, queue, NullLogger<StumpV2Service>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
 
         var user = new AuthUser { Id = "user_admin", Username = "admin", IsServerOwner = true };
 
@@ -194,7 +194,7 @@ public sealed class StumpV2ApiTests : IDisposable
         using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new StumpV2Service(context, composite, queue, NullLogger<StumpV2Service>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
 
         var user = new AuthUser { Id = "user_admin", Username = "admin", IsServerOwner = true };
 
@@ -213,7 +213,7 @@ public sealed class StumpV2ApiTests : IDisposable
         using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new StumpV2Service(context, composite, queue, NullLogger<StumpV2Service>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
 
         var user = new AuthUser { Id = "user_admin", Username = "admin", IsServerOwner = true };
 
@@ -240,7 +240,7 @@ public sealed class StumpV2ApiTests : IDisposable
         using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new StumpV2Service(context, composite, queue, NullLogger<StumpV2Service>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
 
         var status = await service.GetSystemStatusAsync();
         Assert.Equal("OK", status.Status);

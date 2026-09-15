@@ -13,7 +13,7 @@ using DiarSpeicher.Infrastructure.Komga;
 using DiarSpeicher.Infrastructure.Metadata;
 using Microsoft.AspNetCore.HttpOverrides;
 using DiarSpeicher.Infrastructure.Opds;
-using DiarSpeicher.Infrastructure.StumpV2;
+using DiarSpeicher.Infrastructure.Catalog;
 using DiarSpeicher.Infrastructure.Sync;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -77,7 +77,7 @@ builder.Services.AddSingleton<IBookProcessor, EpubBookProcessor>();
 builder.Services.AddSingleton<IBookProcessor, PdfBookProcessor>();
 builder.Services.AddSingleton<CompositeBookProcessor>();
 
-// Page extraction is served through the disk cache, so every consumer (OPDS, Stump v2,
+// Page extraction is served through the disk cache, so every consumer (OPDS, DiarSpeicher v2,
 // thumbnails) skips repeated decompression of the same page.
 builder.Services.AddSingleton<ICompositeBookProcessor>(sp => new CachingBookProcessor(
     sp.GetRequiredService<CompositeBookProcessor>(),
@@ -92,7 +92,7 @@ builder.Services.AddScoped<IKomgaService, KomgaService>();
 
 builder.Services.AddScoped<IKoReaderService, KoReaderService>();
 builder.Services.AddScoped<IKoboService, KoboService>();
-builder.Services.AddScoped<IStumpV2Service, StumpV2Service>();
+builder.Services.AddScoped<IDiarSpeicherService, DiarSpeicherService>();
 
 builder.Services.AddSingleton<IDirectoryScanner, DirectoryScanner>();
 builder.Services.AddSingleton<IArchiveConversionService, ArchiveConversionService>();
@@ -159,7 +159,7 @@ var forwardedHeaders = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedProto
 };
-forwardedHeaders.KnownNetworks.Clear();
+forwardedHeaders.KnownIPNetworks.Clear();
 forwardedHeaders.KnownProxies.Clear();
 
 app.UseForwardedHeaders(forwardedHeaders);
@@ -189,7 +189,7 @@ app.MapOpdsV2Endpoints();
 app.MapKomgaEndpoints();
 app.MapKoReaderEndpoints();
 app.MapKoboEndpoints();
-app.MapStumpV2Endpoints();
+app.MapDiarSpeicherEndpoints();
 app.MapMetadataEndpoints();
 app.MapFilesystemEndpoints();
 app.MapTrashEndpoints();

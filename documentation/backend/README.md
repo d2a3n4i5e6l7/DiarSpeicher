@@ -39,7 +39,7 @@ Cada protocolo cuelga de su propio prefijo y se registra en `Program.cs` con un
 | `/opds/v1.2`           | [OpdsEndpoints.cs](../../src/DiarSpeicher.Api/Endpoints/OpdsEndpoints.cs)       |
 | `/opds/v2.0`           | [OpdsV2Endpoints.cs](../../src/DiarSpeicher.Api/Endpoints/OpdsV2Endpoints.cs)   |
 | `/api/v1`              | [KomgaEndpoints.cs](../../src/DiarSpeicher.Api/Endpoints/KomgaEndpoints.cs)     |
-| `/api/v2`              | [StumpV2Endpoints.cs](../../src/DiarSpeicher.Api/Endpoints/StumpV2Endpoints.cs)  |
+| `/api/v2`              | [DiarSpeicherV2Endpoints.cs](../../src/DiarSpeicher.Api/Endpoints/DiarSpeicherV2Endpoints.cs)  |
 | `/koreader/{apiKey}`   | [KoReaderEndpoints.cs](../../src/DiarSpeicher.Api/Endpoints/KoReaderEndpoints.cs) |
 | `/kobo/{apiKey}`       | [KoboEndpoints.cs](../../src/DiarSpeicher.Api/Endpoints/KoboEndpoints.cs)       |
 | `/graphql`             | `MapGraphQL()` en [Program.cs](../../src/DiarSpeicher.Api/Program.cs)           |

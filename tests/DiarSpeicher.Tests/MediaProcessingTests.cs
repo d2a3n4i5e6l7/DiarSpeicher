@@ -52,7 +52,7 @@ public class MediaProcessingTests : IDisposable
     }
 
     [Fact]
-    public void MediaHasher_GeneratesStumpAndKoreaderHashes()
+    public void MediaHasher_GeneratesDiarSpeicherAndKoreaderHashes()
     {
         var filePath = Path.Combine(_tempDir, "sample_book.bin");
         var content = new byte[50000]; // Larger than 40KB to exercise sample offsets
@@ -62,11 +62,11 @@ public class MediaProcessingTests : IDisposable
         }
         File.WriteAllBytes(filePath, content);
 
-        var stumpHash = MediaHasher.ComputeStumpHash(filePath, content.Length);
+        var diarSpeicherHash = MediaHasher.ComputeDiarSpeicherHash(filePath, content.Length);
         var koreaderHash = MediaHasher.ComputeKoreaderHash(filePath);
 
-        Assert.NotNull(stumpHash);
-        Assert.Equal(64, stumpHash.Length); // SHA-256 hex string is 64 chars
+        Assert.NotNull(diarSpeicherHash);
+        Assert.Equal(64, diarSpeicherHash.Length); // SHA-256 hex string is 64 chars
 
         Assert.NotNull(koreaderHash);
         Assert.Equal(32, koreaderHash.Length); // MD5 hex string is 32 chars

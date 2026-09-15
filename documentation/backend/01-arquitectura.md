@@ -26,13 +26,13 @@ flowchart LR
     subgraph api["DiarSpeicher.Api"]
         P["Program.cs"]
         MW["Middleware<br/>GatewayIdentity · OpdsAuth"]
-        EP["Endpoints<br/>Opds · OpdsV2 · Komga<br/>StumpV2 · Identity · KoReader · Kobo"]
+        EP["Endpoints<br/>Opds · OpdsV2 · Komga<br/>DiarSpeicherV2 · Identity · KoReader · Kobo"]
         GQL["GraphQL<br/>Query · Mutation · Subscription"]
     end
 
     subgraph infra["DiarSpeicher.Infrastructure"]
         DB["DiarSpeicherDbContext<br/>+ Migrations"]
-        SVC["Servicios<br/>Opds · OpdsV2 · Komga<br/>StumpV2 · KoReader · Kobo · Identity"]
+        SVC["Servicios<br/>Opds · OpdsV2 · Komga<br/>DiarSpeicherV2 · KoReader · Kobo · Identity"]
         SCAN["Filesystem<br/>DirectoryScanner · LibraryScannerService"]
         PROC["Processors<br/>Zip · Rar · Epub · Pdf"]
         BG["Background<br/>ScannerQueue · ScanBackgroundService<br/>LibraryWatcherService"]

@@ -100,7 +100,7 @@ decide. El vocabulario lo fijan dos ficheros que **deben decir lo mismo**:
 
 | Permiso              | Dónde se comprueba                                                    |
 | -------------------- | ----------------------------------------------------------------------- |
-| `FileUpload`         | `TusEndpoints` POST y PATCH · `StumpV2Service.UploadToLibraryAsync`, que cubre también la mutación `uploadBooks` |
+| `FileUpload`         | `TusEndpoints` POST y PATCH · `DiarSpeicherV2Service.UploadToLibraryAsync`, que cubre también la mutación `uploadBooks` |
 | `CreateFolder`       | Los mismos dos, **solo si el subpath no existe todavía**                |
 | `ManageLibrary`      | `POST /api/v2/libraries`                                                |
 | `ScanLibrary`        | `POST /api/v2/libraries/{id}/scan` y la mutación `scanLibrary`          |

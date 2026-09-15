@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace DiarSpeicher.Core.Domain.StumpV2;
+namespace DiarSpeicher.Core.Domain.Catalog;
 
 /// <summary>Una de las carpetas declaradas en el compose donde pueden vivir bibliotecas.</summary>
 public sealed class FolderRootDto

@@ -11,7 +11,7 @@ public static class MediaHasher
     /// Computes the Stump partial SHA-256 hash for a media file.
     /// Matches stump/core/src/filesystem/hash.rs generate().
     /// </summary>
-    public static string ComputeStumpHash(string path, long totalBytes)
+    public static string ComputeDiarSpeicherHash(string path, long totalBytes)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -81,10 +81,10 @@ public static class MediaHasher
     }
 
     /// <summary>
-    /// Async counterpart of <see cref="ComputeStumpHash"/>.
+    /// Async counterpart of <see cref="ComputeDiarSpeicherHash"/>.
     /// Uses overlapped I/O so the calling thread is released while the disk responds.
     /// </summary>
-    public static async Task<string> ComputeStumpHashAsync(string path, long totalBytes, CancellationToken cancellationToken = default)
+    public static async Task<string> ComputeDiarSpeicherHashAsync(string path, long totalBytes, CancellationToken cancellationToken = default)
     {
         await using var stream = new FileStream(
             path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);

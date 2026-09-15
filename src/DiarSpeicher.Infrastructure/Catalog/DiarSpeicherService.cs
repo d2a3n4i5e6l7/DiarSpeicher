@@ -4,7 +4,7 @@ using System.Xml.Linq;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Core.Domain.StumpV2;
+using DiarSpeicher.Core.Domain.Catalog;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Infrastructure.Data;
@@ -17,14 +17,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace DiarSpeicher.Infrastructure.StumpV2;
+namespace DiarSpeicher.Infrastructure.Catalog;
 
-public sealed class StumpV2Service : IStumpV2Service
+public sealed class DiarSpeicherService : IDiarSpeicherService
 {
     private readonly DiarSpeicherDbContext _db;
     private readonly ICompositeBookProcessor _bookProcessor;
     private readonly IScannerQueue _scannerQueue;
-    private readonly ILogger<StumpV2Service> _logger;
+    private readonly ILogger<DiarSpeicherService> _logger;
     private readonly UploadOptions _uploadOptions;
     private readonly StorageOptions _storage;
     private readonly LibraryRootsOptions _libraryRoots;
@@ -33,11 +33,11 @@ public sealed class StumpV2Service : IStumpV2Service
     /// <summary>Lo unico que se acepta como portada subida a mano.</summary>
     private static readonly string[] CoverExtensions = [".jpg", ".jpeg", ".png", ".webp"];
 
-    public StumpV2Service(
+    public DiarSpeicherService(
         DiarSpeicherDbContext db,
         ICompositeBookProcessor bookProcessor,
         IScannerQueue scannerQueue,
-        ILogger<StumpV2Service> logger,
+        ILogger<DiarSpeicherService> logger,
         IOptions<StorageOptions> storageOptions,
         IOptions<LibraryRootsOptions>? libraryRoots = null,
         ITrashService? trash = null)
@@ -182,7 +182,7 @@ public sealed class StumpV2Service : IStumpV2Service
         }
     }
 
-    public async Task<StumpPageResponse<StumpMediaDto>> GetMediaAsync(
+    public async Task<DiarSpeicherPageResponse<DiarSpeicherMediaDto>> GetMediaAsync(
         AuthUser user,
         int page,
         int pageSize,
@@ -207,7 +207,7 @@ public sealed class StumpV2Service : IStumpV2Service
 
         var dtos = mediaList.Select(m => ToMediaDto(m, sessionMap.GetValueOrDefault(m.Id))).ToList();
 
-        return new StumpPageResponse<StumpMediaDto>
+        return new DiarSpeicherPageResponse<DiarSpeicherMediaDto>
         {
             Data = dtos,
             Total = total,
@@ -217,7 +217,7 @@ public sealed class StumpV2Service : IStumpV2Service
         };
     }
 
-    public async Task<StumpMediaDto?> GetMediaByIdAsync(AuthUser user, string id, CancellationToken ct = default)
+    public async Task<DiarSpeicherMediaDto?> GetMediaByIdAsync(AuthUser user, string id, CancellationToken ct = default)
     {
         var media = await _db.Media.ForUser(user)
             .Include(m => m.Metadata)
@@ -233,7 +233,7 @@ public sealed class StumpV2Service : IStumpV2Service
         return ToMediaDto(media, session);
     }
 
-    public async Task<List<StumpMediaDto>> GetKeepReadingAsync(AuthUser user, CancellationToken ct = default)
+    public async Task<List<DiarSpeicherMediaDto>> GetKeepReadingAsync(AuthUser user, CancellationToken ct = default)
     {
         var sessions = await _db.GetKeepReadingSessionsAsync(user.Id, ct);
 
@@ -247,7 +247,7 @@ public sealed class StumpV2Service : IStumpV2Service
         var mediaMap = mediaList.ToDictionary(m => m.Id);
         var sessionMap = sessions.ToDictionary(s => s.MediaId);
 
-        var result = new List<StumpMediaDto>();
+        var result = new List<DiarSpeicherMediaDto>();
         foreach (var id in mediaIds)
         {
             if (mediaMap.TryGetValue(id, out var media))
@@ -259,7 +259,7 @@ public sealed class StumpV2Service : IStumpV2Service
         return result;
     }
 
-    public async Task<StumpPageResponse<StumpSeriesDto>> GetSeriesAsync(AuthUser user, string? libraryId, int page, int pageSize, CancellationToken ct = default)
+    public async Task<DiarSpeicherPageResponse<DiarSpeicherSeriesDto>> GetSeriesAsync(AuthUser user, string? libraryId, int page, int pageSize, CancellationToken ct = default)
     {
         pageSize = Math.Clamp(pageSize, 1, 100);
         page = Math.Max(0, page);
@@ -278,7 +278,7 @@ public sealed class StumpV2Service : IStumpV2Service
 
         var dtos = seriesList.Select(ToSeriesDto).ToList();
 
-        return new StumpPageResponse<StumpSeriesDto>
+        return new DiarSpeicherPageResponse<DiarSpeicherSeriesDto>
         {
             Data = dtos,
             Total = total,
@@ -288,7 +288,7 @@ public sealed class StumpV2Service : IStumpV2Service
         };
     }
 
-    public async Task<StumpSeriesDto?> GetSeriesByIdAsync(AuthUser user, string id, CancellationToken ct = default)
+    public async Task<DiarSpeicherSeriesDto?> GetSeriesByIdAsync(AuthUser user, string id, CancellationToken ct = default)
     {
         var series = await _db.Series.ForUser(user)
             .Include(s => s.Metadata)
@@ -302,7 +302,7 @@ public sealed class StumpV2Service : IStumpV2Service
     /// Renombra o describe una serie. ForUser va delante a proposito: sin el, cualquiera
     /// con permiso de biblioteca podria editar una serie que su filtro de edad le oculta.
     /// </summary>
-    public async Task<StumpSeriesDto?> UpdateSeriesAsync(AuthUser user, string id, StumpUpdateSeriesInput input, CancellationToken ct = default)
+    public async Task<DiarSpeicherSeriesDto?> UpdateSeriesAsync(AuthUser user, string id, DiarSpeicherUpdateSeriesInput input, CancellationToken ct = default)
     {
         var series = await _db.Series.ForUser(user)
             .Include(s => s.Metadata)
@@ -328,7 +328,7 @@ public sealed class StumpV2Service : IStumpV2Service
         return ToSeriesDto(series);
     }
 
-    public async Task<StumpPageResponse<StumpMediaDto>> GetSeriesMediaAsync(AuthUser user, string seriesId, int page, int pageSize, CancellationToken ct = default)
+    public async Task<DiarSpeicherPageResponse<DiarSpeicherMediaDto>> GetSeriesMediaAsync(AuthUser user, string seriesId, int page, int pageSize, CancellationToken ct = default)
     {
         pageSize = Math.Clamp(pageSize, 1, 100);
         page = Math.Max(0, page);
@@ -346,7 +346,7 @@ public sealed class StumpV2Service : IStumpV2Service
 
         var dtos = mediaList.Select(m => ToMediaDto(m, sessionMap.GetValueOrDefault(m.Id))).ToList();
 
-        return new StumpPageResponse<StumpMediaDto>
+        return new DiarSpeicherPageResponse<DiarSpeicherMediaDto>
         {
             Data = dtos,
             Total = total,
@@ -356,7 +356,7 @@ public sealed class StumpV2Service : IStumpV2Service
         };
     }
 
-    public async Task<List<StumpLibraryDto>> GetLibrariesAsync(AuthUser user, CancellationToken ct = default)
+    public async Task<List<DiarSpeicherLibraryDto>> GetLibrariesAsync(AuthUser user, CancellationToken ct = default)
     {
         var libraries = await _db.Libraries.ForUser(user)
             .Include(l => l.Series)
@@ -390,7 +390,7 @@ public sealed class StumpV2Service : IStumpV2Service
             .ToList();
     }
 
-    public async Task<StumpLibraryDto?> GetLibraryByIdAsync(AuthUser user, string id, CancellationToken ct = default)
+    public async Task<DiarSpeicherLibraryDto?> GetLibraryByIdAsync(AuthUser user, string id, CancellationToken ct = default)
     {
         var lib = await _db.Libraries.ForUser(user)
             .Include(l => l.Series)
@@ -447,7 +447,7 @@ public sealed class StumpV2Service : IStumpV2Service
         return (media.Path, ContentTypeExtensions.FromExtension(media.Extension).ToMimeType());
     }
 
-    public async Task<bool> UpdateProgressAsync(AuthUser user, string mediaId, StumpUpdateProgressInput input, CancellationToken ct = default)
+    public async Task<bool> UpdateProgressAsync(AuthUser user, string mediaId, DiarSpeicherUpdateProgressInput input, CancellationToken ct = default)
     {
         var media = await _db.Media.ForUser(user)
             .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
@@ -496,7 +496,7 @@ public sealed class StumpV2Service : IStumpV2Service
         return true;
     }
 
-    public async Task<StumpEpubTocDto?> GetEpubTocAsync(AuthUser user, string mediaId, CancellationToken ct = default)
+    public async Task<DiarSpeicherEpubTocDto?> GetEpubTocAsync(AuthUser user, string mediaId, CancellationToken ct = default)
     {
         var media = await _db.Media.ForUser(user)
             .Include(m => m.Metadata)
@@ -509,7 +509,7 @@ public sealed class StumpV2Service : IStumpV2Service
 
         await using var fileStream = new FileStream(media.Path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
         await using var archive = await ZipArchive.CreateAsync(fileStream, ZipArchiveMode.Read, leaveOpen: false, entryNameEncoding: null, ct);
-        var tocItems = new List<StumpEpubTocItem>();
+        var tocItems = new List<DiarSpeicherEpubTocItem>();
 
         var ncxEntry = archive.Entries.FirstOrDefault(e => e.FullName.EndsWith(".ncx", StringComparison.OrdinalIgnoreCase));
         if (ncxEntry != null)
@@ -525,7 +525,7 @@ public sealed class StumpV2Service : IStumpV2Service
 
                 if (!string.IsNullOrEmpty(label) && !string.IsNullOrEmpty(contentSrc))
                 {
-                    tocItems.Add(new StumpEpubTocItem { Title = label, Href = contentSrc });
+                    tocItems.Add(new DiarSpeicherEpubTocItem { Title = label, Href = contentSrc });
                 }
             }
         }
@@ -539,11 +539,11 @@ public sealed class StumpV2Service : IStumpV2Service
 
             for (int i = 0; i < htmlEntries.Count; i++)
             {
-                tocItems.Add(new StumpEpubTocItem { Title = $"Section {i + 1}", Href = htmlEntries[i].FullName });
+                tocItems.Add(new DiarSpeicherEpubTocItem { Title = $"Section {i + 1}", Href = htmlEntries[i].FullName });
             }
         }
 
-        return new StumpEpubTocDto
+        return new DiarSpeicherEpubTocDto
         {
             MediaId = media.Id,
             Title = media.Metadata?.Title ?? media.Name,
@@ -593,7 +593,7 @@ public sealed class StumpV2Service : IStumpV2Service
         return (ms.ToArray(), contentType);
     }
 
-    public async Task<StumpLibraryDto?> CreateLibraryAsync(AuthUser user, StumpCreateLibraryInput input, CancellationToken ct = default)
+    public async Task<DiarSpeicherLibraryDto?> CreateLibraryAsync(AuthUser user, DiarSpeicherCreateLibraryInput input, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Path))
             return null;
@@ -639,7 +639,7 @@ public sealed class StumpV2Service : IStumpV2Service
         return ToLibraryDto(library, 0);
     }
 
-    public async Task<StumpLibraryDto?> UpdateLibraryAsync(AuthUser user, string id, StumpUpdateLibraryInput input, CancellationToken ct = default)
+    public async Task<DiarSpeicherLibraryDto?> UpdateLibraryAsync(AuthUser user, string id, DiarSpeicherUpdateLibraryInput input, CancellationToken ct = default)
     {
         var library = await _db.Libraries.ForUser(user)
             .Include(l => l.Series)
@@ -853,7 +853,7 @@ public sealed class StumpV2Service : IStumpV2Service
         return true;
     }
 
-    public async Task<StumpMissingReportDto> GetMissingAsync(AuthUser user, string libraryId, CancellationToken ct = default)
+    public async Task<DiarSpeicherMissingReportDto> GetMissingAsync(AuthUser user, string libraryId, CancellationToken ct = default)
     {
         var series = await _db.Series.ForUser(user)
             .Where(s => s.LibraryId == libraryId && s.Status == FileStatus.Missing)
@@ -867,9 +867,9 @@ public sealed class StumpV2Service : IStumpV2Service
             })
             .ToListAsync(ct);
 
-        var report = new StumpMissingReportDto
+        var report = new DiarSpeicherMissingReportDto
         {
-            Series = series.Select(s => new StumpMissingSeriesDto
+            Series = series.Select(s => new DiarSpeicherMissingSeriesDto
             {
                 Id = s.Id,
                 Name = s.Name,
@@ -1057,7 +1057,7 @@ public sealed class StumpV2Service : IStumpV2Service
             series.Count, media.Count, libraryId);
     }
 
-    private static LibraryConfig BuildConfig(StumpLibraryConfigDto? dto)
+    private static LibraryConfig BuildConfig(DiarSpeicherLibraryConfigDto? dto)
     {
         var config = new LibraryConfig { LibraryPattern = LibraryPattern.SeriesBased };
         if (dto != null)
@@ -1068,7 +1068,7 @@ public sealed class StumpV2Service : IStumpV2Service
         return config;
     }
 
-    private static void ApplyConfig(LibraryConfig config, StumpLibraryConfigDto dto)
+    private static void ApplyConfig(LibraryConfig config, DiarSpeicherLibraryConfigDto dto)
     {
         config.LibraryType = ParseEnum(dto.LibraryType, config.LibraryType);
         config.LibraryPattern = ParseEnum(dto.LibraryPattern, config.LibraryPattern);
@@ -1090,7 +1090,7 @@ public sealed class StumpV2Service : IStumpV2Service
     private static TEnum ParseEnum<TEnum>(string? raw, TEnum fallback) where TEnum : struct, Enum =>
         Enum.TryParse<TEnum>(raw, ignoreCase: true, out var parsed) ? parsed : fallback;
 
-    private static StumpLibraryDto ToLibraryDto(Library library, int mediaCount) => new()
+    private static DiarSpeicherLibraryDto ToLibraryDto(Library library, int mediaCount) => new()
     {
         Id = library.Id,
         Name = library.Name,
@@ -1103,7 +1103,7 @@ public sealed class StumpV2Service : IStumpV2Service
         CreatedAt = library.CreatedAt,
         UpdatedAt = library.UpdatedAt,
         LastScannedAt = library.LastScannedAt,
-        Config = library.Config == null ? null : new StumpLibraryConfigDto
+        Config = library.Config == null ? null : new DiarSpeicherLibraryConfigDto
         {
             LibraryType = library.Config.LibraryType.ToString(),
             LibraryPattern = library.Config.LibraryPattern.ToString(),
@@ -1127,12 +1127,12 @@ public sealed class StumpV2Service : IStumpV2Service
         AuthUser user,
         string libraryId,
         string? subpath,
-        IEnumerable<StumpUploadFileInput> files,
+        IEnumerable<DiarSpeicherUploadFileInput> files,
         CancellationToken ct = default)
     {
         return UploadToLibraryAsync(user, libraryId, subpath, ToAsync(files), ct);
 
-        static async IAsyncEnumerable<StumpUploadFileInput> ToAsync(IEnumerable<StumpUploadFileInput> source)
+        static async IAsyncEnumerable<DiarSpeicherUploadFileInput> ToAsync(IEnumerable<DiarSpeicherUploadFileInput> source)
         {
             foreach (var item in source)
             {
@@ -1145,7 +1145,7 @@ public sealed class StumpV2Service : IStumpV2Service
         AuthUser user,
         string libraryId,
         string? subpath,
-        IAsyncEnumerable<StumpUploadFileInput> files,
+        IAsyncEnumerable<DiarSpeicherUploadFileInput> files,
         CancellationToken ct = default)
     {
         if (!_uploadOptions.EnableUpload)
@@ -1224,7 +1224,7 @@ public sealed class StumpV2Service : IStumpV2Service
 
         await _scannerQueue.QueueScanAsync(new ScanRequest(library.Id), ct);
 
-        return UploadResult.Ok(new StumpUploadResponseDto
+        return UploadResult.Ok(new DiarSpeicherUploadResponseDto
         {
             UploadedCount = savedFiles.Count,
             Files = savedFiles,
@@ -1306,10 +1306,10 @@ public sealed class StumpV2Service : IStumpV2Service
         }
     }
 
-    public async Task<StumpSystemStatusDto> GetSystemStatusAsync(CancellationToken ct = default)
+    public async Task<DiarSpeicherSystemStatusDto> GetSystemStatusAsync(CancellationToken ct = default)
     {
         var userCount = await _db.Users.CountAsync(ct);
-        return new StumpSystemStatusDto
+        return new DiarSpeicherSystemStatusDto
         {
             Status = "OK",
             Semver = "0.1.0",
@@ -1321,9 +1321,9 @@ public sealed class StumpV2Service : IStumpV2Service
     {
         try
         {
-        // The auth middleware synthesises a "default-owner" identity while the server has
-        // no users yet. That id has no row in Users, so writing a reading session would
-        // violate the foreign key.
+            // The auth middleware synthesises a "default-owner" identity while the server has
+            // no users yet. That id has no row in Users, so writing a reading session would
+            // violate the foreign key.
             var userExists = await _db.Users.AnyAsync(u => u.Id == userId, ct);
             if (!userExists) return;
 
@@ -1358,9 +1358,9 @@ public sealed class StumpV2Service : IStumpV2Service
         }
     }
 
-    private static StumpMediaDto ToMediaDto(Media m, ReadingSession? session)
+    private static DiarSpeicherMediaDto ToMediaDto(Media m, ReadingSession? session)
     {
-        return new StumpMediaDto
+        return new DiarSpeicherMediaDto
         {
             Id = m.Id,
             Name = m.Name,
@@ -1375,7 +1375,7 @@ public sealed class StumpV2Service : IStumpV2Service
             CreatedAt = m.CreatedAt,
             CurrentPage = session?.EndPage,
             IsCompleted = session?.Status == ReadingStatus.Finished,
-            Metadata = m.Metadata != null ? new StumpMediaMetadataDto
+            Metadata = m.Metadata != null ? new DiarSpeicherMediaMetadataDto
             {
                 Title = m.Metadata.Title,
                 Summary = m.Metadata.Summary,
@@ -1388,9 +1388,9 @@ public sealed class StumpV2Service : IStumpV2Service
         };
     }
 
-    private static StumpSeriesDto ToSeriesDto(Series s)
+    private static DiarSpeicherSeriesDto ToSeriesDto(Series s)
     {
-        return new StumpSeriesDto
+        return new DiarSpeicherSeriesDto
         {
             Id = s.Id,
             Name = s.Name,
@@ -1404,11 +1404,11 @@ public sealed class StumpV2Service : IStumpV2Service
         };
     }
 
-    private static StumpSeriesMetadataDto? ToSeriesMetadataDto(SeriesMetadata? metadata)
+    private static DiarSpeicherSeriesMetadataDto? ToSeriesMetadataDto(SeriesMetadata? metadata)
     {
         if (metadata is null) return null;
 
-        return new StumpSeriesMetadataDto
+        return new DiarSpeicherSeriesMetadataDto
         {
             Source = metadata.MetaType,
             ExternalId = metadata.Comicid,

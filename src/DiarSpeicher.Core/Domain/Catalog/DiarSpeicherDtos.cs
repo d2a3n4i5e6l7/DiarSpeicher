@@ -1,9 +1,9 @@
 using System.Text.Json.Serialization;
 using DiarSpeicher.Core.Domain.Enums;
 
-namespace DiarSpeicher.Core.Domain.StumpV2;
+namespace DiarSpeicher.Core.Domain.Catalog;
 
-public sealed class StumpPageResponse<T>
+public sealed class DiarSpeicherPageResponse<T>
 {
     [JsonPropertyName("data")]
     public List<T> Data { get; set; } = new();
@@ -21,7 +21,7 @@ public sealed class StumpPageResponse<T>
     public int TotalPages { get; set; }
 }
 
-public sealed class StumpMediaDto
+public sealed class DiarSpeicherMediaDto
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
@@ -61,7 +61,7 @@ public sealed class StumpMediaDto
 
     [JsonPropertyName("metadata")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public StumpMediaMetadataDto? Metadata { get; set; }
+    public DiarSpeicherMediaMetadataDto? Metadata { get; set; }
 
     [JsonPropertyName("currentPage")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -71,7 +71,7 @@ public sealed class StumpMediaDto
     public bool IsCompleted { get; set; }
 }
 
-public sealed class StumpMediaMetadataDto
+public sealed class DiarSpeicherMediaMetadataDto
 {
     [JsonPropertyName("title")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -102,7 +102,7 @@ public sealed class StumpMediaMetadataDto
     public float? Number { get; set; }
 }
 
-public sealed class StumpSeriesDto
+public sealed class DiarSpeicherSeriesDto
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
@@ -140,14 +140,14 @@ public sealed class StumpSeriesDto
     /// </summary>
     [JsonPropertyName("metadata")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public StumpSeriesMetadataDto? Metadata { get; set; }
+    public DiarSpeicherSeriesMetadataDto? Metadata { get; set; }
 }
 
 /// <summary>
 /// Lo que aporta el catalogo externo sobre una serie. <c>source</c> dice de donde salio,
 /// para que la interfaz pueda marcarlo y ofrecer revertirlo.
 /// </summary>
-public sealed class StumpSeriesMetadataDto
+public sealed class DiarSpeicherSeriesMetadataDto
 {
     [JsonPropertyName("source")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -210,7 +210,7 @@ public sealed class StumpSeriesMetadataDto
     public string? TotalChapters { get; set; }
 }
 
-public sealed class StumpLibraryDto
+public sealed class DiarSpeicherLibraryDto
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
@@ -259,10 +259,10 @@ public sealed class StumpLibraryDto
 
     [JsonPropertyName("config")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public StumpLibraryConfigDto? Config { get; set; }
+    public DiarSpeicherLibraryConfigDto? Config { get; set; }
 }
 
-public sealed class StumpLibraryConfigDto
+public sealed class DiarSpeicherLibraryConfigDto
 {
     [JsonPropertyName("libraryType")]
     public string LibraryType { get; set; } = nameof(Enums.LibraryType.Mixed);
@@ -311,7 +311,7 @@ public sealed class StumpLibraryConfigDto
     public string? IgnoreRules { get; set; }
 }
 
-public sealed class StumpEpubTocDto
+public sealed class DiarSpeicherEpubTocDto
 {
     [JsonPropertyName("mediaId")]
     public string MediaId { get; set; } = string.Empty;
@@ -320,10 +320,10 @@ public sealed class StumpEpubTocDto
     public string Title { get; set; } = string.Empty;
 
     [JsonPropertyName("items")]
-    public List<StumpEpubTocItem> Items { get; set; } = new();
+    public List<DiarSpeicherEpubTocItem> Items { get; set; } = new();
 }
 
-public sealed class StumpEpubTocItem
+public sealed class DiarSpeicherEpubTocItem
 {
     [JsonPropertyName("title")]
     public string Title { get; set; } = string.Empty;
@@ -332,10 +332,10 @@ public sealed class StumpEpubTocItem
     public string Href { get; set; } = string.Empty;
 
     [JsonPropertyName("children")]
-    public List<StumpEpubTocItem> Children { get; set; } = new();
+    public List<DiarSpeicherEpubTocItem> Children { get; set; } = new();
 }
 
-public sealed class StumpUpdateProgressInput
+public sealed class DiarSpeicherUpdateProgressInput
 {
     [JsonPropertyName("page")]
     public int Page { get; set; }
@@ -349,7 +349,7 @@ public sealed class StumpUpdateProgressInput
     public bool? IsCompleted { get; set; }
 }
 
-public sealed class StumpSystemStatusDto
+public sealed class DiarSpeicherSystemStatusDto
 {
     [JsonPropertyName("status")]
     public string Status { get; set; } = "OK";
@@ -361,7 +361,7 @@ public sealed class StumpSystemStatusDto
     public bool IsClaimed { get; set; }
 }
 
-public sealed class StumpCreateLibraryInput
+public sealed class DiarSpeicherCreateLibraryInput
 {
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
@@ -376,14 +376,14 @@ public sealed class StumpCreateLibraryInput
     public string? Emoji { get; set; }
 
     [JsonPropertyName("config")]
-    public StumpLibraryConfigDto? Config { get; set; }
+    public DiarSpeicherLibraryConfigDto? Config { get; set; }
 }
 
 /// <summary>
 /// Cuerpo de PUT /api/v2/libraries/{id}. Un campo nulo significa "no tocar", de modo que el
 /// cliente puede enviar solo lo que cambia sin arrastrar el resto del recurso.
 /// </summary>
-public sealed class StumpUpdateLibraryInput
+public sealed class DiarSpeicherUpdateLibraryInput
 {
     [JsonPropertyName("name")]
     public string? Name { get; set; }
@@ -404,7 +404,7 @@ public sealed class StumpUpdateLibraryInput
     public string? Emoji { get; set; }
 
     [JsonPropertyName("config")]
-    public StumpLibraryConfigDto? Config { get; set; }
+    public DiarSpeicherLibraryConfigDto? Config { get; set; }
 }
 
 /// <summary>
@@ -416,7 +416,7 @@ public sealed class StumpUpdateLibraryInput
 /// serie, nunca despues, asi que un renombrado a mano sobrevive a los rescaneos.
 /// </para>
 /// </summary>
-public sealed class StumpUpdateSeriesInput
+public sealed class DiarSpeicherUpdateSeriesInput
 {
     [JsonPropertyName("name")]
     public string? Name { get; set; }
@@ -426,13 +426,13 @@ public sealed class StumpUpdateSeriesInput
 }
 
 /// <summary>Cuerpo de PUT /api/v2/series/{id}/thumbnail: el tomo cuya portada se adopta.</summary>
-public sealed class StumpSeriesThumbnailInput
+public sealed class DiarSpeicherSeriesThumbnailInput
 {
     [JsonPropertyName("mediaId")]
     public string MediaId { get; set; } = string.Empty;
 }
 
-public sealed class StumpUploadResponseDto
+public sealed class DiarSpeicherUploadResponseDto
 {
     [JsonPropertyName("uploadedCount")]
     public int UploadedCount { get; set; }
@@ -470,24 +470,24 @@ public enum UploadOutcome
 public sealed class UploadResult
 {
     public UploadOutcome Outcome { get; init; }
-    public StumpUploadResponseDto? Response { get; init; }
+    public DiarSpeicherUploadResponseDto? Response { get; init; }
     public string? Message { get; init; }
 
-    public static UploadResult Ok(StumpUploadResponseDto response) =>
+    public static UploadResult Ok(DiarSpeicherUploadResponseDto response) =>
         new() { Outcome = UploadOutcome.Success, Response = response };
 
     public static UploadResult Fail(UploadOutcome outcome, string message) =>
         new() { Outcome = outcome, Message = message };
 }
 
-public sealed class StumpUploadFileInput
+public sealed class DiarSpeicherUploadFileInput
 {
     public string FileName { get; set; } = string.Empty;
     public Stream Content { get; set; } = Stream.Null;
 }
 
 /// <summary>Estado de un escaneo, tal y como viaja por SSE y por el sondeo de respaldo.</summary>
-public sealed class StumpScanStatusDto
+public sealed class DiarSpeicherScanStatusDto
 {
     [JsonPropertyName("libraryId")]
     public string LibraryId { get; set; } = string.Empty;
@@ -539,7 +539,7 @@ public sealed class StumpScanStatusDto
 }
 
 /// <summary>Una serie del indice cuya carpeta ya no esta en el disco.</summary>
-public sealed class StumpMissingSeriesDto
+public sealed class DiarSpeicherMissingSeriesDto
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
@@ -558,10 +558,10 @@ public sealed class StumpMissingSeriesDto
     public int ReadingSessions { get; set; }
 }
 
-public sealed class StumpMissingReportDto
+public sealed class DiarSpeicherMissingReportDto
 {
     [JsonPropertyName("series")]
-    public List<StumpMissingSeriesDto> Series { get; set; } = [];
+    public List<DiarSpeicherMissingSeriesDto> Series { get; set; } = [];
 
     /// <summary>Tomos perdidos cuya serie si sigue en disco.</summary>
     [JsonPropertyName("orphanVolumes")]

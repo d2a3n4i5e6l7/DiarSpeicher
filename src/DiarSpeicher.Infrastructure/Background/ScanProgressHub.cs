@@ -90,7 +90,8 @@ public sealed class ScanProgressHub : IScanProgressHub, IScanProgressPublisher
         var queued = new ScanSnapshot(
             new ScanProgressEvent { JobId = libraryId, LibraryId = libraryId, Phase = ScanPhase.Started },
             DateTimeOffset.UtcNow,
-            Finished: false) { Queued = true };
+            Finished: false)
+        { Queued = true };
 
         // Sobrescribe un escaneo anterior ya terminado, nunca uno en marcha.
         _latest.AddOrUpdate(libraryId, queued, (_, previous) => previous.Finished ? queued : previous);

@@ -2,9 +2,9 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Core.Domain.StumpV2;
+using DiarSpeicher.Core.Domain.Catalog;
 using DiarSpeicher.Core.Filesystem;
-using DiarSpeicher.Infrastructure.StumpV2;
+using DiarSpeicher.Infrastructure.Catalog;
 using DiarSpeicher.Infrastructure.Storage;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
@@ -18,7 +18,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DiarSpeicher.Api.Endpoints;
 
-public static class StumpV2Endpoints
+public static class DiarSpeicherEndpoints
 {
     private const string AuthUserKey = "AuthUser";
 
@@ -46,7 +46,7 @@ public static class StumpV2Endpoints
         }
     }
 
-    private static StumpScanStatusDto ToScanDto(ScanSnapshot snapshot) => new()
+    private static DiarSpeicherScanStatusDto ToScanDto(ScanSnapshot snapshot) => new()
     {
         LibraryId = snapshot.Progress.LibraryId,
         Phase = snapshot.Progress.Phase.ToString(),
@@ -65,7 +65,7 @@ public static class StumpV2Endpoints
         Queued = snapshot.Queued
     };
 
-    public static RouteGroupBuilder MapStumpV2Endpoints(this IEndpointRouteBuilder app)
+    public static RouteGroupBuilder MapDiarSpeicherEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v2");
 
@@ -85,7 +85,7 @@ public static class StumpV2Endpoints
         group.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
         group.MapGet("/version", () => Results.Ok(new { semver = "0.1.0", rev = "net10" }));
         group.MapGet("/claim", async (
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var status = await service.GetSystemStatusAsync(ct);
@@ -111,7 +111,7 @@ public static class StumpV2Endpoints
     {
         group.MapGet("/media", async (
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             [FromQuery] int page = 0,
             [FromQuery] int pageSize = 20,
             [FromQuery] bool newestFirst = false,
@@ -124,7 +124,7 @@ public static class StumpV2Endpoints
 
         group.MapGet("/media/keep-reading", async (
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -135,7 +135,7 @@ public static class StumpV2Endpoints
         group.MapGet("/media/{id}", async (
             string id,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -147,7 +147,7 @@ public static class StumpV2Endpoints
             string id,
             int page,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -175,7 +175,7 @@ public static class StumpV2Endpoints
         group.MapGet("/media/{id}/file", async (
             string id,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -191,9 +191,9 @@ public static class StumpV2Endpoints
 
         group.MapPut("/media/{id}/progress", async (
             string id,
-            [FromBody] StumpUpdateProgressInput input,
+            [FromBody] DiarSpeicherUpdateProgressInput input,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -206,7 +206,7 @@ public static class StumpV2Endpoints
     {
         group.MapGet("/series", async (
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             [FromQuery] string? libraryId = null,
             [FromQuery] int page = 0,
             [FromQuery] int pageSize = 20,
@@ -220,7 +220,7 @@ public static class StumpV2Endpoints
         group.MapGet("/series/{id}", async (
             string id,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -230,9 +230,9 @@ public static class StumpV2Endpoints
 
         group.MapPut("/series/{id}", async (
             string id,
-            [FromBody] StumpUpdateSeriesInput input,
+            [FromBody] DiarSpeicherUpdateSeriesInput input,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -249,7 +249,7 @@ public static class StumpV2Endpoints
         group.MapGet("/series/{id}/thumbnail", async (
             string id,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -263,9 +263,9 @@ public static class StumpV2Endpoints
 
         group.MapPut("/series/{id}/thumbnail", async (
             string id,
-            [FromBody] StumpSeriesThumbnailInput input,
+            [FromBody] DiarSpeicherSeriesThumbnailInput input,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -283,7 +283,7 @@ public static class StumpV2Endpoints
         group.MapDelete("/series/{id}/thumbnail", async (
             string id,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -299,7 +299,7 @@ public static class StumpV2Endpoints
         group.MapGet("/series/{id}/media", async (
             string id,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             [FromQuery] int page = 0,
             [FromQuery] int pageSize = 20,
             CancellationToken ct = default) =>
@@ -317,7 +317,7 @@ public static class StumpV2Endpoints
     private static async Task<IResult> HandleSeriesCoverUpload(
         string id,
         HttpContext httpContext,
-        [FromServices] IStumpV2Service service,
+        [FromServices] IDiarSpeicherService service,
         CancellationToken ct)
     {
         var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -350,7 +350,7 @@ public static class StumpV2Endpoints
     {
         group.MapGet("/libraries", async (
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -361,7 +361,7 @@ public static class StumpV2Endpoints
         group.MapGet("/libraries/{id}", async (
             string id,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -370,9 +370,9 @@ public static class StumpV2Endpoints
         });
 
         group.MapPost("/libraries", async (
-            [FromBody] StumpCreateLibraryInput input,
+            [FromBody] DiarSpeicherCreateLibraryInput input,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -396,9 +396,9 @@ public static class StumpV2Endpoints
 
         group.MapPut("/libraries/{id}", async (
             string id,
-            [FromBody] StumpUpdateLibraryInput input,
+            [FromBody] DiarSpeicherUpdateLibraryInput input,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -421,7 +421,7 @@ public static class StumpV2Endpoints
         group.MapGet("/libraries/{id}/missing", async (
             string id,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -432,7 +432,7 @@ public static class StumpV2Endpoints
         group.MapPost("/libraries/{id}/purge-missing", async (
             string id,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -496,7 +496,7 @@ public static class StumpV2Endpoints
             string id,
             [FromQuery] bool deleteFiles,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -521,7 +521,7 @@ public static class StumpV2Endpoints
             string id,
             [FromQuery] bool deleteFiles,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -546,7 +546,7 @@ public static class StumpV2Endpoints
             string id,
             [FromQuery] bool deleteFile,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -572,7 +572,7 @@ public static class StumpV2Endpoints
         group.MapPost("/libraries/{id}/scan", async (
             string id,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -589,7 +589,7 @@ public static class StumpV2Endpoints
     private static async Task<IResult> HandleLibraryUpload(
         string id,
         HttpContext httpContext,
-        [FromServices] IStumpV2Service service,
+        [FromServices] IDiarSpeicherService service,
         [FromServices] IOptions<StorageOptions> storageOptions,
         CancellationToken ct)
     {
@@ -636,7 +636,7 @@ public static class StumpV2Endpoints
         };
     }
 
-    private static async IAsyncEnumerable<StumpUploadFileInput> ReadMultipartFilesAsync(
+    private static async IAsyncEnumerable<DiarSpeicherUploadFileInput> ReadMultipartFilesAsync(
         MultipartReader reader,
         Action<string> onSubpathFound,
         [EnumeratorCancellation] CancellationToken ct)
@@ -669,7 +669,7 @@ public static class StumpV2Endpoints
                 var rawName = HeaderUtilities.RemoveQuotes(cd.FileNameStar.HasValue ? cd.FileNameStar.Value : cd.FileName.Value).Value;
                 if (string.IsNullOrWhiteSpace(rawName)) continue;
 
-                yield return new StumpUploadFileInput
+                yield return new DiarSpeicherUploadFileInput
                 {
                     FileName = rawName,
                     Content = section.Body
@@ -683,7 +683,7 @@ public static class StumpV2Endpoints
         group.MapGet("/epub/{id}/toc", async (
             string id,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
@@ -695,7 +695,7 @@ public static class StumpV2Endpoints
             string id,
             string resourcePath,
             HttpContext httpContext,
-            [FromServices] IStumpV2Service service,
+            [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;

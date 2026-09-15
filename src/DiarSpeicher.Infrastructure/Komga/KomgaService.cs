@@ -145,37 +145,19 @@ public class KomgaService : IKomgaService
         // SQLite; the visibility filter mirrors ForUser exactly.
         var (where, parameters) = MediaSqlFilters.BuildVisibilityFilter(user);
 
-        // EF1002 warns that an interpolated string reaches the SQL unparameterised. The only
-        // interpolated values here are MediaSqlFilters.Joins, a const, and the clause text from
-        // BuildVisibilityFilter, which emits nothing but literal SQL and "@name" placeholders:
-        // every value travels through the parameter list. Switching to FromSql would try to
-        // parameterise the fragments themselves, which is not what they are.
-#pragma warning disable EF1002
+        var countSql = MediaSqlFilters.BuildCountSql(where);
+        var pageSql = MediaSqlFilters.BuildLatestPageSql(where);
+
         var totalElements = await _db.Database
-            .SqlQueryRaw<int>(
-                $"""
-                 SELECT COUNT(*) AS "Value"
-                 {MediaSqlFilters.Joins}
-                 WHERE {where}
-                 """,
-                parameters.ToParameters())
+            .SqlQueryRaw<int>(countSql, parameters.ToParameters())
             .SingleAsync(ct);
 
         var books = await _db.Media
-            .FromSqlRaw(
-                $"""
-                 SELECT m.*
-                 {MediaSqlFilters.Joins}
-                 WHERE {where}
-                 ORDER BY m."CreatedAt" DESC, m."Id" DESC
-                 LIMIT @take OFFSET @skip
-                 """,
-                parameters.ToParameters(("@take", size), ("@skip", page * size)))
+            .FromSqlRaw(pageSql, parameters.ToParameters(("@take", size), ("@skip", page * size)))
             .Include(m => m.Metadata)
             .Include(m => m.Series)
             .AsNoTracking()
             .ToListAsync(ct);
-#pragma warning restore EF1002
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id))).ToList();

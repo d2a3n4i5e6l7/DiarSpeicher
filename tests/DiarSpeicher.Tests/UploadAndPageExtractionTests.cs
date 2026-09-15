@@ -2,14 +2,14 @@
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Core.Domain.StumpV2;
+using DiarSpeicher.Core.Domain.Catalog;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
-using DiarSpeicher.Infrastructure.StumpV2;
+using DiarSpeicher.Infrastructure.Catalog;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -89,12 +89,12 @@ public sealed class UploadAndPageExtractionTests : IDisposable
         using var db = CreateInMemoryDbContext();
         var processor = new CompositeBookProcessor(new IBookProcessor[] { new ZipBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new StumpV2Service(db, processor, queue, NullLogger<StumpV2Service>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(db, processor, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
 
         var owner = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var libPath = Path.Combine(_tempDir, "NewLib");
 
-        var result = await service.CreateLibraryAsync(owner, new StumpCreateLibraryInput
+        var result = await service.CreateLibraryAsync(owner, new DiarSpeicherCreateLibraryInput
         {
             Name = "Manga",
             Path = libPath,
@@ -116,7 +116,7 @@ public sealed class UploadAndPageExtractionTests : IDisposable
         using var db = CreateInMemoryDbContext();
         var processor = new CompositeBookProcessor(new IBookProcessor[] { new ZipBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new StumpV2Service(db, processor, queue, NullLogger<StumpV2Service>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(db, processor, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
 
         var owner = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var libDir = Path.Combine(_tempDir, "SafeLib");
@@ -138,7 +138,7 @@ public sealed class UploadAndPageExtractionTests : IDisposable
 
         var uploadInput = new[]
         {
-            new StumpUploadFileInput { FileName = "hack.cbz", Content = cbzStream }
+            new DiarSpeicherUploadFileInput { FileName = "hack.cbz", Content = cbzStream }
         };
 
         var result = await service.UploadToLibraryAsync(owner, library.Id, "../../../evil", uploadInput);
@@ -173,7 +173,7 @@ public sealed class UploadAndPageExtractionTests : IDisposable
             new EpubBookProcessor()
         });
         var queue = new ScannerQueue();
-        var v2Service = new StumpV2Service(db, compositeProcessor, queue, NullLogger<StumpV2Service>.Instance, TestStorageOptions.Default());
+        var v2Service = new DiarSpeicherService(db, compositeProcessor, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
 
         var scannerService = new LibraryScannerService(
             db,
@@ -195,7 +195,7 @@ public sealed class UploadAndPageExtractionTests : IDisposable
             subpath: "Batman",
             files: new[]
             {
-                new StumpUploadFileInput { FileName = "Batman_01.cbz", Content = cbzStream }
+                new DiarSpeicherUploadFileInput { FileName = "Batman_01.cbz", Content = cbzStream }
             });
 
         Assert.Equal(UploadOutcome.Success, uploadResult.Outcome);
@@ -218,7 +218,7 @@ public sealed class UploadAndPageExtractionTests : IDisposable
         Assert.Equal(3, media.Pages);
         Assert.Equal("cbz", media.Extension);
 
-        // 5. Fetch the first page via Stump v2 Service!
+        // 5. Fetch the first page via DiarSpeicher v2 Service!
         var page1 = await v2Service.GetMediaPageAsync(owner, media.Id, 1);
         Assert.NotNull(page1);
         Assert.Equal(ContentType.Jpeg, page1.ContentType);

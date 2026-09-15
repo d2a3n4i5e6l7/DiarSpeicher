@@ -78,6 +78,47 @@ public static class MediaSqlFilters
         return (string.Join(" AND ", clauses), parameters);
     }
 
+    /// <summary>
+    /// El SQL se arma con <see cref="string.Concat(string?, string?, string?)"/> y no con una
+    /// cadena interpolada porque EF1002 marca toda interpolacion que llega a SqlQueryRaw o
+    /// FromSqlRaw, sin poder distinguir una constante de una entrada del usuario. Aqui solo se
+    /// concatena SQL literal —<see cref="Joins"/> es const y <paramref name="where"/> viene de
+    /// <see cref="BuildVisibilityFilter"/>, que emite unicamente clausulas y marcadores
+    /// "@nombre"—, de modo que evitar la interpolacion satisface al analizador sin suprimirlo.
+    /// </summary>
+    public static string BuildCountSql(string where) => string.Concat(
+        """
+        SELECT COUNT(*) AS "Value"
+
+        """,
+        Joins,
+        """
+
+        WHERE 
+        """,
+        where);
+
+    /// <summary>
+    /// Pagina ordenada por fecha de alta. Vease <see cref="BuildCountSql"/> para el motivo de
+    /// concatenar en vez de interpolar.
+    /// </summary>
+    public static string BuildLatestPageSql(string where) => string.Concat(
+        """
+        SELECT m.*
+
+        """,
+        Joins,
+        """
+
+        WHERE 
+        """,
+        where,
+        """
+
+        ORDER BY m."CreatedAt" DESC, m."Id" DESC
+        LIMIT @take OFFSET @skip
+        """);
+
     /// <summary>Fresh SqliteParameter instances, so each command owns its own.</summary>
     public static object[] ToParameters(
         this List<(string Name, object Value)> values,

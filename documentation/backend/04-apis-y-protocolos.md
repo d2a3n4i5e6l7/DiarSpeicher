@@ -140,7 +140,7 @@ SQLite. El resto de la API se resuelve con LINQ y `ForUser`.
 
 ## API v2 nativa — `/api/v2`
 
-Lo sirve [StumpV2Endpoints.cs](../../src/DiarSpeicher.Api/Endpoints/StumpV2Endpoints.cs).
+Lo sirve [DiarSpeicherV2Endpoints.cs](../../src/DiarSpeicher.Api/Endpoints/DiarSpeicherV2Endpoints.cs).
 Los endpoints de usuarios y claves que compartían este prefijo se retiraron:
 esa administración es del plugin del Gateway.
 

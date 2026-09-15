@@ -7,8 +7,8 @@ using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Data.Extensions;
 using DiarSpeicher.Infrastructure.Filesystem;
 using Microsoft.Extensions.Options;
-using DiarSpeicher.Core.Domain.StumpV2;
-using DiarSpeicher.Infrastructure.StumpV2;
+using DiarSpeicher.Core.Domain.Catalog;
+using DiarSpeicher.Infrastructure.Catalog;
 using Microsoft.EntityFrameworkCore;
 
 namespace DiarSpeicher.Api.GraphQL;
@@ -159,22 +159,22 @@ public class Mutation
     /// behave identically on both surfaces.
     /// </summary>
     public async Task<UploadBooksPayload> UploadBooks(
-        IStumpV2Service stumpService,
+        IDiarSpeicherService diarSpeicherService,
         AuthUserResolver auth,
         UploadBooksInput input,
         CancellationToken ct)
     {
-        var inputs = new List<StumpUploadFileInput>();
+        var inputs = new List<DiarSpeicherUploadFileInput>();
         foreach (var file in input.Files)
         {
-            inputs.Add(new StumpUploadFileInput
+            inputs.Add(new DiarSpeicherUploadFileInput
             {
                 FileName = file.Name,
                 Content = file.OpenReadStream()
             });
         }
 
-        var result = await stumpService.UploadToLibraryAsync(auth.Require(), input.LibraryId, input.Subpath, inputs, ct);
+        var result = await diarSpeicherService.UploadToLibraryAsync(auth.Require(), input.LibraryId, input.Subpath, inputs, ct);
 
         if (result.Outcome != UploadOutcome.Success)
         {

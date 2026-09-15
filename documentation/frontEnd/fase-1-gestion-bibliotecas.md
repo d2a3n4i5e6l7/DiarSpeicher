@@ -8,11 +8,11 @@ ni de ver el resultado del último.
 
 ## Ampliación de la API
 
-`StumpLibraryDto` solo serializaba `id`, `name`, `path`, `status` y `seriesCount`, y
+`DiarSpeicherLibraryDto` solo serializaba `id`, `name`, `path`, `status` y `seriesCount`, y
 `CreateLibraryAsync` fijaba `LibraryPattern.SeriesBased` ignorando el resto de la
 `LibraryConfig`. Ambas cosas se han corregido en esta fase.
 
-`StumpLibraryDto` añade `mediaCount`, `description`, `emoji`, `createdAt`, `updatedAt`,
+`DiarSpeicherLibraryDto` añade `mediaCount`, `description`, `emoji`, `createdAt`, `updatedAt`,
 `lastScannedAt` y un objeto `config` con las quince opciones de `LibraryConfig`. Los enums
 viajan como el nombre del miembro (`"Manga"`, `"RightToLeft"`), no como su índice, para que
 el contrato no dependa del orden de declaración.
@@ -26,7 +26,7 @@ el contrato no dependa del orden de declaración.
 | `DELETE /api/v2/libraries/{id}`    | Nuevo. Borra el índice, nunca los ficheros         |
 | `POST /api/v2/libraries/{id}/scan` | Sin cambios                                        |
 
-`StumpLibraryDto` es exclusivo de `/api/v2`: los clientes OPDS y Komga consumen
+`DiarSpeicherLibraryDto` es exclusivo de `/api/v2`: los clientes OPDS y Komga consumen
 `KomgaLibraryDto` y los feeds XML, que no se han tocado. Los 137 tests de contrato siguen
 pasando.
 

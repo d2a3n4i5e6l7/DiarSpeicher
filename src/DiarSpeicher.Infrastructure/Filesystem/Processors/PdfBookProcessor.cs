@@ -76,11 +76,17 @@ public class PdfBookProcessor : IBookProcessor
         }
     }
 
+    /// <summary>
+    /// PDFium se distribuye como binario nativo y no cubre todas las plataformas que admite
+    /// net10.0. La comprobacion va escrita aqui, y no como [SupportedOSPlatform], porque el
+    /// atributo se propagaria por toda la cadena de llamadas hasta el arranque y los tests.
+    /// </summary>
     private static ExtractedPage? RasterizePage(string path, int pageNumber)
     {
         try
         {
             if (!File.Exists(path) || pageNumber < 1) return null;
+            if (!OperatingSystem.IsLinux() && !OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS()) return null;
 
             using var stream = File.OpenRead(path);
             using var skBitmap = Conversion.ToImage(stream, page: pageNumber - 1);
