@@ -384,8 +384,9 @@ export interface EpubDeviceProfile {
 export const epubProfilesApi = {
   getProfiles: (userId: string | number) =>
     http.get<EpubDeviceProfile[]>(`/api/v2/users/${userId}/epub-profiles`),
+  /** `affectedBooks`: libros a medias cuyo progreso quedará repaginado por el perfil nuevo. */
   saveProfiles: (userId: string | number, profiles: EpubDeviceProfile[]) =>
-    http.put<{ updated: boolean; count: number }>(
+    http.put<{ updated: boolean; count: number; affectedBooks: number }>(
       `/api/v2/users/${userId}/epub-profiles`,
       profiles,
     ),

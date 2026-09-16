@@ -1,3 +1,4 @@
+import { errorMessage } from "../api/errorMessage";
 import {
 	Alert,
 	Box,
@@ -130,7 +131,7 @@ export default function LibraryDetailPage() {
 
 		void load().catch((err: unknown) => {
 			if (mounted) {
-				setLoaded({ key: requestKey, error: err instanceof Error ? err.message : "No se pudo cargar la biblioteca." });
+				setLoaded({ key: requestKey, error: errorMessage(err, "No se pudo cargar la biblioteca.") });
 			}
 		});
 

@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using SkiaSharp;
 
 namespace DiarSpeicher.Tests;
 
@@ -122,4 +123,21 @@ internal static class PdfBuilder
     }
 
     private static void Write(Stream stream, string text) => stream.Write(Encoding.ASCII.GetBytes(text));
+}
+
+/// <summary>
+/// JPEG de verdad, no un PNG con el nombre cambiado: el servicio deduce el tipo de la
+/// extension, asi que un fichero mentiroso haria pasar el test sirviendo algo que ningun
+/// lector podria pintar.
+/// </summary>
+internal static class JpegBuilder
+{
+    public static byte[] Solid(int width, int height)
+    {
+        using var surface = SKSurface.Create(new SKImageInfo(width, height));
+        surface.Canvas.Clear(new SKColor(200, 40, 40));
+        using var image = surface.Snapshot();
+        using var encoded = image.Encode(SKEncodedImageFormat.Jpeg, 80);
+        return encoded.ToArray();
+    }
 }

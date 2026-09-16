@@ -102,6 +102,7 @@ export function formatDuration(seconds: number): string {
  */
 export function scanLabel(progress: ScanStatus): string {
 	if (progress.queued) return "EN COLA";
+	if (progress.phase === "ProcessingMedia") return progress.currentMedia ?? progress.currentSeries ?? "LEYENDO TOMOS";
 	if (progress.phase === "ProcessingSeries") return progress.currentSeries ?? "LEYENDO TOMOS";
 	if (progress.message) return progress.message;
 

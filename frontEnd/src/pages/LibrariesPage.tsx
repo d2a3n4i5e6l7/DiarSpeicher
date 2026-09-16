@@ -1,3 +1,4 @@
+import { errorMessage } from "../api/errorMessage";
 import {
 	Alert,
 	Box,
@@ -136,7 +137,7 @@ export default function LibrariesPage() {
 			setScanningIds((prev) => prev.filter((id) => scans.some((scan) => scan.libraryId === id)));
 			if (!silent) setError(null);
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error cargando las bibliotecas.");
+			setError(errorMessage(err, "Error cargando las bibliotecas."));
 		} finally {
 			if (!silent) setLoading(false);
 		}
@@ -152,7 +153,7 @@ export default function LibrariesPage() {
 				}
 			} catch (err: unknown) {
 				if (isMounted) {
-					setError(err instanceof Error ? err.message : "Error cargando las bibliotecas.");
+					setError(errorMessage(err, "Error cargando las bibliotecas."));
 				}
 			} finally {
 				if (isMounted) {
@@ -249,7 +250,7 @@ export default function LibrariesPage() {
 			setFormOpen(false);
 			await load(true);
 		} catch (err: unknown) {
-			setFormError(err instanceof Error ? err.message : "Error guardando la biblioteca.");
+			setFormError(errorMessage(err, "Error guardando la biblioteca."));
 		} finally {
 			setSaving(false);
 		}
@@ -270,7 +271,7 @@ export default function LibrariesPage() {
 			setPendingDelete(null);
 			await load(true);
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error eliminando la biblioteca.");
+			setError(errorMessage(err, "Error eliminando la biblioteca."));
 		} finally {
 			setSaving(false);
 		}
@@ -284,7 +285,7 @@ export default function LibrariesPage() {
 			setNotice(`Escaneo encolado para "${library.name}".`);
 			await load(true);
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "No se pudo encolar el escaneo.");
+			setError(errorMessage(err, "No se pudo encolar el escaneo."));
 			setScanningIds((prev) => prev.filter((id) => id !== library.id));
 		}
 	};

@@ -9,9 +9,6 @@ public static class OpdsV2Endpoints
 {
     public static IEndpointRouteBuilder MapOpdsV2Endpoints(this IEndpointRouteBuilder endpoints)
     {
-        // Komga monta OPDS 2 en "/opds/v2/" (Opds2Controller.kt), no en "/opds/v2.0/". Un
-        // cliente escrito contra Komga pide la ruta corta y aqui recibia un 404, asi que se
-        // registran las dos: la larga se mantiene para no romper a quien ya la use.
         MapGroup(endpoints.MapGroup("/opds/v2.0"));
         MapGroup(endpoints.MapGroup("/opds/{apiKey}/v2.0"));
         MapGroup(endpoints.MapGroup("/opds/v2"));
@@ -30,38 +27,38 @@ public static class OpdsV2Endpoints
     {
         group.MapGet("/auth", (HttpContext context, IOpdsV2Service opdsV2) =>
         {
-            var apiKey = GetApiKey(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var doc = opdsV2.GetAuthenticationDoc(apiKey);
             return Results.Json(doc, contentType: OpdsV2MimeTypes.AuthenticationJson);
         });
 
         group.MapGet("/catalog", async (HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var feed = await opdsV2.GetCatalogFeedAsync(user, apiKey, ct);
             return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
         });
 
         group.MapGet("/search", async (string? query, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var feed = await opdsV2.SearchFeedAsync(user, query ?? string.Empty, apiKey, ct);
             return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
         });
 
         group.MapGet("/libraries", async (HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var feed = await opdsV2.GetLibrariesFeedAsync(user, apiKey, ct);
             return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
         });
 
         async Task<IResult> LibraryFeed(string id, int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct)
         {
-            var feed = await opdsV2.GetLibrarySeriesFeedAsync(GetAuthUser(context), id, Math.Max(0, page ?? 0), GetApiKey(context), ct);
+            var feed = await opdsV2.GetLibrarySeriesFeedAsync(RequestIdentity.GetAuthUser(context), id, Math.Max(0, page ?? 0), RequestIdentity.GetApiKey(context), ct);
             return feed == null
                 ? Results.NotFound()
                 : Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
@@ -72,7 +69,7 @@ public static class OpdsV2Endpoints
 
         group.MapGet("/series/{id}", async (string id, int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {
-            var feed = await opdsV2.GetSeriesBooksFeedAsync(GetAuthUser(context), id, Math.Max(0, page ?? 0), GetApiKey(context), ct);
+            var feed = await opdsV2.GetSeriesBooksFeedAsync(RequestIdentity.GetAuthUser(context), id, Math.Max(0, page ?? 0), RequestIdentity.GetApiKey(context), ct);
             return feed == null
                 ? Results.NotFound()
                 : Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
@@ -80,8 +77,8 @@ public static class OpdsV2Endpoints
 
         group.MapGet("/series", async (int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var feed = await opdsV2.GetSeriesFeedAsync(user, Math.Max(0, page ?? 0), apiKey, ct);
             return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
         });
@@ -89,21 +86,18 @@ public static class OpdsV2Endpoints
 
     private static void MapBookEndpoints(RouteGroupBuilder group)
     {
-        // Komga cuelga estos tres de "libraries/" (Opds2Controller.kt), no de "books/". Se
-        // registran las dos formas contra el mismo handler para que un cliente escrito
-        // contra Komga encuentre el feed donde lo busca.
         async Task<IResult> BooksFeed(int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct)
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var feed = await opdsV2.GetBooksFeedAsync(user, Math.Max(0, page ?? 0), apiKey, ct);
             return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
         }
 
         async Task<IResult> KeepReadingFeed(HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct)
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var feed = await opdsV2.GetKeepReadingFeedAsync(user, apiKey, ct);
             return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
         }
@@ -119,8 +113,8 @@ public static class OpdsV2Endpoints
 
         group.MapGet("/books/{id}", async (string id, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var pub = await opdsV2.GetPublicationAsync(user, id, apiKey, ct);
             return pub == null
                 ? Results.NotFound($"Publication {id} not found")
@@ -133,7 +127,7 @@ public static class OpdsV2Endpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var (data, contentType) = await opdsService.GetBookThumbnailAsync(user, id, ct);
             if (data == null || data.Length == 0)
             {
@@ -150,7 +144,7 @@ public static class OpdsV2Endpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var zeroBased = zero_based ?? true;
             var (extractedPage, book) = await opdsService.GetBookPageAsync(user, id, page, zeroBased, trackProgression: true, ct);
 
@@ -164,7 +158,7 @@ public static class OpdsV2Endpoints
 
         group.MapGet("/books/{id}/progression", async (string id, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var prog = await opdsV2.GetProgressionAsync(user, id, ct);
             return prog == null ? Results.NotFound() : Results.Ok(prog);
         });
@@ -176,7 +170,7 @@ public static class OpdsV2Endpoints
             IOpdsV2Service opdsV2,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var ok = await opdsV2.UpdateProgressionAsync(user, id, input, ct);
             return ok ? Results.Ok() : Results.BadRequest("Could not update progression");
         });
@@ -187,7 +181,7 @@ public static class OpdsV2Endpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var book = await opdsService.GetMediaForDownloadAsync(user, id, ct);
             if (book == null || !File.Exists(book.Path))
             {
@@ -202,28 +196,4 @@ public static class OpdsV2Endpoints
         });
     }
 
-    private static AuthUser GetAuthUser(HttpContext context)
-    {
-        if (context.Items.TryGetValue("AuthUser", out var obj) && obj is AuthUser authUser)
-        {
-            return authUser;
-        }
-
-        return new AuthUser { Id = "anonymous", Username = "anonymous" };
-    }
-
-    private static string? GetApiKey(HttpContext context)
-    {
-        if (context.Items.TryGetValue("OpdsApiKey", out var obj) && obj is string apiKey)
-        {
-            return apiKey;
-        }
-
-        if (context.Request.RouteValues.TryGetValue("apiKey", out var rVal) && rVal != null)
-        {
-            return rVal.ToString();
-        }
-
-        return null;
-    }
 }

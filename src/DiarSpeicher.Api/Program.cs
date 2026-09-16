@@ -5,6 +5,7 @@ using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Core.Gateway;
 using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Reading;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Storage;
@@ -24,10 +25,6 @@ var builder = WebApplication.CreateBuilder(args);
 var configuredConnection = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Data Source=diarspeicher.db;Cache=Shared;Mode=ReadWriteCreate;";
 
-// Las claves ajenas se exigen aqui y no en la cadena de conexion, que llega por variable de
-// entorno y puede venir de cualquier sitio. De ellas depende, por ejemplo, que las filas de
-// MediaPages se vayan con su tomo: nadie las borra a mano, las seis rutas que quitan un
-// medio confian en el ON DELETE CASCADE de la tabla.
 var connectionString = new SqliteConnectionStringBuilder(configuredConnection)
 {
     ForeignKeys = true
@@ -40,8 +37,6 @@ builder.Services.AddDbContext<DiarSpeicherDbContext>(options =>
     options.UseSqlite(connectionString, sqlite => sqlite.MaxBatchSize(SqliteMaxBatchSize));
 });
 
-// DataLoaders resolve batches concurrently, and a DbContext is not thread-safe, so the
-// GraphQL layer takes a short-lived context per batch from the factory.
 builder.Services.AddDbContextFactory<DiarSpeicherDbContext>(options =>
 {
     options.UseSqlite(connectionString, sqlite => sqlite.MaxBatchSize(SqliteMaxBatchSize));
@@ -49,11 +44,8 @@ builder.Services.AddDbContextFactory<DiarSpeicherDbContext>(options =>
 
 builder.Services.AddHttpContextAccessor();
 
-// Contrato con el Gateway: prefijo de montaje y rutas que sirve sin identidad.
 builder.Services.Configure<GatewayOptions>(builder.Configuration.GetSection(GatewayOptions.SectionName));
 
-// Los enlaces de los feeds llevan el prefijo del montaje. Vive en Api porque lee el
-// HttpContext; Infrastructure solo conoce la interfaz.
 builder.Services.AddSingleton<ILinkPrefixProvider, HttpContextLinkPrefixProvider>();
 
 
@@ -77,14 +69,14 @@ builder.Services.AddSingleton<IBookProcessor, EpubBookProcessor>();
 builder.Services.AddSingleton<IBookProcessor, PdfBookProcessor>();
 builder.Services.AddSingleton<CompositeBookProcessor>();
 
-// Page extraction is served through the disk cache, so every consumer (OPDS, DiarSpeicher v2,
-// thumbnails) skips repeated decompression of the same page.
 builder.Services.AddSingleton<ICompositeBookProcessor>(sp => new CachingBookProcessor(
     sp.GetRequiredService<CompositeBookProcessor>(),
     sp.GetRequiredService<IPageCache>()));
 
 builder.Services.AddSingleton<IThumbnailService, ThumbnailService>();
 
+builder.Services.AddScoped<IEpubPageMapStore, EpubPageMapStore>();
+builder.Services.AddScoped<IReadingProgress, ReadingProgress>();
 
 builder.Services.AddScoped<IOpdsService, OpdsService>();
 builder.Services.AddScoped<IOpdsV2Service, OpdsV2Service>();
@@ -92,13 +84,16 @@ builder.Services.AddScoped<IKomgaService, KomgaService>();
 
 builder.Services.AddScoped<IKoReaderService, KoReaderService>();
 builder.Services.AddScoped<IKoboService, KoboService>();
+builder.Services.AddScoped(sp => new DiarSpeicherServiceOptions
+{
+    LibraryRoots = sp.GetService<IOptions<LibraryRootsOptions>>(),
+    Trash = sp.GetService<ITrashService>()
+});
 builder.Services.AddScoped<IDiarSpeicherService, DiarSpeicherService>();
 
 builder.Services.AddSingleton<IDirectoryScanner, DirectoryScanner>();
 builder.Services.AddSingleton<IArchiveConversionService, ArchiveConversionService>();
 
-// Catalogo externo de MangaBaka. El volcado es un fichero de solo lectura en disco, asi que
-// el catalogo es singleton; el emparejador toca la base de datos y va por peticion.
 builder.Services.AddSingleton<IMangaBakaCatalog, MangaBakaCatalog>();
 builder.Services.AddSingleton<IMangaBakaIngestService, MangaBakaIngestService>();
 builder.Services.AddScoped<ISeriesMetadataMatcher, SeriesMetadataMatcher>();
@@ -108,8 +103,6 @@ builder.Services.AddHostedService<ScanBackgroundService>();
 builder.Services.AddHostedService<LibraryWatcherService>();
 builder.Services.AddHostedService<DatabaseBackupService>();
 
-// El hub es singleton porque los suscriptores de SSE viven mas que la peticion que los
-// abrio; el publicador de GraphQL sigue siendo scoped porque su emisor lo es.
 builder.Services.AddSingleton<ScanProgressHub>();
 builder.Services.AddSingleton<IScanProgressHub>(sp => sp.GetRequiredService<ScanProgressHub>());
 builder.Services.AddScoped<GraphQLScanProgressPublisher>();
@@ -140,10 +133,6 @@ builder.Services
 
 var app = builder.Build();
 
-// Los directorios de datos se crean en cada arranque, no en la imagen: el volumen se monta
-// encima de lo que traiga la imagen y tapa los directorios que se crearon al construirla.
-// La imagen final es distroless, asi que tampoco hay shell con la que crearlos antes de
-// arrancar el proceso.
 EnsureDataDirectories(app.Services, connectionString);
 
 using (var scope = app.Services.CreateScope())
@@ -154,8 +143,6 @@ using (var scope = app.Services.CreateScope())
     await db.BackfillSortNamesAsync();
 }
 
-// El salto gateway -> backend va en claro, asi que el esquema real lo trae la cabecera. Sin
-// vaciar las listas solo se confiaria en loopback y el gateway es otro contenedor.
 var forwardedHeaders = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedProto
@@ -198,12 +185,6 @@ app.MapTusEndpoints();
 
 await app.RunAsync();
 
-/// <summary>
-/// Crea el directorio de la base de datos y los de los datos generados. SQLite no crea el
-/// directorio que contiene el fichero, de modo que la migracion inicial falla si no existe,
-/// y el resto se crean aqui para que un fallo de permisos salte al arrancar y no en la
-/// primera peticion que toque disco.
-/// </summary>
 static void EnsureDataDirectories(IServiceProvider services, string connectionString)
 {
     var storage = services.GetRequiredService<IOptions<StorageOptions>>().Value;
@@ -236,11 +217,6 @@ static void EnsureDataDirectories(IServiceProvider services, string connectionSt
     }
 }
 
-/// <summary>
-/// Sin ruta configurada, el volcado cuelga del volumen de datos. El directorio de trabajo
-/// del proceso no vale: en el contenedor es /home/nonroot, que ni es escribible ni persiste
-/// entre despliegues, y son 3,5 GB que no se quieren volver a descargar.
-/// </summary>
 static void ApplyMangaBakaStorageRoot(MangaBakaOptions options, IOptions<StorageOptions> storageOptions)
 {
     if (!string.IsNullOrWhiteSpace(options.DatabasePath)) return;
@@ -248,10 +224,6 @@ static void ApplyMangaBakaStorageRoot(MangaBakaOptions options, IOptions<Storage
     options.DatabasePath = Path.Combine(Path.GetFullPath(storageOptions.Value.RootPath), "manga_database");
 }
 
-/// <summary>
-/// The DIAR_* variables documented for uploads are applied after the "Storage" section is
-/// bound, so an explicitly set variable always wins over appsettings.
-/// </summary>
 static void ApplyUploadEnvironmentOverrides(StorageOptions options)
 {
     var enableUpload = Environment.GetEnvironmentVariable("DIAR_ENABLE_UPLOAD");

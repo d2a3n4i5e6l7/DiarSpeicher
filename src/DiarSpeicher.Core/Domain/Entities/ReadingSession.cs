@@ -17,6 +17,10 @@ public class ReadingSession
     public string? KoreaderProgress { get; set; }
     public long? ElapsedSeconds { get; set; }
 
+    public int? RenderedPage { get; set; }
+    public int? RenderedTotalPages { get; set; }
+    public string? RenderedProfileKey { get; set; }
+
     public int ReadthroughNumber { get; set; } = 1;
     public ReadingStatus Status { get; set; } = ReadingStatus.Reading;
 

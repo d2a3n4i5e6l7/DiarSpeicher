@@ -1,8 +1,5 @@
 namespace DiarSpeicher.Infrastructure.Catalog;
 
-/// <summary>
-/// Alta, edicion y borrado de bibliotecas, incluido el movimiento de la raiz
-/// </summary>
 public sealed partial class DiarSpeicherService
 {
     public async Task<List<DiarSpeicherLibraryDto>> GetLibrariesAsync(AuthUser user, CancellationToken ct = default)
@@ -194,9 +191,6 @@ public sealed partial class DiarSpeicherService
         return resolved;
     }
 
-    /// <summary>
-    /// Reescribe el prefijo de las rutas absolutas guardadas al mover una biblioteca.
-    /// </summary>
     private async Task RepointLibraryPathsAsync(string libraryId, string oldPath, string newPath, CancellationToken ct)
     {
         var cut = oldPath.Length + 1;
@@ -221,10 +215,6 @@ public sealed partial class DiarSpeicherService
             [oldPath.Length, oldPath], ct);
     }
 
-    /// <summary>
-    /// Borra el registro de la biblioteca, nunca los ficheros del disco: DiarSpeicher indexa
-    /// carpetas que no son suyas y que pueden estar compartidas con otros programas.
-    /// </summary>
     public async Task<bool> DeleteLibraryAsync(AuthUser user, string id, bool deleteFiles = false, CancellationToken ct = default)
     {
         var library = await _db.Libraries.ForUser(user)
@@ -239,7 +229,6 @@ public sealed partial class DiarSpeicherService
         }
 
         await PurgeLibraryContentAsync(library.Id, ct);
-.
         var libraryPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(library.Path));
         await _db.Database.ExecuteSqlRawAsync(
             "DELETE FROM ScannedDirectories WHERE substr(Path, 1, {0}) = {1}",
@@ -260,9 +249,6 @@ public sealed partial class DiarSpeicherService
         return true;
     }
 
-    /// <summary>
-    /// Borra las series y los tomos de una biblioteca, con sus miniaturas.
-    /// </summary>
     private async Task PurgeLibraryContentAsync(string libraryId, CancellationToken ct)
     {
         var series = await _db.Series
@@ -273,9 +259,13 @@ public sealed partial class DiarSpeicherService
             .Where(m => m.Series != null && m.Series.LibraryId == libraryId)
             .ToListAsync(ct);
 
-        foreach (var thumb in media.Select(m => m.ThumbnailPath).Concat(series.Select(s => s.ThumbnailPath)))
+        var thumbs = media.Select(m => m.ThumbnailPath)
+            .Concat(series.Select(s => s.ThumbnailPath))
+            .Where(thumb => !string.IsNullOrWhiteSpace(thumb));
+
+        foreach (var thumb in thumbs)
         {
-            if (!string.IsNullOrWhiteSpace(thumb)) TryDeleteFile(thumb);
+            TryDeleteFile(thumb!);
         }
 
         _db.Media.RemoveRange(media);

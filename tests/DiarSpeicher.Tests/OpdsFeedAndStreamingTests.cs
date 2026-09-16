@@ -18,6 +18,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     private readonly SqliteConnection _connection;
     private readonly DbContextOptions<DiarSpeicherDbContext> _options;
     private readonly string _tempDir;
+    private readonly string _thumbnailPath;
     private readonly string _testCbzPath;
     private string _kidBookId = null!;
     private string _adultBookId = null!;
@@ -39,6 +40,8 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
         Directory.CreateDirectory(_tempDir);
 
         _testCbzPath = Path.Combine(_tempDir, "sample_comic.cbz");
+        _thumbnailPath = Path.Combine(_tempDir, "sample_comic_thumb.jpg");
+        File.WriteAllBytes(_thumbnailPath, JpegBuilder.Solid(64, 96));
         CreateSampleCbz(_testCbzPath);
 
         SeedTestData(context);
@@ -99,6 +102,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
             Pages = 3,
             Size = new FileInfo(_testCbzPath).Length,
             SeriesId = series.Id,
+            ThumbnailPath = _thumbnailPath,
             Metadata = new MediaMetadata
             {
                 Title = "Spider-Man Kid #1",
@@ -145,7 +149,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var xml = await service.GetCatalogXmlAsync(user, null);
@@ -171,7 +175,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
 
         // 1. Usuario con restricción de edad 12 años
         var childUser = new AuthUser
@@ -213,7 +217,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
 
         var restrictedUser = new AuthUser
         {
@@ -241,7 +245,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
 
         var user = new AuthUser { Id = "reader_1", Username = "reader_john", IsServerOwner = false };
 
@@ -272,7 +276,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
 
         var childUser = new AuthUser
         {
@@ -297,7 +301,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
 
@@ -325,7 +329,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
 
         // Crear una sesión de lectura activa para reader_1 en _kidBookId
         context.ReadingSessions.Add(new ReadingSession
@@ -359,7 +363,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     {
         using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root);
+        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
 
         var user = new AuthUser { Id = "reader_1", Username = "reader_john", IsServerOwner = true };
 

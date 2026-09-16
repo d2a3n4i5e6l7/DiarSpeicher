@@ -100,7 +100,7 @@ public sealed class KomgaCompatibilityTests : IDisposable
     public async Task GetLibrariesAsync_ReturnsKomgaFormattedLibraries()
     {
         using var context = new DiarSpeicherDbContext(_options);
-        var service = new KomgaService(context, NullLogger<KomgaService>.Instance);
+        var service = new KomgaService(context, NullLogger<KomgaService>.Instance, TestReadingProgress.For(context));
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var libs = await service.GetLibrariesAsync(user);
@@ -115,7 +115,7 @@ public sealed class KomgaCompatibilityTests : IDisposable
     public async Task GetSeriesAsync_ReturnsSpringPageableFormat()
     {
         using var context = new DiarSpeicherDbContext(_options);
-        var service = new KomgaService(context, NullLogger<KomgaService>.Instance);
+        var service = new KomgaService(context, NullLogger<KomgaService>.Instance, TestReadingProgress.For(context));
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var page = await service.GetSeriesAsync(user, _libraryId, null, 0, 20);
@@ -138,7 +138,7 @@ public sealed class KomgaCompatibilityTests : IDisposable
     public async Task GetBookPagesAsync_ReturnsCorrectPageList()
     {
         using var context = new DiarSpeicherDbContext(_options);
-        var service = new KomgaService(context, NullLogger<KomgaService>.Instance);
+        var service = new KomgaService(context, NullLogger<KomgaService>.Instance, TestReadingProgress.For(context));
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var pages = await service.GetBookPagesAsync(user, _kidBookId);
@@ -154,7 +154,7 @@ public sealed class KomgaCompatibilityTests : IDisposable
     public async Task ReadProgress_CanUpdateAndDeleteProgress()
     {
         using var context = new DiarSpeicherDbContext(_options);
-        var service = new KomgaService(context, NullLogger<KomgaService>.Instance);
+        var service = new KomgaService(context, NullLogger<KomgaService>.Instance, TestReadingProgress.For(context));
 
         var user = new AuthUser { Id = "reader_komga", Username = "narutofan", IsServerOwner = false };
 
@@ -181,7 +181,7 @@ public sealed class KomgaCompatibilityTests : IDisposable
     public async Task GetBooksInSeriesAsync_EnforcesParentalAgeRestriction()
     {
         using var context = new DiarSpeicherDbContext(_options);
-        var service = new KomgaService(context, NullLogger<KomgaService>.Instance);
+        var service = new KomgaService(context, NullLogger<KomgaService>.Instance, TestReadingProgress.For(context));
 
         var childUser = new AuthUser
         {

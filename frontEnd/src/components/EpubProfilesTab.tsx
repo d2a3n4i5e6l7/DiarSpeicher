@@ -1,4 +1,5 @@
 import {
+	Alert,
 	Box,
 	Card,
 	Chip,
@@ -18,6 +19,7 @@ import {
 } from "@mui/material";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import AutoStoriesIcon from "@mui/icons-material/AutoStories";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { DS } from "../theme";
 import type { EpubDeviceProfile } from "../api/endpoints";
 import { DEFAULT_EPUB_PROFILES, FONT_OPTIONS } from "../constants/epubProfiles";
@@ -110,6 +112,24 @@ export default function EpubProfilesTab({ profiles, onChange }: EpubProfilesTabP
 								</IconButton>
 							</Tooltip>
 						</Box>
+
+						<Alert
+							severity="warning"
+							icon={<WarningAmberIcon fontSize="small" />}
+							sx={{
+								backgroundColor: "transparent",
+								border: `1px solid ${DS.border}`,
+								borderRadius: 0,
+								color: DS.muted,
+								fontSize: "12.5px",
+								"& .MuiAlert-icon": { color: DS.red },
+							}}
+						>
+							Cambiar la resolución, la fuente o los márgenes repagina los EPUB: un libro de 400
+							páginas puede pasar a 520. El progreso de los libros sin terminar se traduce por
+							proporción al reabrirlos, así que quedará cerca del punto en el que lo dejaste, pero
+							no exactamente en él.
+						</Alert>
 
 						{/* Nombre del Perfil */}
 						<TextField

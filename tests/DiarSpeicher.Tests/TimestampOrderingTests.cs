@@ -122,7 +122,7 @@ public sealed class TimestampOrderingTests : IDisposable
         }
 
         await using var context = new DiarSpeicherDbContext(_options);
-        var service = new KomgaService(context, NullLogger<KomgaService>.Instance);
+        var service = new KomgaService(context, NullLogger<KomgaService>.Instance, TestReadingProgress.For(context));
         var owner = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
 
         var first = await service.GetLatestBooksAsync(owner, page: 0, size: 2);

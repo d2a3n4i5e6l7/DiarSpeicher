@@ -150,7 +150,7 @@ public sealed class DiarSpeicherApiTests : IDisposable
         using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(context));
 
         var user = new AuthUser { Id = "user_admin", Username = "admin", IsServerOwner = true };
 
@@ -171,7 +171,7 @@ public sealed class DiarSpeicherApiTests : IDisposable
         using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(context));
 
         var user = new AuthUser { Id = "user_admin", Username = "admin", IsServerOwner = true };
 
@@ -194,7 +194,7 @@ public sealed class DiarSpeicherApiTests : IDisposable
         using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(context));
 
         var user = new AuthUser { Id = "user_admin", Username = "admin", IsServerOwner = true };
 
@@ -213,7 +213,7 @@ public sealed class DiarSpeicherApiTests : IDisposable
         using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(context));
 
         var user = new AuthUser { Id = "user_admin", Username = "admin", IsServerOwner = true };
 
@@ -240,7 +240,7 @@ public sealed class DiarSpeicherApiTests : IDisposable
         using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(context));
 
         var status = await service.GetSystemStatusAsync();
         Assert.Equal("OK", status.Status);

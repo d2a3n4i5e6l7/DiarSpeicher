@@ -18,7 +18,8 @@ public static class ReadingSessionSqlQueries
                 $"""
                 SELECT "Id", "CreatedAt", "ElapsedSeconds", "EndPage", "EndPercentage",
                        "KoreaderProgress", "MediaId", "Notes", "ReadthroughNumber", "SessionDate",
-                       "StartPage", "StartPercentage", "Status", "UpdatedAt", "UserId"
+                       "StartPage", "StartPercentage", "Status", "UpdatedAt", "UserId",
+                       "RenderedPage", "RenderedTotalPages", "RenderedProfileKey"
                 FROM (
                     SELECT *, ROW_NUMBER() OVER (PARTITION BY "MediaId" ORDER BY "Id" DESC) AS "rn"
                     FROM "ReadingSessions"
@@ -42,7 +43,8 @@ public static class ReadingSessionSqlQueries
                 $"""
                 SELECT "Id", "CreatedAt", "ElapsedSeconds", "EndPage", "EndPercentage",
                        "KoreaderProgress", "MediaId", "Notes", "ReadthroughNumber", "SessionDate",
-                       "StartPage", "StartPercentage", "Status", "UpdatedAt", "UserId"
+                       "StartPage", "StartPercentage", "Status", "UpdatedAt", "UserId",
+                       "RenderedPage", "RenderedTotalPages", "RenderedProfileKey"
                 FROM (
                     SELECT *, ROW_NUMBER() OVER (
                         PARTITION BY "MediaId" ORDER BY COALESCE("UpdatedAt", "CreatedAt") DESC, "Id" DESC

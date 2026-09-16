@@ -7,74 +7,6 @@ public static class MediaHasher
     public const int HashSampleSize = 10000;
     public const int HashSampleCount = 4;
 
-    public static string ComputeDiarSpeicherHash(string path, long totalBytes)
-    {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-
-        if (totalBytes <= HashSampleSize * HashSampleCount)
-        {
-            var buffer = new byte[totalBytes];
-            int read = stream.Read(buffer, 0, (int)totalBytes);
-            sha256.AppendData(buffer, 0, read);
-        }
-        else
-        {
-            var buffer = new byte[HashSampleSize];
-
-            for (int i = 0; i < HashSampleCount; i++)
-            {
-                long offset = (totalBytes / HashSampleCount) * i;
-                stream.Seek(offset, SeekOrigin.Begin);
-                int read = stream.Read(buffer, 0, HashSampleSize);
-                sha256.AppendData(buffer, 0, read);
-            }
-
-            long finalOffset = totalBytes - HashSampleSize;
-            stream.Seek(finalOffset, SeekOrigin.Begin);
-            int finalRead = stream.Read(buffer, 0, HashSampleSize);
-            sha256.AppendData(buffer, 0, finalRead);
-        }
-
-        var hashBytes = sha256.GetHashAndReset();
-        return Convert.ToHexStringLower(hashBytes);
-    }
-
-    public static string ComputeKoreaderHash(string path)
-    {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var md5 = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
-
-        const long step = 1024L;
-        const int size = 1024;
-        var buffer = new byte[size];
-
-        for (int i = -1; i <= 10; i++)
-        {
-            long offset = (i == -1) ? 0L : step << (2 * i);
-            if (offset >= stream.Length)
-            {
-                break;
-            }
-
-            stream.Seek(offset, SeekOrigin.Begin);
-            int bytesRead = stream.Read(buffer, 0, size);
-            if (bytesRead == 0)
-            {
-                break;
-            }
-
-            md5.AppendData(buffer, 0, bytesRead);
-        }
-
-        var hashBytes = md5.GetHashAndReset();
-        return Convert.ToHexStringLower(hashBytes);
-    }
-
-    /// <summary>
-    /// Async counterpart of <see cref="ComputeDiarSpeicherHash"/>.
-    /// Uses overlapped I/O so the calling thread is released while the disk responds.
-    /// </summary>
     public static async Task<string> ComputeDiarSpeicherHashAsync(string path, long totalBytes, CancellationToken cancellationToken = default)
     {
         await using var stream = new FileStream(
@@ -109,9 +41,6 @@ public static class MediaHasher
         return Convert.ToHexStringLower(hashBytes);
     }
 
-    /// <summary>
-    /// Async counterpart of <see cref="ComputeKoreaderHash"/>.
-    /// </summary>
     public static async Task<string> ComputeKoreaderHashAsync(string path, CancellationToken cancellationToken = default)
     {
         await using var stream = new FileStream(

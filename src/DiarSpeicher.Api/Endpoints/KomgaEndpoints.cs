@@ -33,7 +33,7 @@ public static class KomgaEndpoints
     {
         endpoints.MapGet("/api/v2/users/me", (HttpContext context) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
 
             // Komga identifica al usuario por su correo; aquí no hay correos, así que va el
             // nombre, que es lo que el cliente acaba mostrando.
@@ -75,14 +75,14 @@ public static class KomgaEndpoints
     {
         group.MapGet("/libraries", async (HttpContext context, IKomgaService komga, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var libs = await komga.GetLibrariesAsync(user, ct);
             return Results.Ok(libs);
         });
 
         group.MapGet("/libraries/{id}", async (string id, HttpContext context, IKomgaService komga, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var lib = await komga.GetLibraryByIdAsync(user, id, ct);
             return lib == null ? Results.NotFound() : Results.Ok(lib);
         });
@@ -99,14 +99,14 @@ public static class KomgaEndpoints
             IKomgaService komga,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var result = await komga.GetSeriesAsync(user, library_id, search, Math.Max(0, page ?? 0), Math.Clamp(size ?? 20, 1, 100), ct);
             return Results.Ok(result);
         });
 
         group.MapGet("/series/{id}", async (string id, HttpContext context, IKomgaService komga, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var series = await komga.GetSeriesByIdAsync(user, id, ct);
             return series == null ? Results.NotFound() : Results.Ok(series);
         });
@@ -119,7 +119,7 @@ public static class KomgaEndpoints
             IKomgaService komga,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var result = await komga.GetBooksInSeriesAsync(user, id, Math.Max(0, page ?? 0), Math.Clamp(size ?? 20, 1, 100), ct);
             return Results.Ok(result);
         });
@@ -131,7 +131,7 @@ public static class KomgaEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var books = await komga.GetBooksInSeriesAsync(user, id, 0, 1, ct);
             if (books.Content.Count == 0)
             {
@@ -157,7 +157,7 @@ public static class KomgaEndpoints
             IKomgaService komga,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var result = await komga.GetBooksAsync(user, search, Math.Max(0, page ?? 0), Math.Clamp(size ?? 20, 1, 100), ct);
             return Results.Ok(result);
         });
@@ -169,21 +169,21 @@ public static class KomgaEndpoints
             IKomgaService komga,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var result = await komga.GetLatestBooksAsync(user, Math.Max(0, page ?? 0), Math.Clamp(size ?? 20, 1, 100), ct);
             return Results.Ok(result);
         });
 
         group.MapGet("/books/{id}", async (string id, HttpContext context, IKomgaService komga, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var book = await komga.GetBookByIdAsync(user, id, ct);
             return book == null ? Results.NotFound() : Results.Ok(book);
         });
 
         group.MapGet("/books/{id}/pages", async (string id, HttpContext context, IKomgaService komga, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var pages = await komga.GetBookPagesAsync(user, id, ct);
             return Results.Ok(pages);
         });
@@ -195,7 +195,7 @@ public static class KomgaEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var (extractedPage, book) = await opdsService.GetBookPageAsync(user, id, pageNumber, zeroBased: false, trackProgression: true, ct);
 
             if (book == null || extractedPage == null || extractedPage.Data.Length == 0)
@@ -212,7 +212,7 @@ public static class KomgaEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var (data, contentType) = await opdsService.GetBookThumbnailAsync(user, id, ct);
             if (data == null || data.Length == 0)
             {
@@ -227,7 +227,7 @@ public static class KomgaEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var book = await opdsService.GetMediaForDownloadAsync(user, id, ct);
             if (book == null || !File.Exists(book.Path))
             {
@@ -254,7 +254,7 @@ public static class KomgaEndpoints
             IKomgaService komga,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var ok = await komga.UpdateReadProgressAsync(user, id, dto.Page, dto.Completed, ct);
             return ok ? Results.NoContent() : Results.BadRequest("Could not update read progress");
         });
@@ -265,19 +265,10 @@ public static class KomgaEndpoints
             IKomgaService komga,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var ok = await komga.DeleteReadProgressAsync(user, id, ct);
             return ok ? Results.NoContent() : Results.NotFound();
         });
     }
 
-    private static AuthUser GetAuthUser(HttpContext context)
-    {
-        if (context.Items.TryGetValue("AuthUser", out var obj) && obj is AuthUser authUser)
-        {
-            return authUser;
-        }
-
-        return new AuthUser { Id = "anonymous", Username = "anonymous" };
-    }
 }

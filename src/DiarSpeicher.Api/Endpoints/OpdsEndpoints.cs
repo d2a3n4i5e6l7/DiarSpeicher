@@ -22,15 +22,15 @@ public static class OpdsEndpoints
     {
         group.MapGet("/catalog", async (HttpContext context, IOpdsService opdsService, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var xml = await opdsService.GetCatalogXmlAsync(user, apiKey, ct);
             return Results.Content(xml, AtomContentType);
         });
 
         group.MapGet("/search", (HttpContext context, IOpdsService opdsService) =>
         {
-            var apiKey = GetApiKey(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var xml = opdsService.GetOpenSearchXml(apiKey);
             return Results.Content(xml, OpenSearchContentType);
         });
@@ -41,16 +41,16 @@ public static class OpdsEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var xml = await opdsService.GetSearchFeedXmlAsync(user, search, apiKey, ct);
             return Results.Content(xml, AtomContentType);
         });
 
         group.MapGet("/keep-reading", async (HttpContext context, IOpdsService opdsService, CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var xml = await opdsService.GetKeepReadingFeedXmlAsync(user, apiKey, ct);
             return Results.Content(xml, AtomContentType);
         });
@@ -61,8 +61,8 @@ public static class OpdsEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var xml = await opdsService.GetLibrariesFeedAsync(user, search, apiKey, ct);
             return Results.Content(xml, AtomContentType);
         });
@@ -74,8 +74,8 @@ public static class OpdsEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             try
             {
                 var xml = await opdsService.GetLibrarySeriesFeedAsync(user, id, Math.Max(0, page ?? 0), apiKey, ct);
@@ -94,8 +94,8 @@ public static class OpdsEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var xml = await opdsService.GetSeriesFeedAsync(user, search, Math.Max(0, page ?? 0), apiKey, ct);
             return Results.Content(xml, AtomContentType);
         });
@@ -106,8 +106,8 @@ public static class OpdsEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var xml = await opdsService.GetLatestSeriesFeedAsync(user, Math.Max(0, page ?? 0), apiKey, ct);
             return Results.Content(xml, AtomContentType);
         });
@@ -119,8 +119,8 @@ public static class OpdsEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             try
             {
                 var xml = await opdsService.GetSeriesBooksFeedAsync(user, id, Math.Max(0, page ?? 0), apiKey, ct);
@@ -139,8 +139,8 @@ public static class OpdsEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var xml = await opdsService.GetBooksFeedAsync(user, search, Math.Max(0, page ?? 0), apiKey, ct);
             return Results.Content(xml, AtomContentType);
         });
@@ -151,8 +151,8 @@ public static class OpdsEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
-            var apiKey = GetApiKey(context);
+            var user = RequestIdentity.GetAuthUser(context);
+            var apiKey = RequestIdentity.GetApiKey(context);
             var xml = await opdsService.GetLatestBooksFeedAsync(user, Math.Max(0, page ?? 0), apiKey, ct);
             return Results.Content(xml, AtomContentType);
         });
@@ -163,7 +163,7 @@ public static class OpdsEndpoints
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var (data, contentType) = await opdsService.GetBookThumbnailAsync(user, id, ct);
             if (data == null || data.Length == 0)
             {
@@ -177,13 +177,16 @@ public static class OpdsEndpoints
             string id,
             int page,
             bool? zero_based,
+            bool? cover,
             HttpContext context,
             IOpdsService opdsService,
             CancellationToken ct) =>
         {
-            var user = GetAuthUser(context);
+            var user = RequestIdentity.GetAuthUser(context);
             var zeroBased = zero_based ?? true;
-            var (extractedPage, book) = await opdsService.GetBookPageAsync(user, id, page, zeroBased, trackProgression: true, ct);
+
+            var isCover = cover ?? false;
+            var (extractedPage, book) = await opdsService.GetBookPageAsync(user, id, page, zeroBased, trackProgression: !isCover, ct);
 
             if (book == null)
             {
@@ -224,7 +227,7 @@ public static class OpdsEndpoints
         IOpdsService opdsService,
         CancellationToken ct)
     {
-        var user = GetAuthUser(context);
+        var user = RequestIdentity.GetAuthUser(context);
         var book = await opdsService.GetMediaForDownloadAsync(user, id, ct);
 
         if (book == null || !File.Exists(book.Path))
@@ -242,33 +245,4 @@ public static class OpdsEndpoints
             enableRangeProcessing: true);
     }
 
-    private static AuthUser GetAuthUser(HttpContext context)
-    {
-        if (context.Items.TryGetValue("AuthUser", out var obj) && obj is AuthUser authUser)
-        {
-            return authUser;
-        }
-
-        return new AuthUser
-        {
-            Id = "anonymous",
-            Username = "anonymous",
-            IsServerOwner = false
-        };
-    }
-
-    private static string? GetApiKey(HttpContext context)
-    {
-        if (context.Items.TryGetValue("OpdsApiKey", out var obj) && obj is string apiKey)
-        {
-            return apiKey;
-        }
-
-        if (context.Request.RouteValues.TryGetValue("apiKey", out var rVal) && rVal != null)
-        {
-            return rVal.ToString();
-        }
-
-        return null;
-    }
 }

@@ -1,3 +1,4 @@
+import { errorMessage } from "../api/errorMessage";
 import { Alert, Box, Button, Chip, LinearProgress, Stack, Typography } from "@mui/material";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
@@ -57,7 +58,7 @@ export default function MetadataPage() {
 				if (next.busy) delay = POLL_BUSY_MS;
 			} catch (err: unknown) {
 				if (!mounted) return;
-				setError(err instanceof Error ? err.message : "No se pudo leer el estado del volcado.");
+				setError(errorMessage(err, "No se pudo leer el estado del volcado."));
 			}
 
 			// Reprogramar siempre, tambien tras un fallo: un corte de red de un segundo dejaba
@@ -77,7 +78,7 @@ export default function MetadataPage() {
 		try {
 			await metadataApi.download();
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "No se pudo iniciar la descarga.");
+			setError(errorMessage(err, "No se pudo iniciar la descarga."));
 		} finally {
 			await refresh().catch(() => undefined);
 		}
@@ -98,7 +99,7 @@ export default function MetadataPage() {
 				setUploadPercent(pct);
 			});
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "No se pudo ingerir el fichero.");
+			setError(errorMessage(err, "No se pudo ingerir el fichero."));
 		} finally {
 			setUploading(false);
 			setUploadPercent(null);

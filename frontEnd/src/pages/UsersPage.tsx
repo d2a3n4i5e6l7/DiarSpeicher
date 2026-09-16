@@ -1,3 +1,4 @@
+import { errorMessage } from "../api/errorMessage";
 import {
 	Alert,
 	Box,
@@ -315,7 +316,7 @@ export default function UsersPage() {
 			setUsers(userList || []);
 			setRoles(roleList || []);
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error cargando usuarios o roles.");
+			setError(errorMessage(err, "Error cargando usuarios o roles."));
 		} finally {
 			setLoading(false);
 		}
@@ -332,7 +333,7 @@ export default function UsersPage() {
 				}
 			} catch (err: unknown) {
 				if (isMounted) {
-					setError(err instanceof Error ? err.message : "Error cargando usuarios o roles.");
+					setError(errorMessage(err, "Error cargando usuarios o roles."));
 				}
 			} finally {
 				if (isMounted) {
@@ -388,7 +389,7 @@ export default function UsersPage() {
 			setCreateForm(EMPTY_FORM);
 			await loadData();
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error creando el usuario.");
+			setError(errorMessage(err, "Error creando el usuario."));
 		} finally {
 			setSavingUser(false);
 		}
@@ -402,7 +403,7 @@ export default function UsersPage() {
 		setError(null);
 		try {
 			const age = editForm.age.trim();
-			await Promise.all([
+			const [, profilesResult] = await Promise.all([
 				usersApi.update(editingUser.id, {
 					role: editForm.role || undefined,
 					permissions: serializePermissions(editForm),
@@ -413,11 +414,16 @@ export default function UsersPage() {
 				}),
 				epubProfilesApi.saveProfiles(editingUser.id, epubProfiles),
 			]);
-			setSuccessMsg(`Usuario "${editingUser.username}" actualizado.`);
+			const repaginated = profilesResult?.affectedBooks ?? 0;
+			setSuccessMsg(
+				repaginated > 0
+					? `Usuario "${editingUser.username}" actualizado. La nueva maquetación repagina ${repaginated} libro(s) sin terminar: su progreso se reajustará al reabrirlos y quedará cerca, no exacto.`
+					: `Usuario "${editingUser.username}" actualizado.`,
+			);
 			setOpenEdit(false);
 			await loadData();
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error actualizando el usuario.");
+			setError(errorMessage(err, "Error actualizando el usuario."));
 		} finally {
 			setSavingUser(false);
 		}
@@ -435,7 +441,7 @@ export default function UsersPage() {
 			setOpenPassword(false);
 			setNewPasswordVal("");
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error cambiando la contraseña.");
+			setError(errorMessage(err, "Error cambiando la contraseña."));
 		} finally {
 			setSavingUser(false);
 		}
@@ -451,7 +457,7 @@ export default function UsersPage() {
 			setDeleteUser(null);
 			await loadData();
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error eliminando el usuario.");
+			setError(errorMessage(err, "Error eliminando el usuario."));
 		} finally {
 			setSavingUser(false);
 		}

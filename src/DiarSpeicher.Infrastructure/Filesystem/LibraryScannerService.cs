@@ -674,7 +674,7 @@ public class LibraryScannerService : ILibraryScannerService
         // de los tomos que vienen en cuanto empieza, no cuando ya estan hechos.
         await PublishProgressAsync(
             progress.LibraryId,
-            ScanPhase.ProcessingSeries,
+            ScanPhase.ProcessingMedia,
             cancellationToken,
             completedSeries: progress.CompletedSeries,
             totalSeries: progress.TotalSeries,
@@ -739,7 +739,7 @@ public class LibraryScannerService : ILibraryScannerService
 
             await PublishProgressAsync(
                 progress.LibraryId,
-                ScanPhase.ProcessingSeries,
+                ScanPhase.ProcessingMedia,
                 cancellationToken,
                 completedSeries: progress.CompletedSeries,
                 totalSeries: progress.TotalSeries,

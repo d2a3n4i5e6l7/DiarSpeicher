@@ -5,6 +5,9 @@ public enum ScanPhase
     Started,
     WalkingLibrary,
     ProcessingSeries,
+
+    ProcessingMedia,
+
     Completed,
     Failed
 }

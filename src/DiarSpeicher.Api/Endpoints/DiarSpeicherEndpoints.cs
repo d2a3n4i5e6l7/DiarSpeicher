@@ -13,7 +13,9 @@ using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 
 using DiarSpeicher.Core.Domain.Entities;
+using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using Microsoft.EntityFrameworkCore;
 
 namespace DiarSpeicher.Api.Endpoints;
@@ -759,6 +761,18 @@ public static class DiarSpeicherEndpoints
             return Results.Forbid();
         }
 
+        var newProfile = profiles.FirstOrDefault(p => p.IsDefault) ?? profiles.FirstOrDefault();
+        var affectedBooks = 0;
+        if (newProfile != null)
+        {
+            var profileKey = EpubRasterizer.BuildProfileKey(newProfile);
+            affectedBooks = await db.ReadingSessions
+                .CountAsync(s => s.UserId == targetId
+                    && s.Status == ReadingStatus.Reading
+                    && s.RenderedPage != null
+                    && s.RenderedProfileKey != profileKey, ct);
+        }
+
         var prefs = await db.UserPreferences.FirstOrDefaultAsync(p => p.UserId == targetId, ct);
         if (prefs == null)
         {
@@ -775,6 +789,6 @@ public static class DiarSpeicherEndpoints
         }
 
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { updated = true, count = profiles.Count });
+        return Results.Ok(new { updated = true, count = profiles.Count, affectedBooks });
     }
 }

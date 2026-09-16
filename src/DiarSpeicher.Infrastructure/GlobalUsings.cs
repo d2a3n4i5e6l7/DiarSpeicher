@@ -9,6 +9,7 @@ global using DiarSpeicher.Core.Filesystem;
 global using DiarSpeicher.Infrastructure.Background;
 global using DiarSpeicher.Infrastructure.Data;
 global using DiarSpeicher.Infrastructure.Data.Extensions;
+global using DiarSpeicher.Infrastructure.Reading;
 global using DiarSpeicher.Infrastructure.Filesystem;
 global using DiarSpeicher.Infrastructure.Filesystem.Processors;
 global using DiarSpeicher.Infrastructure.Storage;

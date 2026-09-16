@@ -63,14 +63,14 @@ public sealed partial class DiarSpeicherService
 
         var goneMedia = media.Where(m => !File.Exists(m.Path)).ToList();
 
-        foreach (var item in goneMedia)
+        foreach (var item in goneMedia.Where(item => !string.IsNullOrWhiteSpace(item.ThumbnailPath)))
         {
-            if (!string.IsNullOrWhiteSpace(item.ThumbnailPath)) TryDeleteFile(item.ThumbnailPath);
+            TryDeleteFile(item.ThumbnailPath!);
         }
 
-        foreach (var s in goneSeries)
+        foreach (var s in goneSeries.Where(s => !string.IsNullOrWhiteSpace(s.ThumbnailPath)))
         {
-            if (!string.IsNullOrWhiteSpace(s.ThumbnailPath)) TryDeleteFile(s.ThumbnailPath);
+            TryDeleteFile(s.ThumbnailPath!);
         }
 
         _db.Media.RemoveRange(goneMedia);
@@ -97,9 +97,13 @@ public sealed partial class DiarSpeicherService
             .Where(s => s.Path == root || s.Path.StartsWith(prefix))
             .ToListAsync(ct);
 
-        foreach (var thumb in media.Select(m => m.ThumbnailPath).Concat(series.Select(s => s.ThumbnailPath)))
+        var thumbs = media.Select(m => m.ThumbnailPath)
+            .Concat(series.Select(s => s.ThumbnailPath))
+            .Where(thumb => !string.IsNullOrWhiteSpace(thumb));
+
+        foreach (var thumb in thumbs)
         {
-            if (!string.IsNullOrWhiteSpace(thumb)) TryDeleteFile(thumb);
+            TryDeleteFile(thumb!);
         }
 
         _db.Media.RemoveRange(media);

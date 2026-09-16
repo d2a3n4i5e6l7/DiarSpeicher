@@ -89,7 +89,9 @@ public sealed class UploadAndPageExtractionTests : IDisposable
         using var db = CreateInMemoryDbContext();
         var processor = new CompositeBookProcessor(new IBookProcessor[] { new ZipBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(db, processor, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(
+            db, processor, queue, NullLogger<DiarSpeicherService>.Instance,
+            TestStorageOptions.Default(), TestReadingProgress.For(db), TestLibraryRoots.Allowing(_tempDir));
 
         var owner = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var libPath = Path.Combine(_tempDir, "NewLib");
@@ -116,7 +118,7 @@ public sealed class UploadAndPageExtractionTests : IDisposable
         using var db = CreateInMemoryDbContext();
         var processor = new CompositeBookProcessor(new IBookProcessor[] { new ZipBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(db, processor, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
+        var service = new DiarSpeicherService(db, processor, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(db));
 
         var owner = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var libDir = Path.Combine(_tempDir, "SafeLib");
@@ -173,7 +175,7 @@ public sealed class UploadAndPageExtractionTests : IDisposable
             new EpubBookProcessor()
         });
         var queue = new ScannerQueue();
-        var v2Service = new DiarSpeicherService(db, compositeProcessor, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default());
+        var v2Service = new DiarSpeicherService(db, compositeProcessor, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(db));
 
         var scannerService = new LibraryScannerService(
             db,

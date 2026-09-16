@@ -1,3 +1,4 @@
+import { errorMessage } from "../api/errorMessage";
 import { Box, CircularProgress, IconButton, Slider, Tooltip, Typography } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -105,7 +106,7 @@ export default function ReaderPage() {
 
 		void init().catch((err: unknown) => {
 			if (mounted) {
-				setLoaded({ key: mediaId, error: err instanceof Error ? err.message : "No se pudo abrir el tomo." });
+				setLoaded({ key: mediaId, error: errorMessage(err, "No se pudo abrir el tomo.") });
 			}
 		});
 

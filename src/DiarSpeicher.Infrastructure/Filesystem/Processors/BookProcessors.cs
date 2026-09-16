@@ -84,12 +84,12 @@ public class ZipBookProcessor : IBookProcessor
 
             if (includeCover && imageEntries.Count > 0)
             {
-                cover = await ReadEntryAsync(imageEntries[CoverSelection.SelectCoverIndex(metadata, imageEntries.Count)], cancellationToken);
+                cover = await ArchiveEntryReader.ReadAsync(ArchiveEntryRef.From(imageEntries[CoverSelection.SelectCoverIndex(metadata, imageEntries.Count)]), cancellationToken);
             }
 
             if (measurePages)
             {
-                dimensions = await MeasurePagesAsync(imageEntries, cancellationToken);
+                dimensions = await ArchiveEntryReader.MeasurePagesAsync(ArchiveEntryRef.From(imageEntries), cancellationToken);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -146,7 +146,7 @@ public class ZipBookProcessor : IBookProcessor
                 return null;
             }
 
-            return await ReadEntryAsync(imageEntries[targetIndex], cancellationToken);
+            return await ArchiveEntryReader.ReadAsync(ArchiveEntryRef.From(imageEntries[targetIndex]), cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -154,51 +154,6 @@ public class ZipBookProcessor : IBookProcessor
         }
     }
 
-    private static async Task<ExtractedPage> ReadEntryAsync(ZipArchiveEntry entry, CancellationToken cancellationToken)
-    {
-        await using var stream = await entry.OpenAsync(cancellationToken);
-        using var ms = new MemoryStream();
-        await stream.CopyToAsync(ms, cancellationToken);
-
-        var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entry.FullName));
-        return new ExtractedPage(ct, ms.ToArray());
-    }
-
-    private static async Task<List<MeasuredPage>> MeasurePagesAsync(List<ZipArchiveEntry> imageEntries, CancellationToken cancellationToken)
-    {
-        var dimensions = new List<MeasuredPage>(imageEntries.Count);
-        for (var i = 0; i < imageEntries.Count; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var pageEntry = imageEntries[i];
-            int? width = null;
-            int? height = null;
-
-            try
-            {
-                await using var headerStream = await pageEntry.OpenAsync(cancellationToken);
-                (width, height) = await PageMeasurer.MeasureAsync(headerStream, cancellationToken);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // Una pagina ilegible se guarda sin dimensiones y el resto sigue.
-            }
-
-            var entryName = pageEntry.FullName;
-            dimensions.Add(new MeasuredPage
-            {
-                Number = i + 1,
-                FileName = Path.GetFileName(entryName),
-                MediaType = PageMeasurer.MimeTypeFor(entryName),
-                Width = width,
-                Height = height,
-                SizeBytes = pageEntry.Length
-            });
-        }
-
-        return dimensions;
-    }
 }
 
 public class RarBookProcessor : IBookProcessor
@@ -237,12 +192,12 @@ public class RarBookProcessor : IBookProcessor
 
             if (includeCover && imageEntries.Count > 0)
             {
-                cover = await ReadEntryAsync(imageEntries[CoverSelection.SelectCoverIndex(metadata, imageEntries.Count)], cancellationToken);
+                cover = await ArchiveEntryReader.ReadAsync(ArchiveEntryRef.From(imageEntries[CoverSelection.SelectCoverIndex(metadata, imageEntries.Count)]), cancellationToken);
             }
 
             if (measurePages)
             {
-                dimensions = await MeasurePagesAsync(imageEntries, cancellationToken);
+                dimensions = await ArchiveEntryReader.MeasurePagesAsync(ArchiveEntryRef.From(imageEntries), cancellationToken);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -268,12 +223,6 @@ public class RarBookProcessor : IBookProcessor
         };
     }
 
-    /// <summary>
-    /// Reparte una entrada del RAR: la acumula en <paramref name="imageEntries"/> si es pagina,
-    /// devuelve los metadatos si es el ComicInfo.xml, y nada en cualquier otro caso. El flujo
-    /// de entradas es asincrono y de un solo paso, asi que ambas cosas se deciden aqui en vez
-    /// de recorrer el archivo dos veces.
-    /// </summary>
     private static async Task<(ExtractedMetadata? Metadata, List<string> Tags)?> ClassifyEntryAsync(
         IArchiveEntry entry,
         BookAnalysisOptions analysis,
@@ -331,7 +280,7 @@ public class RarBookProcessor : IBookProcessor
                 return null;
             }
 
-            return await ReadEntryAsync(imageEntries[targetIndex], cancellationToken);
+            return await ArchiveEntryReader.ReadAsync(ArchiveEntryRef.From(imageEntries[targetIndex]), cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -339,51 +288,6 @@ public class RarBookProcessor : IBookProcessor
         }
     }
 
-    private static async Task<ExtractedPage> ReadEntryAsync(IArchiveEntry entry, CancellationToken cancellationToken)
-    {
-        await using var entryStream = await entry.OpenEntryStreamAsync(cancellationToken);
-        using var ms = new MemoryStream();
-        await entryStream.CopyToAsync(ms, cancellationToken);
-
-        var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entry.Key));
-        return new ExtractedPage(ct, ms.ToArray());
-    }
-
-    private static async Task<List<MeasuredPage>> MeasurePagesAsync(List<IArchiveEntry> imageEntries, CancellationToken cancellationToken)
-    {
-        var dimensions = new List<MeasuredPage>(imageEntries.Count);
-        for (var i = 0; i < imageEntries.Count; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var pageEntry = imageEntries[i];
-            int? width = null;
-            int? height = null;
-
-            try
-            {
-                await using var headerStream = await pageEntry.OpenEntryStreamAsync(cancellationToken);
-                (width, height) = await PageMeasurer.MeasureAsync(headerStream, cancellationToken);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // Una pagina ilegible se guarda sin dimensiones y el resto sigue.
-            }
-
-            var entryName = pageEntry.Key ?? string.Empty;
-            dimensions.Add(new MeasuredPage
-            {
-                Number = i + 1,
-                FileName = Path.GetFileName(entryName),
-                MediaType = PageMeasurer.MimeTypeFor(entryName),
-                Width = width,
-                Height = height,
-                SizeBytes = pageEntry.Size
-            });
-        }
-
-        return dimensions;
-    }
 }
 
 public class EpubBookProcessor : IBookProcessor
@@ -431,7 +335,7 @@ public class EpubBookProcessor : IBookProcessor
                 var coverEntry = await FindCoverEntryAsync(archive, cancellationToken);
                 if (coverEntry is not null)
                 {
-                    cover = await ReadEntryAsync(coverEntry, cancellationToken);
+                    cover = await ArchiveEntryReader.ReadAsync(ArchiveEntryRef.From(coverEntry), cancellationToken);
                 }
             }
         }
@@ -471,7 +375,7 @@ public class EpubBookProcessor : IBookProcessor
 
         if (spineEntries.Count == 0)
         {
-            return (pageNumber == 1 && coverEntry != null) ? await ReadEntryAsync(coverEntry, cancellationToken) : null;
+            return (pageNumber == 1 && coverEntry != null) ? await ArchiveEntryReader.ReadAsync(ArchiveEntryRef.From(coverEntry), cancellationToken) : null;
         }
 
         var profile = _profileProvider != null
@@ -567,17 +471,6 @@ public class EpubBookProcessor : IBookProcessor
             .ToList();
     }
 
-    private static async Task<ExtractedPage> ReadEntryAsync(ZipArchiveEntry entry, CancellationToken cancellationToken)
-    {
-        await using var stream = await entry.OpenAsync(cancellationToken);
-        using var ms = new MemoryStream();
-        await stream.CopyToAsync(ms, cancellationToken);
-
-        var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entry.FullName));
-        return new ExtractedPage(ct, ms.ToArray());
-    }
-
-    /// <summary>Returns the chapter count found in the OPF spine.</summary>
     private static async Task<int> ReadOpfDataAsync(
         ZipArchiveEntry opfEntry, ExtractedMetadata metadata, List<string> tags, CancellationToken cancellationToken)
     {
@@ -702,7 +595,6 @@ public class EpubBookProcessor : IBookProcessor
 
     private static string? ExtractCoverHref(XDocument doc)
     {
-        // 1. EPUB3: <item properties="cover-image" href="...">
         var coverItem = doc.Descendants().FirstOrDefault(e =>
             e.Name.LocalName == "item" &&
             e.Attribute("properties")?.Value.Contains("cover-image") == true);
@@ -713,7 +605,6 @@ public class EpubBookProcessor : IBookProcessor
             return href;
         }
 
-        // 2. EPUB2: <meta name="cover" content="cover-id"/> -> <item id="cover-id" href="...">
         var coverMeta = doc.Descendants().FirstOrDefault(e =>
             e.Name.LocalName == "meta" &&
             e.Attribute("name")?.Value == "cover");

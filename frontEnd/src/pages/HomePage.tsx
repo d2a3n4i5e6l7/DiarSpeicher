@@ -1,3 +1,4 @@
+import { errorMessage } from "../api/errorMessage";
 import { Alert, Box, CircularProgress, Typography } from "@mui/material";
 import { useCallback, useEffect, useState } from "react";
 import PageHeader from "../components/PageHeader";
@@ -38,7 +39,7 @@ export default function HomePage() {
 				if (mounted) {
 					setResult({
 						key: requestKey,
-						error: err instanceof Error ? err.message : "No se pudo cargar el catálogo.",
+						error: errorMessage(err, "No se pudo cargar el catálogo."),
 					});
 				}
 			});

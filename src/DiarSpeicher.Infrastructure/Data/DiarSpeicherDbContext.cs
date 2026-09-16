@@ -15,6 +15,7 @@ public class DiarSpeicherDbContext : DbContext
     public DbSet<Media> Media => Set<Media>();
     public DbSet<MediaMetadata> MediaMetadata => Set<MediaMetadata>();
     public DbSet<MediaPage> MediaPages => Set<MediaPage>();
+    public DbSet<EpubPageMap> EpubPageMaps => Set<EpubPageMap>();
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<MediaTag> MediaTags => Set<MediaTag>();
     public DbSet<SeriesTag> SeriesTags => Set<SeriesTag>();
@@ -133,6 +134,18 @@ public class DiarSpeicherDbContext : DbContext
             entity.Property(e => e.MediaId).HasMaxLength(32);
             entity.Property(e => e.FileName).HasMaxLength(255).IsRequired();
             entity.Property(e => e.MediaType).HasMaxLength(64).IsRequired();
+
+            entity.HasOne(e => e.Media)
+                .WithMany()
+                .HasForeignKey(e => e.MediaId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EpubPageMap>(entity =>
+        {
+            entity.HasKey(e => new { e.MediaId, e.ProfileKey });
+            entity.Property(e => e.MediaId).HasMaxLength(32);
+            entity.Property(e => e.ProfileKey).HasMaxLength(512).IsRequired();
 
             entity.HasOne(e => e.Media)
                 .WithMany()

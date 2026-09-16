@@ -37,12 +37,11 @@ RUN set -eu; \
     useradd -u 1000 -g node -s /usr/sbin/nologin -M -d /home/node node
 
 WORKDIR /app
-COPY --from=dotnet-builder /build/publish/ /app/
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-RUN chmod +x /usr/local/bin/entrypoint.sh \
-    && mkdir -p /data/db /data/thumbnails /data/cache/pages /data/manga_database /libraries \
-    && chown -R 1000:1000 /app /data \
+COPY --chown=1000:1000 --from=dotnet-builder /build/publish/ /app/
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN mkdir -p /data/db /data/thumbnails /data/cache/pages /data/manga_database /libraries \
+    && chown -R 1000:1000 /data \
     && chmod 1777 /tmp
 
 LABEL org.opencontainers.image.title="DiarSpeicher" \

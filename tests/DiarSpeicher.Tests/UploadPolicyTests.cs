@@ -128,7 +128,8 @@ public sealed class UploadPolicyTests : IDisposable
             composite,
             new ScannerQueue(),
             NullLogger<DiarSpeicherService>.Instance,
-            TestStorageOptions.With(configure));
+            TestStorageOptions.With(configure),
+            TestReadingProgress.For(db));
 
         return (service, library.Id, new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true });
     }

@@ -16,21 +16,20 @@ public class OpdsV2Service : IOpdsV2Service
     private readonly DiarSpeicherDbContext _db;
     private readonly ILogger<OpdsV2Service> _logger;
     private readonly ILinkPrefixProvider _linkPrefix;
+    private readonly IReadingProgress _progress;
 
     public OpdsV2Service(
         DiarSpeicherDbContext db,
         ILogger<OpdsV2Service> logger,
-        ILinkPrefixProvider linkPrefix)
+        ILinkPrefixProvider linkPrefix,
+        IReadingProgress progress)
     {
         _db = db;
         _logger = logger;
         _linkPrefix = linkPrefix;
+        _progress = progress;
     }
 
-    /// <summary>
-    /// Every link in a feed goes through here, so the mount prefix is applied in exactly one
-    /// place. UsePathBase only rewrites the incoming path; it does not touch what we generate.
-    /// </summary>
     private string FormatUrl(string path, string? apiKey)
     {
         var prefix = _linkPrefix.Prefix;
@@ -155,7 +154,8 @@ public class OpdsV2Service : IOpdsV2Service
             .Take(PageSize)
             .ToListAsync(ct);
 
-        feed.Publications = books.Select(b => ToPublication(b, apiKey)).ToList();
+        var epubTotals = await _progress.EpubTotalsAsync(books, ct);
+        feed.Publications = books.Select(b => ToPublication(b, apiKey, epubTotals.TotalFor(b.Id))).ToList();
         return feed;
     }
 
@@ -287,6 +287,8 @@ public class OpdsV2Service : IOpdsV2Service
             .Take(PageSize)
             .ToListAsync(ct);
 
+        var epubTotals = await _progress.EpubTotalsAsync(books, ct);
+
         return new OpdsV2Feed
         {
             Metadata = new OpdsV2Metadata
@@ -297,7 +299,7 @@ public class OpdsV2Service : IOpdsV2Service
                 CurrentPage = page
             },
             Links = BuildPagingLinks($"series/{seriesId}", page, totalCount, apiKey),
-            Publications = books.Select(b => ToPublication(b, apiKey)).ToList()
+            Publications = books.Select(b => ToPublication(b, apiKey, epubTotals.TotalFor(b.Id))).ToList()
         };
     }
 
@@ -352,6 +354,8 @@ public class OpdsV2Service : IOpdsV2Service
             links.Add(new(FormatUrl($"books/browse?page={page + 1}", apiKey), OpdsV2MimeTypes.OpdsJson, "next"));
         }
 
+        var epubTotals = await _progress.EpubTotalsAsync(books, ct);
+
         return new OpdsV2Feed
         {
             Metadata = new OpdsV2Metadata
@@ -362,7 +366,7 @@ public class OpdsV2Service : IOpdsV2Service
                 CurrentPage = page
             },
             Links = links,
-            Publications = books.Select(b => ToPublication(b, apiKey)).ToList()
+            Publications = books.Select(b => ToPublication(b, apiKey, epubTotals.TotalFor(b.Id))).ToList()
         };
     }
 
@@ -379,13 +383,14 @@ public class OpdsV2Service : IOpdsV2Service
             .ToListAsync(ct);
 
         var booksMap = books.ToDictionary(b => b.Id);
+        var epubTotals = await _progress.EpubTotalsAsync(books, ct);
         var publications = new List<OpdsV2Publication>();
 
         foreach (var s in sessions)
         {
             if (booksMap.TryGetValue(s.MediaId, out var media))
             {
-                publications.Add(ToPublication(media, apiKey));
+                publications.Add(ToPublication(media, apiKey, epubTotals.TotalFor(media.Id)));
             }
         }
 
@@ -412,7 +417,10 @@ public class OpdsV2Service : IOpdsV2Service
             .Include(m => m.Series)
             .FirstOrDefaultAsync(m => m.Id == bookId, ct);
 
-        return book == null ? null : ToPublication(book, apiKey, includeReadingOrder: true);
+        if (book == null) return null;
+
+        var progress = await _progress.ResolveAsync(book, session: null, ct);
+        return ToPublication(book, apiKey, progress.TotalPages, includeReadingOrder: true);
     }
 
     public async Task<OpdsV2Progression?> GetProgressionAsync(AuthUser user, string bookId, CancellationToken ct = default)
@@ -422,10 +430,16 @@ public class OpdsV2Service : IOpdsV2Service
 
         if (session == null) return null;
 
+        var book = await _db.Media.ForUser(user).FirstOrDefaultAsync(m => m.Id == bookId, ct);
+        if (book == null) return null;
+
+        var progress = await _progress.ResolveAsync(book, session, ct);
         return new OpdsV2Progression
         {
-            Page = session.EndPage,
-            Percentage = session.EndPercentage,
+            Page = progress.Page,
+            Percentage = progress.Page is int p && progress.TotalPages > 0
+                ? Math.Clamp((decimal)p / progress.TotalPages, 0m, 1m)
+                : session.EndPercentage,
             Modified = session.UpdatedAt?.ToString("O") ?? session.CreatedAt.ToString("O"),
             Device = "OPDS-2.0-Client"
         };
@@ -434,55 +448,36 @@ public class OpdsV2Service : IOpdsV2Service
     public async Task<bool> UpdateProgressionAsync(AuthUser user, string bookId, OpdsV2Progression progression, CancellationToken ct = default)
     {
         var book = await _db.Media.ForUser(user).FirstOrDefaultAsync(m => m.Id == bookId, ct);
-        if (book == null || string.IsNullOrWhiteSpace(user.Id)) return false;
-
-        var userExists = await _db.Users.AnyAsync(u => u.Id == user.Id, ct);
-        if (!userExists) return false;
-
-        var session = await _db.ReadingSessions
-            .FirstOrDefaultAsync(s => s.MediaId == bookId && s.UserId == user.Id, ct);
+        if (book == null) return false;
 
         var page = progression.Page ?? 1;
-        var percentage = progression.Percentage ?? (book.Pages > 0 ? (decimal)page / book.Pages : 0m);
+        var ok = await _progress.RecordAsync(
+            user,
+            book,
+            new ReadingProgressUpdate(page, Percentage: progression.Percentage),
+            ct);
 
-        if (session == null)
+        if (ok)
         {
-            session = new ReadingSession
-            {
-                MediaId = bookId,
-                UserId = user.Id,
-                StartPage = page,
-                EndPage = page,
-                StartPercentage = percentage,
-                EndPercentage = percentage,
-                Status = (book.Pages > 0 && page >= book.Pages) ? ReadingStatus.Finished : ReadingStatus.Reading,
-                CreatedAt = DateTimeOffset.UtcNow,
-                UpdatedAt = DateTimeOffset.UtcNow
-            };
-            _db.ReadingSessions.Add(session);
+            _logger.LogTrace("Updated OPDS 2.0 reading progression for user {UserId}, book {BookId}, page {Page}", user.Id, bookId, page);
         }
-        else
-        {
-            session.EndPage = page;
-            session.EndPercentage = percentage;
-            if (book.Pages > 0 && page >= book.Pages)
-            {
-                session.Status = ReadingStatus.Finished;
-            }
-            session.UpdatedAt = DateTimeOffset.UtcNow;
-        }
-
-        await _db.SaveChangesAsync(ct);
-        _logger.LogTrace("Updated OPDS 2.0 reading progression for user {UserId}, book {BookId}, page {Page}", user.Id, bookId, page);
-        return true;
+        return ok;
     }
 
-    private OpdsV2Publication ToPublication(Media media, string? apiKey, bool includeReadingOrder = false)
+
+    private OpdsV2Publication ToPublication(
+        Media media,
+        string? apiKey,
+        int? totalPages = null,
+        bool includeReadingOrder = false)
     {
         var title = media.Metadata?.Title ?? media.Name;
         var summary = media.Metadata?.Summary;
         var modified = (media.UpdatedAt ?? media.CreatedAt).ToString("O");
         var ext = ContentTypeExtensions.FromExtension(media.Extension);
+
+        // Las paginas que el lector va a pedir, no las del OPF: en un EPUB son las del render.
+        var pages = totalPages is > 0 ? totalPages.Value : media.Pages;
 
         var publication = new OpdsV2Publication
         {
@@ -493,7 +488,7 @@ public class OpdsV2Service : IOpdsV2Service
                 Type = "http" + "://schema.org/ComicStory",
                 Modified = modified,
                 Description = summary,
-                NumberOfPages = media.Pages,
+                NumberOfPages = pages,
                 ReadingProgression = "ltr"
             },
             Images =
@@ -508,9 +503,9 @@ public class OpdsV2Service : IOpdsV2Service
             ]
         };
 
-        if (includeReadingOrder && media.Pages > 0)
+        if (includeReadingOrder && pages > 0)
         {
-            for (var p = 0; p < media.Pages; p++)
+            for (var p = 0; p < pages; p++)
             {
                 publication.ReadingOrder.Add(new OpdsV2Link(
                     FormatUrl($"books/{media.Id}/pages/{p}?zero_based=true", apiKey),

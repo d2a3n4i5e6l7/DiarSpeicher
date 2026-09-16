@@ -1,3 +1,4 @@
+import { errorMessage } from "../api/errorMessage";
 import {
 	Alert,
 	Box,
@@ -32,39 +33,14 @@ import {
 } from "../catalog/mediaHelpers";
 import { READABLE_WIDTH } from "../catalog/layout";
 import { DS } from "../theme";
+import DetailRow from "../components/DetailRow";
+import { backHandler } from "../api/backHandler";
 
 interface Result {
 	key: string;
 	media?: MediaItem;
 	series?: SeriesItem | null;
 	error?: string;
-}
-
-function DetailRow({ label, value }: Readonly<{ label: string; value: string | null | undefined }>) {
-	if (!value) return null;
-	return (
-		<Box sx={{ display: "flex", gap: 2, py: 1, borderBottom: `1px solid ${DS.borderSoft}` }}>
-			<Typography
-				sx={{
-					fontFamily: "'Rajdhani', sans-serif",
-					fontWeight: 700,
-					fontSize: "12px",
-					letterSpacing: "1.5px",
-					textTransform: "uppercase",
-					color: DS.muted,
-					minWidth: 150,
-					flexShrink: 0,
-				}}
-			>
-				{label}
-			</Typography>
-			<Typography
-				sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: DS.platinum, wordBreak: "break-all" }}
-			>
-				{value}
-			</Typography>
-		</Box>
-	);
 }
 
 export default function MediaDetailPage() {
@@ -90,7 +66,7 @@ export default function MediaDetailPage() {
 
 		void load().catch((err: unknown) => {
 			if (mounted) {
-				setResult({ key: id, error: err instanceof Error ? err.message : "No se pudo cargar el tomo." });
+				setResult({ key: id, error: errorMessage(err, "No se pudo cargar el tomo.") });
 			}
 		});
 
@@ -117,14 +93,7 @@ export default function MediaDetailPage() {
 	const backUrl = locationState?.from ?? (series ? `/series/${series.id}` : "/");
 	const backLabel = locationState?.label ?? (series ? series.name.toUpperCase() : "ARCHIVO");
 
-	const handleBack = (e: React.MouseEvent) => {
-		const historyState = window.history.state as { idx?: number } | null;
-		const hasHistory = typeof historyState?.idx === "number" && historyState.idx > 0;
-		if (hasHistory && locationState?.from) {
-			e.preventDefault();
-			void navigate(-1);
-		}
-	};
+	const handleBack = backHandler(navigate, Boolean(locationState?.from));
 
 	if (error || !media) {
 		const errorBackUrl = locationState?.from ?? "/";

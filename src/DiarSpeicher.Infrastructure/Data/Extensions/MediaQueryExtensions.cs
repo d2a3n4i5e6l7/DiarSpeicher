@@ -69,6 +69,9 @@ public static class MediaQueryExtensions
         return query;
     }
 
+    public static IQueryable<Series> WithDetails(this IQueryable<Series> query) =>
+        query.Include(s => s.Metadata).Include(s => s.Media);
+
     private static IQueryable<Media> ApplyMediaAgeFilter(IQueryable<Media> query, int maxAge, bool restrictOnUnset)
     {
         if (restrictOnUnset)

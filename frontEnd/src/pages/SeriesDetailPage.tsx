@@ -1,3 +1,4 @@
+import { errorMessage } from "../api/errorMessage";
 import {
 	Alert,
 	Box,
@@ -46,6 +47,8 @@ import {
 } from "../catalog/mediaHelpers";
 import { COVER_GRID, READABLE_WIDTH } from "../catalog/layout";
 import { DS } from "../theme";
+import DetailRow from "../components/DetailRow";
+import { backHandler } from "../api/backHandler";
 
 /**
  * Campo del tablón inferior. Un campo sin dato no se pinta: media ficha llena de guiones
@@ -99,33 +102,6 @@ function MetaChip({ label, value }: Readonly<{ label: string; value: string | nu
 	);
 }
 
-function DetailRow({ label, value }: Readonly<{ label: string; value: string | null | undefined }>) {
-	if (!value) return null;
-	return (
-		<Box sx={{ display: "flex", gap: 2, py: 1, borderBottom: `1px solid ${DS.borderSoft}` }}>
-			<Typography
-				sx={{
-					fontFamily: "'Rajdhani', sans-serif",
-					fontWeight: 700,
-					fontSize: "12px",
-					letterSpacing: "1.5px",
-					textTransform: "uppercase",
-					color: DS.muted,
-					minWidth: 150,
-					flexShrink: 0,
-				}}
-			>
-				{label}
-			</Typography>
-			<Typography
-				sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: DS.platinum, wordBreak: "break-all" }}
-			>
-				{value}
-			</Typography>
-		</Box>
-	);
-}
-
 export default function SeriesDetailPage() {
 	const { id = "" } = useParams();
 	const [tab, setTab] = useState(0);
@@ -155,7 +131,7 @@ export default function SeriesDetailPage() {
 			})
 			.catch((err: unknown) => {
 				if (mounted) {
-					setResult({ key: requestKey, error: err instanceof Error ? err.message : "No se pudo cargar la serie." });
+					setResult({ key: requestKey, error: errorMessage(err, "No se pudo cargar la serie.") });
 				}
 			});
 
@@ -213,7 +189,6 @@ export default function SeriesDetailPage() {
 		}
 	}, [completedMedia]);
 
-
 	if (loading) {
 		return (
 			<Box sx={{ display: "flex", justifyContent: "center", py: 10 }}>
@@ -233,14 +208,7 @@ export default function SeriesDetailPage() {
 	const backUrl = locationState?.from ?? (series?.libraryId ? `/libraries/${series.libraryId}` : "/series");
 	const backLabel = locationState?.label ?? (series?.libraryId ? "BIBLIOTECA" : "SERIES");
 
-	const handleBack = (e: React.MouseEvent) => {
-		const historyState = window.history.state as { idx?: number } | null;
-		const hasHistory = typeof historyState?.idx === "number" && historyState.idx > 0;
-		if (hasHistory && locationState?.from) {
-			e.preventDefault();
-			void navigate(-1);
-		}
-	};
+	const handleBack = backHandler(navigate, Boolean(locationState?.from));
 
 	if (error || !series) {
 		const errorBackUrl = locationState?.from ?? "/series";

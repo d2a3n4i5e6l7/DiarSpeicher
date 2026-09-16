@@ -23,7 +23,9 @@ public class EpubBookPageMap
 
 public static class EpubRasterizer
 {
-    private static readonly ConcurrentDictionary<string, (EpubBookPageMap Map, DateTime CachedAt)> PageMapCache = new();
+    private static readonly ConcurrentDictionary<string, (EpubBookPageMap Map, DateTime CachedAt, DateTime FileWrittenAt)> PageMapCache = new();
+
+    private const int PageMapCacheLimit = 256;
 
     private static readonly Regex ImgTagRegex = new(@"<img[^>]+src=[""']([^""']+)[""']", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex SvgImageRegex = new(@"<image[^>]+(?:href|xlink:href)=[""']([^""']+)[""']", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -46,8 +48,11 @@ public static class EpubRasterizer
         EpubDeviceProfile profile,
         CancellationToken ct = default)
     {
-        var cacheKey = $"{epubPath}:{profile.Width}x{profile.Height}:{profile.FontSize}:{profile.LineHeight}:{profile.MarginHorizontal}:{profile.MarginVertical}:{profile.AutoHeight}:{profile.FontFamily}:{profile.Theme}";
-        if (PageMapCache.TryGetValue(cacheKey, out var cached) && (DateTime.UtcNow - cached.CachedAt).TotalMinutes < 60)
+        var cacheKey = $"{epubPath}:{BuildProfileKey(profile)}";
+        var fileWrittenAt = GetFileWrittenAtUtc(epubPath);
+        if (PageMapCache.TryGetValue(cacheKey, out var cached)
+            && (DateTime.UtcNow - cached.CachedAt).TotalMinutes < 60
+            && cached.FileWrittenAt == fileWrittenAt)
         {
             return cached.Map;
         }
@@ -118,8 +123,40 @@ public static class EpubRasterizer
         }
 
         var map = new EpubBookPageMap { BookPath = epubPath, Pages = targets };
-        PageMapCache[cacheKey] = (map, DateTime.UtcNow);
+        TrimPageMapCache();
+        PageMapCache[cacheKey] = (map, DateTime.UtcNow, fileWrittenAt);
         return map;
+    }
+
+    public static string BuildProfileKey(EpubDeviceProfile profile) =>
+        $"{profile.Width}x{profile.Height}:{profile.FontSize}:{profile.LineHeight}:{profile.MarginHorizontal}:{profile.MarginVertical}:{profile.AutoHeight}:{profile.FontFamily}:{profile.Theme}";
+
+    private static DateTime GetFileWrittenAtUtc(string epubPath)
+    {
+        try
+        {
+            return File.GetLastWriteTimeUtc(epubPath);
+        }
+        catch
+        {
+            // Sin fecha no se puede saber si el mapa cacheado sigue valiendo: MinValue nunca
+            // casa con la comprobacion, asi que el mapa se reconstruye.
+            return DateTime.MinValue;
+        }
+    }
+
+    private static void TrimPageMapCache()
+    {
+        if (PageMapCache.Count < PageMapCacheLimit) return;
+
+        foreach (var stale in PageMapCache
+            .OrderBy(e => e.Value.CachedAt)
+            .Take(Math.Max(1, PageMapCache.Count - PageMapCacheLimit + 1))
+            .Select(e => e.Key)
+            .ToList())
+        {
+            PageMapCache.TryRemove(stale, out _);
+        }
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+import { errorMessage } from "../api/errorMessage";
 import { Alert, Box, CircularProgress, Pagination, Typography } from "@mui/material";
 import CollectionsBookmarkIcon from "@mui/icons-material/CollectionsBookmark";
 import { useEffect, useState } from "react";
@@ -37,7 +38,7 @@ export default function SeriesGridPage() {
 				if (mounted) {
 					setResult({
 						key: requestKey,
-						error: err instanceof Error ? err.message : "No se pudo cargar la lista de series.",
+						error: errorMessage(err, "No se pudo cargar la lista de series."),
 					});
 				}
 			});

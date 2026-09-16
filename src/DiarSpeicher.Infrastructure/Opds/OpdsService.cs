@@ -12,23 +12,22 @@ public class OpdsService : IOpdsService
     private readonly ICompositeBookProcessor _bookProcessor;
     private readonly ILogger<OpdsService> _logger;
     private readonly ILinkPrefixProvider _linkPrefix;
+    private readonly IReadingProgress _progress;
 
     public OpdsService(
         DiarSpeicherDbContext db,
         ICompositeBookProcessor bookProcessor,
         ILogger<OpdsService> logger,
-        ILinkPrefixProvider linkPrefix)
+        ILinkPrefixProvider linkPrefix,
+        IReadingProgress progress)
     {
         _db = db;
         _bookProcessor = bookProcessor;
         _logger = logger;
         _linkPrefix = linkPrefix;
+        _progress = progress;
     }
 
-    /// <summary>
-    /// Every link in a feed goes through here, so the mount prefix is applied in exactly one
-    /// place. UsePathBase only rewrites the incoming path; it does not touch what we generate.
-    /// </summary>
     private string FormatUrl(string path, string? apiKey)
     {
         var prefix = _linkPrefix.Prefix;
@@ -247,7 +246,8 @@ public class OpdsService : IOpdsService
             .ToListAsync(ct);
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
-        var entries = books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey)).ToList();
+        var epubTotals = await _progress.EpubTotalsAsync(books, ct);
+        var entries = books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey, epubTotals)).ToList();
 
         var title = series.Metadata?.Title ?? series.Name;
         var feed = CreatePaginatedFeed(new PaginatedFeedParams(
@@ -284,7 +284,8 @@ public class OpdsService : IOpdsService
             .ToListAsync(ct);
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
-        var entries = books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey)).ToList();
+        var epubTotals = await _progress.EpubTotalsAsync(books, ct);
+        var entries = books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey, epubTotals)).ToList();
 
         var feed = CreatePaginatedFeed(new PaginatedFeedParams(
             "allBooks",
@@ -311,7 +312,8 @@ public class OpdsService : IOpdsService
             .ToListAsync(ct);
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
-        var entries = books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey)).ToList();
+        var epubTotals = await _progress.EpubTotalsAsync(books, ct);
+        var entries = books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey, epubTotals)).ToList();
 
         var feed = CreatePaginatedFeed(new PaginatedFeedParams(
             "latestBooks",
@@ -337,13 +339,14 @@ public class OpdsService : IOpdsService
             .ToListAsync(ct);
 
         var booksMap = books.ToDictionary(b => b.Id);
+        var epubTotals = await _progress.EpubTotalsAsync(books, ct);
         var entries = new List<OpdsEntry>();
 
         foreach (var s in sessions)
         {
             if (booksMap.TryGetValue(s.MediaId, out var media))
             {
-                entries.Add(ToOpdsEntry(media, s, apiKey));
+                entries.Add(ToOpdsEntry(media, s, apiKey, epubTotals));
             }
         }
 
@@ -398,7 +401,8 @@ public class OpdsService : IOpdsService
             .ToListAsync(ct);
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
-        entries.AddRange(books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey)));
+        var epubTotals = await _progress.EpubTotalsAsync(books, ct);
+        entries.AddRange(books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey, epubTotals)));
 
         var feed = new OpdsFeed("searchFeed", "Search Results", links, entries);
         return OpdsXmlBuilder.BuildFeedXml(feed);
@@ -438,40 +442,7 @@ public class OpdsService : IOpdsService
     {
         try
         {
-            var userExists = await _db.Users.AnyAsync(u => u.Id == user.Id, ct);
-            if (!userExists) return;
-
-            var percentage = book.Pages > 0 ? (decimal)correctPage / book.Pages : 0m;
-            var session = await _db.ReadingSessions
-                .FirstOrDefaultAsync(s => s.MediaId == book.Id && s.UserId == user.Id, ct);
-
-            if (session == null)
-            {
-                session = new ReadingSession
-                {
-                    MediaId = book.Id,
-                    UserId = user.Id,
-                    StartPage = correctPage,
-                    EndPage = correctPage,
-                    StartPercentage = percentage,
-                    EndPercentage = percentage,
-                    Status = (book.Pages > 0 && correctPage >= book.Pages) ? ReadingStatus.Finished : ReadingStatus.Reading,
-                    CreatedAt = DateTimeOffset.UtcNow,
-                    UpdatedAt = DateTimeOffset.UtcNow
-                };
-                _db.ReadingSessions.Add(session);
-            }
-            else
-            {
-                session.EndPage = correctPage;
-                session.EndPercentage = percentage;
-                if (book.Pages > 0 && correctPage >= book.Pages)
-                {
-                    session.Status = ReadingStatus.Finished;
-                }
-                session.UpdatedAt = DateTimeOffset.UtcNow;
-            }
-            await _db.SaveChangesAsync(ct);
+            await _progress.RecordAsync(user, book, new ReadingProgressUpdate(correctPage), ct);
         }
         catch (Exception ex)
         {
@@ -497,11 +468,9 @@ public class OpdsService : IOpdsService
             return (bytes, mime);
         }
 
-        // Sin miniatura no se sirve la pagina entera: una portada de manga son 1,5 MB, y una
-        // rejilla de treinta tarjetas descargaria 45 MB creyendo que pide miniaturas. Que
-        // falte se ve, y se arregla reescaneando.
         return (null, "image/jpeg");
     }
+
 
     private OpdsEntry ToOpdsEntry(Library library, string? apiKey)
     {
@@ -530,7 +499,11 @@ public class OpdsService : IOpdsService
         };
     }
 
-    private OpdsEntry ToOpdsEntry(Media media, ReadingSession? session, string? apiKey)
+    private OpdsEntry ToOpdsEntry(
+        Media media,
+        ReadingSession? session,
+        string? apiKey,
+        IReadOnlyDictionary<string, int>? epubTotals = null)
     {
         var title = media.Metadata?.Title ?? media.Name;
         var summary = media.Metadata?.Summary;
@@ -551,15 +524,17 @@ public class OpdsService : IOpdsService
         var links = new List<OpdsLink>
         {
             new(OpdsLinkType.ImageJpeg, OpdsLinkRel.Thumbnail, FormatUrl($"books/{media.Id}/thumbnail", apiKey)),
-            new(OpdsLinkType.ImageJpeg, OpdsLinkRel.Image, FormatUrl($"books/{media.Id}/pages/0?zero_based=true", apiKey)),
+            new(OpdsLinkType.ImageJpeg, OpdsLinkRel.Image, FormatUrl($"books/{media.Id}/pages/0?zero_based=true&cover=1", apiKey)),
             new(OpdsLinkType.FromExtension(media.Extension), OpdsLinkRel.Acquisition, FormatUrl($"books/{media.Id}/file/{fileName}", apiKey))
         };
 
+        var progress = IReadingProgress.FromSession(media, session, epubTotals.TotalFor(media.Id));
+
         var streamLink = new OpdsStreamLink(
             media.Id,
-            media.Pages,
+            progress.TotalPages,
             OpdsLinkType.ImageJpeg,
-            session?.EndPage,
+            progress.Page,
             session?.UpdatedAt?.ToString("yyyy-MM-dd'T'HH:mm:sszzz"),
             FormatUrl($"books/{media.Id}/pages/{{pageNumber}}?zero_based=true", apiKey)
         );

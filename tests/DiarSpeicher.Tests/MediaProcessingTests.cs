@@ -52,24 +52,21 @@ public class MediaProcessingTests : IDisposable
     }
 
     [Fact]
-    public void MediaHasher_GeneratesDiarSpeicherAndKoreaderHashes()
+    public async Task MediaHasher_GeneratesDiarSpeicherAndKoreaderHashes()
     {
         var filePath = Path.Combine(_tempDir, "sample_book.bin");
-        var content = new byte[50000]; // Larger than 40KB to exercise sample offsets
+        var content = new byte[50000];
         for (int i = 0; i < content.Length; i++)
         {
             content[i] = (byte)(i % 256);
         }
         File.WriteAllBytes(filePath, content);
 
-        var diarSpeicherHash = MediaHasher.ComputeDiarSpeicherHash(filePath, content.Length);
-        var koreaderHash = MediaHasher.ComputeKoreaderHash(filePath);
+        var diarSpeicherHash = await MediaHasher.ComputeDiarSpeicherHashAsync(filePath, content.Length);
+        var koreaderHash = await MediaHasher.ComputeKoreaderHashAsync(filePath);
 
-        Assert.NotNull(diarSpeicherHash);
-        Assert.Equal(64, diarSpeicherHash.Length); // SHA-256 hex string is 64 chars
-
-        Assert.NotNull(koreaderHash);
-        Assert.Equal(32, koreaderHash.Length); // MD5 hex string is 32 chars
+        Assert.Equal("64125db78c2d83cb86275fb7852f1ec331d36789c87c214ad5066ebb0b848252", diarSpeicherHash);
+        Assert.Equal("2bcd3c4de20c918e19fab5c36249c70d", koreaderHash);
     }
 
     [Fact]

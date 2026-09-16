@@ -34,8 +34,7 @@ public sealed partial class DiarSpeicherService
     public async Task<DiarSpeicherSeriesDto?> GetSeriesByIdAsync(AuthUser user, string id, CancellationToken ct = default)
     {
         var series = await _db.Series.ForUser(user)
-            .Include(s => s.Metadata)
-            .Include(s => s.Media)
+            .WithDetails()
             .FirstOrDefaultAsync(s => s.Id == id, ct);
 
         return series == null ? null : ToSeriesDto(series);
@@ -44,8 +43,7 @@ public sealed partial class DiarSpeicherService
     public async Task<DiarSpeicherSeriesDto?> UpdateSeriesAsync(AuthUser user, string id, DiarSpeicherUpdateSeriesInput input, CancellationToken ct = default)
     {
         var series = await _db.Series.ForUser(user)
-            .Include(s => s.Metadata)
-            .Include(s => s.Media)
+            .WithDetails()
             .FirstOrDefaultAsync(s => s.Id == id, ct);
 
         if (series == null) return null;
@@ -68,30 +66,12 @@ public sealed partial class DiarSpeicherService
 
     public async Task<DiarSpeicherPageResponse<DiarSpeicherMediaDto>> GetSeriesMediaAsync(AuthUser user, string seriesId, int page, int pageSize, CancellationToken ct = default)
     {
-        pageSize = Math.Clamp(pageSize, 1, 100);
-        page = Math.Max(0, page);
-
         var query = _db.Media.ForUser(user)
             .Include(m => m.Metadata)
             .Where(m => m.SeriesId == seriesId)
             .OrderBy(m => m.SortName).ThenBy(m => m.Name);
 
-        var total = await query.CountAsync(ct);
-        var mediaList = await query.Skip(page * pageSize).Take(pageSize).ToListAsync(ct);
-
-        var mediaIds = mediaList.Select(m => m.Id).ToList();
-        var sessionMap = await _db.GetLatestSessionsPerMediaAsync(user.Id, mediaIds, ct);
-
-        var dtos = mediaList.Select(m => ToMediaDto(m, sessionMap.GetValueOrDefault(m.Id))).ToList();
-
-        return new DiarSpeicherPageResponse<DiarSpeicherMediaDto>
-        {
-            Data = dtos,
-            Total = total,
-            Page = page,
-            PageSize = pageSize,
-            TotalPages = (int)Math.Ceiling(total / (double)pageSize)
-        };
+        return await PageMediaAsync(user, query, page, pageSize, ct);
     }
 
     public async Task<bool> DeleteSeriesAsync(AuthUser user, string id, bool deleteFiles = false, CancellationToken ct = default)
@@ -116,9 +96,9 @@ public sealed partial class DiarSpeicherService
         }
 
         var media = await _db.Media.Where(m => m.SeriesId == remaining.Id).ToListAsync(ct);
-        foreach (var item in media)
+        foreach (var item in media.Where(m => !string.IsNullOrWhiteSpace(m.ThumbnailPath)))
         {
-            if (!string.IsNullOrWhiteSpace(item.ThumbnailPath)) TryDeleteFile(item.ThumbnailPath);
+            TryDeleteFile(item.ThumbnailPath!);
         }
 
         _db.Media.RemoveRange(media);

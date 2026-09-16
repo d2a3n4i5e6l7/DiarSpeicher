@@ -40,20 +40,22 @@ public sealed partial class DiarSpeicherService
 
     private static DiarSpeicherMediaDto ToMediaDto(Media m, ReadingSession? session)
     {
+        var progress = IReadingProgress.FromSession(m, session);
+
         return new DiarSpeicherMediaDto
         {
             Id = m.Id,
             Name = m.Name,
             Size = m.Size,
             Extension = m.Extension,
-            Pages = m.Pages,
+            Pages = progress.TotalPages,
             Status = m.Status.ToString(),
             Hash = m.Hash,
             KoreaderHash = m.KoreaderHash,
             Path = m.Path,
             SeriesId = m.SeriesId,
             CreatedAt = m.CreatedAt,
-            CurrentPage = session?.EndPage,
+            CurrentPage = progress.Page,
             IsCompleted = session?.Status == ReadingStatus.Finished,
             Metadata = m.Metadata != null ? new DiarSpeicherMediaMetadataDto
             {

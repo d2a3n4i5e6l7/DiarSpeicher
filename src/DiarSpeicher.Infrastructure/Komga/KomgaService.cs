@@ -11,14 +11,12 @@ public class KomgaService : IKomgaService
     private readonly ICompositeBookProcessor? _pageProcessor;
     private readonly IEpubProfileProvider? _epubProfileProvider;
 
-    /// <summary>
-    /// El procesador es opcional: sin el, la lista de paginas sale sin dimensiones, que es
-    /// como se comportaba antes. Asi los tests que construyen el servicio a mano siguen
-    /// valiendo y solo produccion paga el coste de medir.
-    /// </summary>
+    private readonly IReadingProgress _progress;
+
     public KomgaService(
         DiarSpeicherDbContext db,
         ILogger<KomgaService> logger,
+        IReadingProgress progress,
         ICompositeBookProcessor? pageProcessor = null,
         IEpubProfileProvider? epubProfileProvider = null)
     {
@@ -26,6 +24,7 @@ public class KomgaService : IKomgaService
         _logger = logger;
         _pageProcessor = pageProcessor;
         _epubProfileProvider = epubProfileProvider;
+        _progress = progress;
     }
 
     public async Task<List<KomgaLibraryDto>> GetLibrariesAsync(AuthUser user, CancellationToken ct = default)
@@ -54,10 +53,7 @@ public class KomgaService : IKomgaService
         int size,
         CancellationToken ct = default)
     {
-        var query = _db.Series.ForUser(user)
-            .Include(s => s.Metadata)
-            .Include(s => s.Media)
-            .AsQueryable();
+        var query = _db.Series.ForUser(user).WithDetails().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(libraryId))
         {
@@ -83,8 +79,7 @@ public class KomgaService : IKomgaService
     public async Task<KomgaSeriesDto?> GetSeriesByIdAsync(AuthUser user, string id, CancellationToken ct = default)
     {
         var series = await _db.Series.ForUser(user)
-            .Include(s => s.Metadata)
-            .Include(s => s.Media)
+            .WithDetails()
             .FirstOrDefaultAsync(s => s.Id == id, ct);
 
         return series == null ? null : ToSeriesDto(series);
@@ -119,7 +114,8 @@ public class KomgaService : IKomgaService
             .ToListAsync(ct);
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
-        var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id))).ToList();
+        var epubTotals = await _progress.EpubTotalsAsync(books, ct);
+        var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id), epubTotals: epubTotals)).ToList();
 
         return KomgaPageResponse<KomgaBookDto>.Create(bookDtos, page, size, totalElements);
     }
@@ -130,8 +126,6 @@ public class KomgaService : IKomgaService
         int size,
         CancellationToken ct = default)
     {
-        // Written as raw SQL because EF cannot translate ORDER BY over a DateTimeOffset on
-        // SQLite; the visibility filter mirrors ForUser exactly.
         var (where, parameters) = MediaSqlFilters.BuildVisibilityFilter(user);
 
         var countSql = MediaSqlFilters.BuildCountSql(where);
@@ -149,7 +143,8 @@ public class KomgaService : IKomgaService
             .ToListAsync(ct);
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
-        var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id))).ToList();
+        var epubTotals = await _progress.EpubTotalsAsync(books, ct);
+        var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id), epubTotals: epubTotals)).ToList();
 
         return KomgaPageResponse<KomgaBookDto>.Create(bookDtos, page, size, totalElements);
     }
@@ -174,7 +169,8 @@ public class KomgaService : IKomgaService
             .ToListAsync(ct);
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
-        var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id))).ToList();
+        var epubTotals = await _progress.EpubTotalsAsync(books, ct);
+        var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id), epubTotals: epubTotals)).ToList();
 
         return KomgaPageResponse<KomgaBookDto>.Create(bookDtos, page, size, totalElements);
     }
@@ -192,15 +188,9 @@ public class KomgaService : IKomgaService
             ? null
             : await _db.ReadingSessions.FirstOrDefaultAsync(s => s.MediaId == id && s.UserId == user.Id, ct);
 
-        int? overridePages = null;
-        var isEpub = book.Extension.TrimStart('.').Equals("epub", StringComparison.OrdinalIgnoreCase)
-            || book.Path.EndsWith(".epub", StringComparison.OrdinalIgnoreCase);
-        if (isEpub)
-        {
-            overridePages = await GetEpubTotalPagesAsync(book, ct);
-        }
+        var progress = await _progress.ResolveAsync(book, session, ct);
 
-        return ToBookDto(book, session, overridePages);
+        return ToBookDto(book, session, progress.TotalPages, overrideCurrentPage: progress.Page);
     }
 
     public async Task<List<KomgaBookPageDto>> GetBookPagesAsync(AuthUser user, string id, CancellationToken ct = default)
@@ -208,9 +198,7 @@ public class KomgaService : IKomgaService
         var book = await _db.Media.ForUser(user).FirstOrDefaultAsync(m => m.Id == id, ct);
         if (book == null || book.Pages <= 0) return [];
 
-        var isEpub = book.Extension.TrimStart('.').Equals("epub", StringComparison.OrdinalIgnoreCase)
-            || book.Path.EndsWith(".epub", StringComparison.OrdinalIgnoreCase);
-        if (isEpub)
+        if (EpubPageMapStore.IsEpub(book))
         {
             return await GetEpubBookPagesAsync(book, ct);
         }
@@ -220,9 +208,6 @@ public class KomgaService : IKomgaService
             .OrderBy(p => p.Number)
             .ToListAsync(ct);
 
-        // Fallback para libros indexados antes de que el scan midiera las paginas. El scan
-        // las persiste desde entonces, asi que esta rama solo cubre lo heredado y deja de
-        // ejecutarse tras el primer rescan.
         if (measured.Count == 0)
         {
             measured = await MeasurePagesAsync(book, ct);
@@ -241,8 +226,6 @@ public class KomgaService : IKomgaService
             }).ToList();
         }
 
-        // Sin procesador o con el archivo ilegible: la lista sintetizada de siempre. Los
-        // clientes de Komga no abriran el libro, pero el resto de la API sigue respondiendo.
         var fallbackPages = new List<KomgaBookPageDto>();
         for (var i = 1; i <= book.Pages; i++)
         {
@@ -256,11 +239,6 @@ public class KomgaService : IKomgaService
         return fallbackPages;
     }
 
-    /// <summary>
-    /// Abre el libro una sola vez en su vida y guarda las dimensiones de cada pagina. Es
-    /// caro —descomprime el archivo entero— y por eso el resultado se persiste: la segunda
-    /// llamada y siguientes salen de la base.
-    /// </summary>
     private async Task<List<MediaPage>> MeasurePagesAsync(Media book, CancellationToken ct)
     {
         if (_pageProcessor is null) return [];
@@ -291,8 +269,6 @@ public class KomgaService : IKomgaService
                     row.MediaType = page.ContentType.ToMimeType();
                     row.SizeBytes = page.Data.Length;
 
-                    // SKCodec lee solo la cabecera: no decodifica la imagen entera para
-                    // averiguar cuanto mide.
                     using var data = SKData.CreateCopy(page.Data);
                     using var codec = SKCodec.Create(data);
                     if (codec is not null)
@@ -304,8 +280,6 @@ public class KomgaService : IKomgaService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Una pagina corrupta no puede tumbar el listado entero: se guarda sin
-                // dimensiones y las demas siguen.
                 _logger.LogWarning(ex, "No se pudo medir la pagina {Page} de {BookId}", i, book.Id);
             }
 
@@ -319,8 +293,6 @@ public class KomgaService : IKomgaService
         }
         catch (DbUpdateException ex)
         {
-            // Dos peticiones simultaneas sobre el mismo libro miden a la vez y la segunda
-            // choca con la clave compuesta. El trabajo ya esta hecho: se lee lo guardado.
             _logger.LogDebug(ex, "Otra peticion ya guardo las paginas de {BookId}", book.Id);
             foreach (var row in rows)
             {
@@ -344,45 +316,14 @@ public class KomgaService : IKomgaService
         CancellationToken ct = default)
     {
         var book = await _db.Media.ForUser(user).FirstOrDefaultAsync(m => m.Id == bookId, ct);
-        if (book == null || string.IsNullOrWhiteSpace(user.Id)) return false;
+        if (book == null) return false;
 
-        var userExists = await _db.Users.AnyAsync(u => u.Id == user.Id, ct);
-        if (!userExists) return false;
-
-        var session = await _db.ReadingSessions
-            .FirstOrDefaultAsync(s => s.MediaId == bookId && s.UserId == user.Id, ct);
-
-        var actualPage = Math.Min(page, book.Pages > 0 ? book.Pages : page);
-        var percentage = book.Pages > 0 ? (decimal)actualPage / book.Pages : 0m;
-        var isFinished = completed || (book.Pages > 0 && actualPage >= book.Pages);
-
-        if (session == null)
+        var ok = await _progress.RecordAsync(user, book, new ReadingProgressUpdate(page, completed), ct);
+        if (ok)
         {
-            session = new ReadingSession
-            {
-                MediaId = bookId,
-                UserId = user.Id,
-                StartPage = actualPage,
-                EndPage = actualPage,
-                StartPercentage = percentage,
-                EndPercentage = percentage,
-                Status = isFinished ? ReadingStatus.Finished : ReadingStatus.Reading,
-                CreatedAt = DateTimeOffset.UtcNow,
-                UpdatedAt = DateTimeOffset.UtcNow
-            };
-            _db.ReadingSessions.Add(session);
+            _logger.LogTrace("Updated Komga read progress for user {UserId}, book {BookId}, page {Page}", user.Id, bookId, page);
         }
-        else
-        {
-            session.EndPage = actualPage;
-            session.EndPercentage = percentage;
-            session.Status = isFinished ? ReadingStatus.Finished : ReadingStatus.Reading;
-            session.UpdatedAt = DateTimeOffset.UtcNow;
-        }
-
-        await _db.SaveChangesAsync(ct);
-        _logger.LogTrace("Updated Komga read progress for user {UserId}, book {BookId}, page {Page}", user.Id, bookId, page);
-        return true;
+        return ok;
     }
 
     public async Task<bool> DeleteReadProgressAsync(AuthUser user, string bookId, CancellationToken ct = default)
@@ -432,7 +373,12 @@ public class KomgaService : IKomgaService
         };
     }
 
-    private static KomgaBookDto ToBookDto(Media m, ReadingSession? s, int? overridePagesCount = null)
+    private static KomgaBookDto ToBookDto(
+        Media m,
+        ReadingSession? s,
+        int? overridePagesCount = null,
+        IReadOnlyDictionary<string, int>? epubTotals = null,
+        int? overrideCurrentPage = null)
     {
         var title = m.Metadata?.Title ?? m.Name;
         var ext = ContentTypeExtensions.FromExtension(m.Extension);
@@ -447,12 +393,14 @@ public class KomgaService : IKomgaService
                 .ToList();
         }
 
+        var progress = IReadingProgress.FromSession(m, s, overridePagesCount ?? epubTotals.TotalFor(m.Id));
+
         KomgaReadProgressDto? readProgress = null;
         if (s != null)
         {
             readProgress = new KomgaReadProgressDto
             {
-                Page = s.EndPage ?? 1,
+                Page = overrideCurrentPage ?? progress.Page ?? 1,
                 Completed = s.Status == ReadingStatus.Finished,
                 ReadDate = (s.UpdatedAt ?? s.CreatedAt).ToString("O"),
                 Created = s.CreatedAt.ToString("O"),
@@ -477,7 +425,7 @@ public class KomgaService : IKomgaService
             {
                 Status = "READY",
                 MediaType = ext.ToMimeType(),
-                PagesCount = overridePagesCount ?? m.Pages
+                PagesCount = overridePagesCount ?? progress.TotalPages
             },
             Metadata = new KomgaBookMetadataDto
             {
@@ -491,7 +439,6 @@ public class KomgaService : IKomgaService
 
     private async Task<List<KomgaBookPageDto>> GetEpubBookPagesAsync(Media book, CancellationToken ct)
     {
-        // Limpiar cualquier medición estática previa de este libro EPUB de la base de datos
         var stalePages = await _db.MediaPages
             .Where(p => p.MediaId == book.Id)
             .ToListAsync(ct);
@@ -544,28 +491,4 @@ public class KomgaService : IKomgaService
         return pages;
     }
 
-    private async Task<int> GetEpubTotalPagesAsync(Media book, CancellationToken ct)
-    {
-        try
-        {
-            if (File.Exists(book.Path))
-            {
-                var profile = _epubProfileProvider != null
-                    ? await _epubProfileProvider.GetCurrentProfileAsync(ct)
-                    : EpubDeviceProfile.GetDefaults()[0];
-
-                await using var archive = await ZipFile.OpenReadAsync(book.Path, ct);
-                var spine = await EpubBookProcessor.GetSpineEntriesAsync(archive, ct);
-                if (spine.Count == 0) spine = EpubBookProcessor.GetFallbackHtmlEntries(archive);
-                var cover = await EpubBookProcessor.FindCoverEntryAsync(archive, ct);
-                var map = await EpubRasterizer.GetOrBuildPageMapAsync(archive, book.Path, spine, cover, profile, ct);
-                return map.TotalPages;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error calculando mapa de paginas EPUB para {Path}", book.Path);
-        }
-        return book.Pages;
-    }
 }

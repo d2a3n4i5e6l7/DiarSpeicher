@@ -9,12 +9,23 @@ public sealed partial class DiarSpeicherService
         bool newestFirst = false,
         CancellationToken ct = default)
     {
-        pageSize = Math.Clamp(pageSize, 1, 100);
-        page = Math.Max(0, page);
         var ordered = _db.Media.ForUser(user).Include(m => m.Metadata);
         var query = newestFirst
             ? ordered.OrderByDescending(m => m.Id)
             : ordered.OrderBy(m => m.SortName).ThenBy(m => m.Name);
+
+        return await PageMediaAsync(user, query, page, pageSize, ct);
+    }
+
+    private async Task<DiarSpeicherPageResponse<DiarSpeicherMediaDto>> PageMediaAsync(
+        AuthUser user,
+        IQueryable<Media> query,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        page = Math.Max(0, page);
 
         var total = await query.CountAsync(ct);
         var mediaList = await query.Skip(page * pageSize).Take(pageSize).ToListAsync(ct);
@@ -22,11 +33,9 @@ public sealed partial class DiarSpeicherService
         var mediaIds = mediaList.Select(m => m.Id).ToList();
         var sessionMap = await _db.GetLatestSessionsPerMediaAsync(user.Id, mediaIds, ct);
 
-        var dtos = mediaList.Select(m => ToMediaDto(m, sessionMap.GetValueOrDefault(m.Id))).ToList();
-
         return new DiarSpeicherPageResponse<DiarSpeicherMediaDto>
         {
-            Data = dtos,
+            Data = mediaList.Select(m => ToMediaDto(m, sessionMap.GetValueOrDefault(m.Id))).ToList(),
             Total = total,
             Page = page,
             PageSize = pageSize,
@@ -87,7 +96,14 @@ public sealed partial class DiarSpeicherService
 
         if (extracted != null)
         {
-            await TrackReadingProgressAsync(user.Id, mediaId, page, media.Pages, ct);
+            try
+            {
+                await _progress.RecordAsync(user, media, new ReadingProgressUpdate(page), ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to update reading session for user {UserId}, media {MediaId}", user.Id, mediaId);
+            }
         }
 
         return extracted;
@@ -110,87 +126,11 @@ public sealed partial class DiarSpeicherService
 
         if (media == null) return false;
 
-        // The auth middleware synthesises a "default-owner" identity while the server has
-        // no users yet. That id has no row in Users, so writing a reading session would
-        // violate the foreign key.
-        var userExists = await _db.Users.AnyAsync(u => u.Id == user.Id, ct);
-        if (!userExists) return false;
-
-        var session = await _db.ReadingSessions
-            .Where(s => s.UserId == user.Id && s.MediaId == mediaId)
-            .OrderByDescending(s => s.Id)
-            .FirstOrDefaultAsync(ct);
-
-        if (session == null)
-        {
-            session = new ReadingSession
-            {
-                UserId = user.Id,
-                MediaId = mediaId,
-                StartPage = 1,
-                StartPercentage = 0,
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-            _db.ReadingSessions.Add(session);
-        }
-
-        session.EndPage = input.Page;
-        if (input.Percentage.HasValue)
-        {
-            session.EndPercentage = (decimal)input.Percentage.Value;
-        }
-        else if (media.Pages > 0)
-        {
-            session.EndPercentage = Math.Clamp((decimal)input.Page / media.Pages, 0m, 1m);
-        }
-
-        var isCompleted = input.IsCompleted ?? (session.EndPercentage >= 1.0m || input.Page >= media.Pages);
-        session.Status = isCompleted ? ReadingStatus.Finished : ReadingStatus.Reading;
-        session.UpdatedAt = DateTimeOffset.UtcNow;
-
-        await _db.SaveChangesAsync(ct);
-        return true;
-    }
-
-    private async Task TrackReadingProgressAsync(string userId, string mediaId, int page, int totalPages, CancellationToken ct)
-    {
-        try
-        {
-            // The auth middleware synthesises a "default-owner" identity while the server has
-            // no users yet. That id has no row in Users, so writing a reading session would
-            // violate the foreign key.
-            var userExists = await _db.Users.AnyAsync(u => u.Id == userId, ct);
-            if (!userExists) return;
-
-            var session = await _db.ReadingSessions
-                .Where(s => s.UserId == userId && s.MediaId == mediaId)
-                .OrderByDescending(s => s.Id)
-                .FirstOrDefaultAsync(ct);
-
-            if (session == null)
-            {
-                session = new ReadingSession
-                {
-                    UserId = userId,
-                    MediaId = mediaId,
-                    StartPage = page,
-                    StartPercentage = totalPages > 0 ? Math.Clamp((decimal)page / totalPages, 0m, 1m) : 0,
-                    CreatedAt = DateTimeOffset.UtcNow
-                };
-                _db.ReadingSessions.Add(session);
-            }
-
-            session.EndPage = page;
-            session.EndPercentage = totalPages > 0 ? Math.Clamp((decimal)page / totalPages, 0m, 1m) : 0;
-            session.Status = (totalPages > 0 && page >= totalPages) ? ReadingStatus.Finished : ReadingStatus.Reading;
-            session.UpdatedAt = DateTimeOffset.UtcNow;
-
-            await _db.SaveChangesAsync(ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update reading session for user {UserId}, media {MediaId}", userId, mediaId);
-        }
+        return await _progress.RecordAsync(
+            user,
+            media,
+            new ReadingProgressUpdate(input.Page, input.IsCompleted, (decimal?)input.Percentage),
+            ct);
     }
 
     public async Task<bool> DeleteMediaAsync(AuthUser user, string id, bool deleteFile = false, CancellationToken ct = default)

@@ -1,3 +1,4 @@
+import { errorMessage } from "../api/errorMessage";
 import {
 	Alert,
 	Box,
@@ -61,7 +62,7 @@ export default function RolesPage() {
 			const list = await rolesApi.list();
 			setRoles(list || []);
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error cargando la lista de roles.");
+			setError(errorMessage(err, "Error cargando la lista de roles."));
 		} finally {
 			setLoading(false);
 		}
@@ -77,7 +78,7 @@ export default function RolesPage() {
 				}
 			} catch (err: unknown) {
 				if (isMounted) {
-					setError(err instanceof Error ? err.message : "Error cargando la lista de roles.");
+					setError(errorMessage(err, "Error cargando la lista de roles."));
 				}
 			} finally {
 				if (isMounted) {
@@ -121,7 +122,7 @@ export default function RolesPage() {
 			setNewIsAdmin(false);
 			await loadRoles();
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error creando el rol.");
+			setError(errorMessage(err, "Error creando el rol."));
 		} finally {
 			setSavingRole(false);
 		}
@@ -143,7 +144,7 @@ export default function RolesPage() {
 			setOpenEdit(false);
 			await loadRoles();
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error actualizando el rol.");
+			setError(errorMessage(err, "Error actualizando el rol."));
 		} finally {
 			setSavingRole(false);
 		}
@@ -159,7 +160,7 @@ export default function RolesPage() {
 			setDeleteRole(null);
 			await loadRoles();
 		} catch (err: unknown) {
-			setError(err instanceof Error ? err.message : "Error eliminando el rol.");
+			setError(errorMessage(err, "Error eliminando el rol."));
 		} finally {
 			setSavingRole(false);
 		}
