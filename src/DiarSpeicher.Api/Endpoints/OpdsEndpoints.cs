@@ -186,7 +186,7 @@ public static class OpdsEndpoints
             var zeroBased = zero_based ?? true;
 
             var isCover = cover ?? false;
-            var (extractedPage, book) = await opdsService.GetBookPageAsync(
+            var (extractedPage, book) = await opdsService.OpenBookPageAsync(
                 user,
                 id,
                 zeroBased ? page + 1 : page,
@@ -198,12 +198,12 @@ public static class OpdsEndpoints
                 return Results.NotFound($"Book {id} not found or unauthorized");
             }
 
-            if (extractedPage == null || extractedPage.Data.Length == 0)
+            if (extractedPage == null)
             {
                 return Results.NotFound($"Page {page} of book {id} not found");
             }
 
-            return Results.File(extractedPage.Data, extractedPage.ContentType.MimeType());
+            return Results.File(extractedPage.Content, extractedPage.ContentType.MimeType());
         });
 
         group.MapGet("/books/{id}/file", async (

@@ -9,7 +9,6 @@ services:
             - PUID=${PUID:-1000}
             - PGID=${PGID:-1000}
             - Gateway__PathBase=${PATH_BASE:-}
-            - Storage__PageCache__MaxBytes=${PAGE_CACHE_BYTES:-2147483648}
             - Storage__Upload__EnableUpload=${ENABLE_UPLOAD:-true}
             - Storage__Backup__Enabled=${ENABLE_BACKUP:-true}
             - Storage__Backup__IntervalHours=${BACKUP_INTERVAL_HOURS:-12}

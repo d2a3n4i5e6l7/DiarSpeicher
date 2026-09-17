@@ -22,6 +22,23 @@ public interface IBookProcessor
     bool CanProcess(string extension);
     Task<ProcessedBook> AnalyzeBookAsync(string path, BookAnalysisOptions? options = null, CancellationToken cancellationToken = default);
     Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
+
+    Task<OpenedPage?> OpenPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
+}
+
+public sealed record OpenedPage(ContentType ContentType, PageStream Content)
+{
+    public static async Task<OpenedPage?> FromBytesAsync(
+        IBookProcessor processor,
+        string path,
+        int pageNumber,
+        CancellationToken cancellationToken)
+    {
+        var page = await processor.ExtractPageAsync(path, pageNumber, cancellationToken);
+        return page is null
+            ? null
+            : new OpenedPage(page.ContentType, PageStream.Detached(new MemoryStream(page.Data, writable: false)));
+    }
 }
 
 internal static class CoverSelection
@@ -158,6 +175,41 @@ public class ZipBookProcessor : IBookProcessor
         }
     }
 
+    public async Task<OpenedPage?> OpenPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
+    {
+        if (pageNumber < 1) return null;
+
+        ZipArchive? archive = null;
+        try
+        {
+            archive = await ZipFile.OpenReadAsync(path, cancellationToken);
+
+            var imageEntries = archive.Entries
+                .Where(e => !PathUtils.IsHiddenFile(e.FullName)
+                    && ContentTypeExtensions.FromExtension(Path.GetExtension(e.FullName)).IsImage())
+                .ToList();
+
+            imageEntries.Sort(static (a, b) => NaturalSortComparer.OrdinalIgnoreCase.Compare(a.FullName, b.FullName));
+
+            if (pageNumber - 1 >= imageEntries.Count)
+            {
+                await archive.DisposeAsync();
+                return null;
+            }
+
+            var entry = imageEntries[pageNumber - 1];
+            var content = await entry.OpenAsync(cancellationToken);
+
+            return new OpenedPage(
+                ContentTypeExtensions.FromExtension(Path.GetExtension(entry.FullName)),
+                PageStream.Owning(content, archive));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (archive is not null) await archive.DisposeAsync();
+            return null;
+        }
+    }
 }
 
 public class RarBookProcessor : IBookProcessor
@@ -294,6 +346,49 @@ public class RarBookProcessor : IBookProcessor
         }
     }
 
+    public async Task<OpenedPage?> OpenPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
+    {
+        if (pageNumber < 1) return null;
+
+        IRarAsyncArchive? archive = null;
+        try
+        {
+            archive = await RarArchive.OpenAsyncArchive(path, cancellationToken: cancellationToken);
+
+            var imageEntries = new List<IArchiveEntry>();
+            await foreach (var entry in archive.EntriesAsync.WithCancellation(cancellationToken))
+            {
+                if (entry.IsDirectory) continue;
+                var key = entry.Key;
+                if (string.IsNullOrEmpty(key) || PathUtils.IsHiddenFile(key)) continue;
+
+                if (ContentTypeExtensions.FromExtension(Path.GetExtension(key)).IsImage())
+                {
+                    imageEntries.Add(entry);
+                }
+            }
+
+            imageEntries.Sort(static (a, b) => NaturalSortComparer.OrdinalIgnoreCase.Compare(a.Key, b.Key));
+
+            if (pageNumber - 1 >= imageEntries.Count)
+            {
+                await archive.DisposeAsync();
+                return null;
+            }
+
+            var target = imageEntries[pageNumber - 1];
+            var content = await target.OpenEntryStreamAsync(cancellationToken);
+
+            return new OpenedPage(
+                ContentTypeExtensions.FromExtension(Path.GetExtension(target.Key)),
+                PageStream.Owning(content, archive));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (archive is not null) await archive.DisposeAsync();
+            return null;
+        }
+    }
 }
 
 public class EpubBookProcessor : IBookProcessor
@@ -638,6 +733,9 @@ public class EpubBookProcessor : IBookProcessor
             return ct.IsImage() && (name == "cover" || name == "cover-image" || name.Contains("cover"));
         });
     }
+
+    public Task<OpenedPage?> OpenPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default) =>
+        OpenedPage.FromBytesAsync(this, path, pageNumber, cancellationToken);
 }
 
 public interface ICompositeBookProcessor
@@ -645,6 +743,7 @@ public interface ICompositeBookProcessor
     IBookProcessor? GetProcessor(string path);
     Task<ProcessedBook> AnalyzeAsync(string path, BookAnalysisOptions? options = null, CancellationToken cancellationToken = default);
     Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
+    Task<OpenedPage?> OpenPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
 }
 
 public class CompositeBookProcessor : ICompositeBookProcessor
@@ -679,6 +778,14 @@ public class CompositeBookProcessor : ICompositeBookProcessor
         }
 
         return await processor.AnalyzeBookAsync(path, analysis, cancellationToken);
+    }
+
+    public Task<OpenedPage?> OpenPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
+    {
+        var processor = GetProcessor(path);
+        return processor is null
+            ? Task.FromResult<OpenedPage?>(null)
+            : processor.OpenPageAsync(path, pageNumber, cancellationToken);
     }
 
     public Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)

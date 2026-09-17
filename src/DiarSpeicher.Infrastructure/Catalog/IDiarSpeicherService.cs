@@ -17,6 +17,7 @@ public interface IDiarSpeicherService
     Task<DiarSpeicherLibraryDto?> GetLibraryByIdAsync(AuthUser user, string id, CancellationToken ct = default);
     Task<bool> TriggerLibraryScanAsync(AuthUser user, string libraryId, CancellationToken ct = default);
     Task<ExtractedPage?> GetMediaPageAsync(AuthUser user, string mediaId, int page, CancellationToken ct = default);
+    Task<OpenedPage?> OpenMediaPageAsync(AuthUser user, string mediaId, int page, CancellationToken ct = default);
     Task<(string Path, string ContentType)?> GetMediaFileAsync(AuthUser user, string mediaId, CancellationToken ct = default);
     Task<bool> UpdateProgressAsync(AuthUser user, string mediaId, DiarSpeicherUpdateProgressInput input, CancellationToken ct = default);
     Task<DiarSpeicherEpubTocDto?> GetEpubTocAsync(AuthUser user, string mediaId, CancellationToken ct = default);

@@ -408,7 +408,7 @@ public class OpdsService : IOpdsService
         return OpdsXmlBuilder.BuildFeedXml(feed);
     }
 
-    public async Task<(ExtractedPage? Page, Media? Media)> GetBookPageAsync(
+    public async Task<(OpenedPage? Page, Media? Media)> OpenBookPageAsync(
         AuthUser user,
         string bookId,
         int pageNumber,
@@ -432,7 +432,7 @@ public class OpdsService : IOpdsService
             await RecordReadingProgressAsync(user, book, correctPage, ct);
         }
 
-        var page = await _bookProcessor.ExtractPageAsync(book.Path, correctPage, ct);
+        var page = await _bookProcessor.OpenPageAsync(book.Path, correctPage, ct);
         return (page, book);
     }
 

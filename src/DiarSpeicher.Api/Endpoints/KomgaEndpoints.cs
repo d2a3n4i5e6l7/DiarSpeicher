@@ -196,14 +196,14 @@ public static class KomgaEndpoints
             CancellationToken ct) =>
         {
             var user = RequestIdentity.GetAuthUser(context);
-            var (extractedPage, book) = await opdsService.GetBookPageAsync(user, id, pageNumber, PageRequestKind.Reading, ct);
+            var (extractedPage, book) = await opdsService.OpenBookPageAsync(user, id, pageNumber, PageRequestKind.Reading, ct);
 
-            if (book == null || extractedPage == null || extractedPage.Data.Length == 0)
+            if (book == null || extractedPage == null)
             {
                 return Results.NotFound($"Page {pageNumber} of book {id} not found");
             }
 
-            return Results.File(extractedPage.Data, extractedPage.ContentType.ToMimeType());
+            return Results.File(extractedPage.Content, extractedPage.ContentType.ToMimeType());
         });
 
         group.MapGet("/books/{id}/thumbnail", async (

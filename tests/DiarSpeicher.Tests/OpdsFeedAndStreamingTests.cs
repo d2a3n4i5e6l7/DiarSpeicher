@@ -250,7 +250,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
         var user = new AuthUser { Id = "reader_1", Username = "reader_john", IsServerOwner = false };
 
         // El servicio recibe la pagina ya normalizada a base 1; de zero_based se encarga el endpoint.
-        var (extractedPage, book) = await service.GetBookPageAsync(
+        var (extractedPage, book) = await service.OpenBookPageAsync(
             user,
             _kidBookId,
             pageNumber: 1,
@@ -258,8 +258,14 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
 
         Assert.NotNull(book);
         Assert.NotNull(extractedPage);
-        Assert.True(extractedPage.Data.Length > 0);
         Assert.Equal("image/jpeg", extractedPage.ContentType.MimeType());
+
+        await using (extractedPage.Content)
+        {
+            using var copia = new MemoryStream();
+            await extractedPage.Content.CopyToAsync(copia);
+            Assert.True(copia.Length > 0);
+        }
 
         // Verificar que se haya registrado la sesión de lectura en la base de datos
         var session = await context.ReadingSessions

@@ -325,10 +325,10 @@ public static class EpubRasterizer
 
     private static readonly IHtmlParser HtmlParser = new HtmlParser();
 
-    private static readonly string BlockSelector = string.Join(',', BlockSelectors);
-
     private static readonly string[] BlockSelectors =
         ["h1", "h2", "h3", "h4", "h5", "h6", "p", "blockquote", "li", "dd", "dt", "figcaption", "pre"];
+
+    private static readonly string BlockSelector = string.Join(',', BlockSelectors);
 
     /// <summary>
     /// Los bloques de texto del capitulo, en orden y con su etiqueta real.

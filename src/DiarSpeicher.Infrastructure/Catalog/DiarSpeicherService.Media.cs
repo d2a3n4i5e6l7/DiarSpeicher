@@ -85,6 +85,28 @@ public sealed partial class DiarSpeicherService
         return result;
     }
 
+    public async Task<OpenedPage?> OpenMediaPageAsync(AuthUser user, string mediaId, int page, CancellationToken ct = default)
+    {
+        var media = await _db.Media.ForUser(user)
+            .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
+
+        if (media == null || !File.Exists(media.Path)) return null;
+
+        var opened = await _bookProcessor.OpenPageAsync(media.Path, page, ct);
+        if (opened == null) return null;
+
+        try
+        {
+            await _progress.RecordAsync(user, media, new ReadingProgressUpdate(page), ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update reading session for user {UserId}, media {MediaId}", user.Id, mediaId);
+        }
+
+        return opened;
+    }
+
     public async Task<ExtractedPage?> GetMediaPageAsync(AuthUser user, string mediaId, int page, CancellationToken ct = default)
     {
         var media = await _db.Media.ForUser(user)

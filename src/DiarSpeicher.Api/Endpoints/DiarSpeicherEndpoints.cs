@@ -153,11 +153,11 @@ public static class DiarSpeicherEndpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            var extracted = await service.GetMediaPageAsync(user, id, page, ct);
-            if (extracted == null) return Results.NotFound();
+            var opened = await service.OpenMediaPageAsync(user, id, page, ct);
+            if (opened == null) return Results.NotFound();
 
             httpContext.Response.Headers.CacheControl = "public, max-age=86400";
-            return Results.File(extracted.Data, extracted.ContentType.ToMimeType());
+            return Results.File(opened.Content, opened.ContentType.ToMimeType());
         });
 
         group.MapGet("/media/{id}/thumbnail", async (

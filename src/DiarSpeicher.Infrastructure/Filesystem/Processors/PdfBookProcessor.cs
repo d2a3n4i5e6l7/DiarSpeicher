@@ -79,6 +79,9 @@ public class PdfBookProcessor : IBookProcessor
         }
     }
 
+    public Task<OpenedPage?> OpenPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default) =>
+        OpenedPage.FromBytesAsync(this, path, pageNumber, cancellationToken);
+
     private static List<MeasuredPage> MeasurePages(PdfDocument document, string path, int pageCount, CancellationToken cancellationToken)
     {
         var paginas = new List<MeasuredPage>(pageCount);
