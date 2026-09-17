@@ -288,14 +288,11 @@ public class LibraryScannerService : ILibraryScannerService
         if (seriesOfLibrary.Count == 0) return;
 
         // De mas profunda a menos: el dueño de un fichero es la serie mas cercana por encima.
-        var owners = seriesOfLibrary
-            .Select(s => new
-            {
-                s.Id,
-                Path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(s.Path))
-            })
-            .OrderByDescending(s => s.Path.Length)
-            .ToList();
+        var owners = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var s in seriesOfLibrary)
+        {
+            owners.TryAdd(Path.TrimEndingDirectorySeparator(Path.GetFullPath(s.Path)), s.Id);
+        }
 
         var seriesIds = seriesOfLibrary.Select(s => s.Id).ToList();
         var media = await _dbContext.Media
@@ -310,28 +307,32 @@ public class LibraryScannerService : ILibraryScannerService
             var dir = Path.GetDirectoryName(Path.GetFullPath(item.Path));
             if (string.IsNullOrEmpty(dir)) continue;
 
-            var owner = owners.FirstOrDefault(o =>
-                string.Equals(dir, o.Path, StringComparison.Ordinal)
-                || dir.StartsWith(o.Path + Path.DirectorySeparatorChar, StringComparison.Ordinal));
+            var owner = FindOwningSeries(owners, dir);
 
-            if (owner is null || string.Equals(owner.Id, item.SeriesId, StringComparison.Ordinal)) continue;
+            if (owner is null || string.Equals(owner, item.SeriesId, StringComparison.Ordinal)) continue;
 
-            item.SeriesId = owner.Id;
+            item.SeriesId = owner;
             repointed++;
         }
 
         var removed = await RemoveDuplicateMediaRowsAsync(media, cancellationToken);
 
-        if (repointed == 0 && removed == 0) return;
+        if (repointed > 0 || removed > 0)
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            report.UpdatedMedia += (ulong)repointed;
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        report.UpdatedMedia += (ulong)repointed;
+            _logger.LogInformation(
+                "Reconciled media for library {LibraryId}: {Repointed} repointed, {Removed} duplicate rows removed.",
+                libraryId,
+                repointed,
+                removed);
+        }
 
-        _logger.LogInformation(
-            "Reconciled media for library {LibraryId}: {Repointed} repointed, {Removed} duplicate rows removed.",
-            libraryId,
-            repointed,
-            removed);
+        foreach (var item in media)
+        {
+            _dbContext.Entry(item).State = EntityState.Detached;
+        }
     }
 
     private async Task<int> RemoveDuplicateMediaRowsAsync(
@@ -387,6 +388,23 @@ public class LibraryScannerService : ILibraryScannerService
         }
     }
 
+    private static string? FindOwningSeries(Dictionary<string, string> owners, string directory)
+    {
+        var actual = Path.TrimEndingDirectorySeparator(directory);
+
+        while (!string.IsNullOrEmpty(actual))
+        {
+            if (owners.TryGetValue(actual, out var id)) return id;
+
+            var padre = Path.GetDirectoryName(actual);
+            if (padre is null || string.Equals(padre, actual, StringComparison.Ordinal)) return null;
+
+            actual = padre;
+        }
+
+        return null;
+    }
+
     private async Task ProcessMissingSeriesAsync(string libraryId, List<string> missingPaths, LibraryScanReport report, CancellationToken cancellationToken)
     {
         if (missingPaths.Count == 0) return;
@@ -395,20 +413,21 @@ public class LibraryScannerService : ILibraryScannerService
             .Where(s => s.LibraryId == libraryId && missingPaths.Contains(s.Path))
             .ToListAsync(cancellationToken);
 
+        var missingSeriesIds = seriesToMarkMissing.Select(s => s.Id).ToList();
+        var mediaInMissingSeries = await _dbContext.Media
+            .Where(m => m.SeriesId != null && missingSeriesIds.Contains(m.SeriesId))
+            .ToListAsync(cancellationToken);
+
         foreach (var s in seriesToMarkMissing)
         {
             s.Status = FileStatus.Missing;
             report.UpdatedSeries++;
+        }
 
-            var mediaInMissingSeries = await _dbContext.Media
-                .Where(m => m.SeriesId == s.Id)
-                .ToListAsync(cancellationToken);
-
-            foreach (var m in mediaInMissingSeries)
-            {
-                m.Status = FileStatus.Missing;
-                report.UpdatedMedia++;
-            }
+        foreach (var m in mediaInMissingSeries)
+        {
+            m.Status = FileStatus.Missing;
+            report.UpdatedMedia++;
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -640,7 +659,7 @@ public class LibraryScannerService : ILibraryScannerService
                 {
                     // includeCover reuses the archive that the analysis already opened,
                     // instead of decompressing the whole book a second time for the cover.
-                    var analyzed = await _bookProcessor.AnalyzeAsync(mediaPath, includeCover: true, token, measurePages: true, analysisOptions);
+                    var analyzed = await _bookProcessor.AnalyzeAsync(mediaPath, analysisOptions with { IncludeCover = true, MeasurePages = true }, token);
                     var thumbPath = await _thumbnailService.SaveThumbnailAsync(mediaId, analyzed.Cover, thumbnailsDir, token);
                     results[index] = new PreparedMedia(mediaId, mediaPath, analyzed, thumbPath);
                 }
@@ -761,6 +780,13 @@ public class LibraryScannerService : ILibraryScannerService
 
         var byId = prepared.ToDictionary(p => p.MediaId, StringComparer.Ordinal);
 
+        var visitedIds = existingOnDisk.Select(m => m.Id).ToList();
+        var pagesByMedia = (await _dbContext.MediaPages
+                .Where(mp => visitedIds.Contains(mp.MediaId))
+                .ToListAsync(cancellationToken))
+            .GroupBy(mp => mp.MediaId, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+
         // Sequential phase: the change tracker must only ever be touched by one thread.
         foreach (var m in existingOnDisk)
         {
@@ -784,10 +810,7 @@ public class LibraryScannerService : ILibraryScannerService
             m.Status = FileStatus.Ready;
             m.UpdatedAt = DateTimeOffset.UtcNow;
 
-            var staleDimensions = await _dbContext.MediaPages
-                .Where(mp => mp.MediaId == m.Id)
-                .ToListAsync(cancellationToken);
-            if (staleDimensions.Count > 0)
+            if (pagesByMedia.TryGetValue(m.Id, out var staleDimensions))
             {
                 _dbContext.MediaPages.RemoveRange(staleDimensions);
             }

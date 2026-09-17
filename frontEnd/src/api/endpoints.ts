@@ -371,7 +371,6 @@ export interface EpubDeviceProfile {
   devicePattern: string;
   width: number;
   height: number;
-  autoHeight: boolean;
   fontSize: number;
   lineHeight: number;
   fontFamily: string;
@@ -502,10 +501,10 @@ export const filesystemApi = {
   createFolder: (parent: string, name: string) =>
     http.post<FolderEntry>("/api/v2/filesystem/folder", { parent, name }),
   roots: () => http.get<FolderRoot[]>("/api/v2/filesystem/roots"),
-  browse: (path?: string) =>
-    http.get<FolderListing>(
-      `/api/v2/filesystem/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`,
-    ),
+  browse: (path?: string) => {
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    return http.get<FolderListing>(`/api/v2/filesystem/browse${query}`);
+  },
   indexStatus: () => http.get<FolderIndexStatus>("/api/v2/filesystem/index"),
   rebuildIndex: () => http.post<FolderIndexStatus>("/api/v2/filesystem/index"),
   search: (q: string) =>
@@ -562,8 +561,8 @@ export const librariesApi = {
   /** URL para EventSource. La cookie de sesión viaja sola; no pasa por request(). */
   scanStreamUrl: (id: string) =>
     `${API_BASE}/api/v2/libraries/${id}/scan/stream`,
-  list: () => http.get<LibraryItem[]>("/api/v2/libraries"),
-  get: (id: string) => http.get<LibraryItem>(`/api/v2/libraries/${id}`),
+  list: (signal?: AbortSignal) => http.get<LibraryItem[]>("/api/v2/libraries", { signal }),
+  get: (id: string, signal?: AbortSignal) => http.get<LibraryItem>(`/api/v2/libraries/${id}`, { signal }),
   create: (payload: CreateLibraryPayload) =>
     http.post<LibraryItem>("/api/v2/libraries", payload),
   update: (id: string, payload: UpdateLibraryPayload) =>
@@ -714,22 +713,24 @@ export const mediaApi = {
 };
 
 export const seriesApi = {
-  list: (libraryId?: string | null, page = 0, pageSize = 24) => {
+  list: (libraryId?: string | null, page = 0, pageSize = 24, signal?: AbortSignal) => {
     const scope = libraryId
       ? `&libraryId=${encodeURIComponent(libraryId)}`
       : "";
     return http.get<PageResponse<SeriesItem>>(
       `/api/v2/series?${pageQuery(page, pageSize)}${scope}`,
+      { signal },
     );
   },
-  get: (id: string) => http.get<SeriesItem>(`/api/v2/series/${id}`),
+  get: (id: string, signal?: AbortSignal) => http.get<SeriesItem>(`/api/v2/series/${id}`, { signal }),
   delete: (id: string, deleteFiles = false) =>
     http.delete<void>(
       `/api/v2/series/${id}?deleteFiles=${String(deleteFiles)}`,
     ),
-  media: (id: string, page = 0, pageSize = 50) =>
+  media: (id: string, page = 0, pageSize = 50, signal?: AbortSignal) =>
     http.get<PageResponse<MediaItem>>(
       `/api/v2/series/${id}/media?${pageQuery(page, pageSize)}`,
+      { signal },
     ),
 
   /**
@@ -747,8 +748,10 @@ export const seriesApi = {
    * Sin él, el navegador seguiría enseñando la portada vieja desde su caché después de
    * cambiarla, porque la URL no habría cambiado.
    */
-  thumbnailUrl: (id: string, token?: string | null) =>
-    `${API_BASE}/api/v2/series/${id}/thumbnail${token ? `?v=${encodeURIComponent(token)}` : ""}`,
+  thumbnailUrl: (id: string, token?: string | null) => {
+    const query = token ? `?v=${encodeURIComponent(token)}` : "";
+    return `${API_BASE}/api/v2/series/${id}/thumbnail${query}`;
+  },
 
   /** Adopta como portada la miniatura de un tomo ya indexado. */
   setCoverFromMedia: (seriesId: string, mediaId: string) =>

@@ -6,6 +6,7 @@ import {
 	Chip,
 	CircularProgress,
 	LinearProgress,
+	Pagination,
 	Stack,
 	Tab,
 	Tabs,
@@ -15,7 +16,7 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import SyncIcon from "@mui/icons-material/Sync";
 import EditIcon from "@mui/icons-material/Edit";
 import LibraryBooksIcon from "@mui/icons-material/LibraryBooks";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import HudFrame from "../components/HudFrame";
 import MissingEntriesDialog from "../components/MissingEntriesDialog";
@@ -51,27 +52,7 @@ interface Loaded {
 const EMPTY_SERIES: SeriesItem[] = [];
 const EMPTY_VOLUMES: MediaItem[] = [];
 
-function Stat({ label, value }: Readonly<{ label: string; value: string }>) {
-	return (
-		<Box sx={{ px: 2, py: 1, borderLeft: `2px solid ${DS.borderRed}` }}>
-			<Typography
-				sx={{
-					fontFamily: "'Rajdhani', sans-serif",
-					fontSize: "11px",
-					fontWeight: 700,
-					letterSpacing: "1.5px",
-					textTransform: "uppercase",
-					color: DS.muted,
-				}}
-			>
-				{label}
-			</Typography>
-			<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "16px", color: "var(--ds-text-strong)" }}>
-				{value}
-			</Typography>
-		</Box>
-	);
-}
+
 
 export default function LibraryDetailPage() {
 	const { id = "" } = useParams();
@@ -97,46 +78,53 @@ export default function LibraryDetailPage() {
 		id,
 		String(reloadToken),
 		String(progress?.completedSeries ?? 0),
-		String(progress?.completedMedia ?? 0),
 		progress?.finished ? "done" : "live",
 	].join("#");
 
 	useEffect(() => {
 		let mounted = true;
+		const controller = new AbortController();
 
 		const load = async () => {
-			const library = await librariesApi.get(id);
+			const library = await librariesApi.get(id, controller.signal);
 
-			// Las series de la biblioteca se piden enteras: hacen falta completas para
-			// filtrar y ordenar en cliente, que es donde vive el buscador.
 			const series: SeriesItem[] = [];
 			let page = 0;
 			let totalPages = 1;
 			while (page < totalPages) {
-				const result = await seriesApi.list(id, page, MAX_PAGE_SIZE);
+				if (controller.signal.aborted) {
+					return;
+				}
+				const result = await seriesApi.list(id, page, MAX_PAGE_SIZE, controller.signal);
 				series.push(...result.data);
 				totalPages = result.totalPages;
 				page += 1;
 			}
 
-			// Los tomos se traen por serie: no hay endpoint que liste medios por biblioteca.
+			if (controller.signal.aborted) {
+				return;
+			}
 			const perSeries = await Promise.all(
-				series.map((item) => seriesApi.media(item.id, 0, MAX_PAGE_SIZE).then((r) => r.data).catch(() => []))
+				series.map((item) => seriesApi.media(item.id, 0, MAX_PAGE_SIZE, controller.signal).then((r) => r.data).catch(() => []))
 			);
 
-			if (mounted) {
+			if (mounted && !controller.signal.aborted) {
 				setLoaded({ key: requestKey, library, series, volumes: perSeries.flat() });
 			}
 		};
 
 		void load().catch((err: unknown) => {
-			if (mounted) {
+			if ((err instanceof DOMException || err instanceof Error) && err.name === "AbortError") {
+				return;
+			}
+			if (mounted && !controller.signal.aborted) {
 				setLoaded({ key: requestKey, error: errorMessage(err, "No se pudo cargar la biblioteca.") });
 			}
 		});
 
 		return () => {
 			mounted = false;
+			controller.abort();
 		};
 	}, [id, requestKey]);
 
@@ -176,6 +164,33 @@ export default function LibraryDetailPage() {
 	const missingCount = (missing?.series.length ?? 0) + (missing?.orphanVolumes ?? 0);
 	const pending = usePendingSeries(library, scanning, series);
 
+	const [seriesPage, setSeriesPage] = useState(1);
+	const [mediaPage, setMediaPage] = useState(1);
+
+	const visibleSeries = useMemo(() => filterAndSortSeries(series, query, seriesSort, seriesDir), [series, query, seriesSort, seriesDir]);
+	const visibleVolumes = useMemo(() => filterAndSortMedia(volumes, query, mediaSort, mediaDir), [volumes, query, mediaSort, mediaDir]);
+
+	const totalPagesCount = useMemo(() => volumes.reduce((sum, v) => sum + v.pages, 0), [volumes]);
+	const totalSize = useMemo(() => volumes.reduce((sum, v) => sum + v.size, 0), [volumes]);
+
+	const totalSeriesPages = Math.max(1, Math.ceil(visibleSeries.length / 24));
+	const paginatedSeries = useMemo(() => {
+		const start = (seriesPage - 1) * 24;
+		return visibleSeries.slice(start, start + 24);
+	}, [visibleSeries, seriesPage]);
+
+	const totalMediaPages = Math.max(1, Math.ceil(visibleVolumes.length / 24));
+	const paginatedVolumes = useMemo(() => {
+		const start = (mediaPage - 1) * 24;
+		return visibleVolumes.slice(start, start + 24);
+	}, [visibleVolumes, mediaPage]);
+
+	const indexingMedia = scanning ? progress?.currentMedia : undefined;
+	const pendingVolumes =
+		scanning && progress !== null && progress.totalMedia > 0
+			? Math.max(0, progress.totalMedia - visibleVolumes.length)
+			: 0;
+
 	if (loading) {
 		return (
 			<Box sx={{ display: "flex", justifyContent: "center", py: 10 }}>
@@ -195,18 +210,103 @@ export default function LibraryDetailPage() {
 		);
 	}
 
-	const visibleSeries = filterAndSortSeries(series, query, seriesSort, seriesDir);
-	const visibleVolumes = filterAndSortMedia(volumes, query, mediaSort, mediaDir);
+	let tabContent: React.ReactNode;
+	if (tab === 0) {
+		tabContent = (
+			<>
+				<CatalogToolbar
+					query={query}
+					onQueryChange={setQuery}
+					sort={seriesSort}
+					onSortChange={setSeriesSort}
+					direction={seriesDir}
+					onDirectionChange={setSeriesDir}
+					options={SERIES_SORTS}
+					placeholder="Buscar serie por nombre..."
+					shown={visibleSeries.length}
+					total={series.length}
+				/>
+				<Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: COVER_GRID }}>
+					{paginatedSeries.map((item) => (
+						<MediaCard
+							key={item.id}
+							to={`/series/${item.id}`}
+							state={{ from: `/libraries/${id}`, label: library.name.toUpperCase() }}
+							title={item.name}
+							subtitle={`${String(item.mediaCount)} TOMOS`}
+							coverUrl={seriesApi.thumbnailUrl(item.id)}
+							width="100%"
+							scanning={scanning && item.name === progress?.currentSeries}
+						/>
+					))}
 
-	// Mientras se indexa, la rejilla de tomos enseña tantos huecos como falten para el total
-	// que anuncia el escaner, y el barrido va en el primero: el que se esta midiendo ahora.
-	const indexingMedia = scanning ? progress?.currentMedia : undefined;
-	const pendingVolumes =
-		scanning && progress !== null && progress.totalMedia > 0
-			? Math.max(0, progress.totalMedia - visibleVolumes.length)
-			: 0;
-	const totalPagesCount = volumes.reduce((sum, v) => sum + v.pages, 0);
-	const totalSize = volumes.reduce((sum, v) => sum + v.size, 0);
+					{pending.map((item) => (
+						<PendingCard key={item.path} name={item.name} volumeCount={item.volumeCount} />
+					))}
+				</Box>
+				{totalSeriesPages > 1 && (
+					<Box sx={{ display: "flex", justifyContent: "center", mt: 4 }}>
+						<Pagination
+							count={totalSeriesPages}
+							page={seriesPage}
+							onChange={(_, p) => setSeriesPage(p)}
+							color="primary"
+						/>
+					</Box>
+				)}
+			</>
+		);
+	} else {
+		tabContent = (
+			<>
+				<CatalogToolbar
+					query={query}
+					onQueryChange={setQuery}
+					sort={mediaSort}
+					onSortChange={setMediaSort}
+					direction={mediaDir}
+					onDirectionChange={setMediaDir}
+					options={MEDIA_SORTS}
+					placeholder="Buscar tomo por nombre..."
+					shown={visibleVolumes.length}
+					total={volumes.length}
+				/>
+				<Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: COVER_GRID }}>
+					{paginatedVolumes.map((item) => (
+						<MediaCard
+							key={item.id}
+							to={`/media/${item.id}`}
+							state={{ from: `/libraries/${id}`, label: library.name.toUpperCase() }}
+							title={mediaTitle(item)}
+							subtitle={mediaSubtitle(item)}
+							coverUrl={mediaApi.thumbnailUrl(item.id)}
+							progress={readProgress(item)}
+							width="100%"
+							scanning={item.name === indexingMedia}
+						/>
+					))}
+
+					{Array.from({ length: pendingVolumes }, (_, slot) => (
+						<PendingVolume
+							key={`tomo-pendiente-${String(slot)}`}
+							label={`TOMO ${String(visibleVolumes.length + slot + 1).padStart(2, "0")}`}
+							active={slot === 0}
+						/>
+					))}
+				</Box>
+				{totalMediaPages > 1 && (
+					<Box sx={{ display: "flex", justifyContent: "center", mt: 4 }}>
+						<Pagination
+							count={totalMediaPages}
+							page={mediaPage}
+							onChange={(_, p) => setMediaPage(p)}
+							color="primary"
+						/>
+					</Box>
+				)}
+			</>
+		);
+	}
 
 	return (
 		<Box>
@@ -283,7 +383,12 @@ export default function LibraryDetailPage() {
 									{library.name}
 								</Typography>
 								<Typography
-									sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: DS.muted }}
+									sx={{
+										fontFamily: "'JetBrains Mono', monospace",
+										fontSize: "12px",
+										color: DS.muted,
+										mt: 0.5,
+									}}
 								>
 									{library.path}
 								</Typography>
@@ -315,64 +420,80 @@ export default function LibraryDetailPage() {
 
 					<Stack direction="row" spacing={1.5} sx={{ flexShrink: 0 }}>
 						<Button
-							startIcon={<SyncIcon />}
+							variant="outlined"
+							startIcon={<SyncIcon className={scanning ? "ds-spin" : undefined} />}
 							disabled={scanning}
 							onClick={() => {
-								void librariesApi.scan(library.id).then(() => {
-									setReloadToken((prev) => prev + 1);
-								});
-							}}
-							sx={{
-								color: "var(--ds-text-2)",
-								border: `1px solid ${DS.border}`,
-								backgroundColor: DS.bgSunken,
-								"&:hover": { borderColor: DS.redGlow, color: "var(--ds-text-strong)" },
+								librariesApi
+									.scan(id)
+									.then(() => {
+										setReloadToken((prev) => prev + 1);
+									})
+									.catch(() => undefined);
 							}}
 						>
-							ESCANEAR
+							{scanning ? "INDEXANDO..." : "REESCANEAR"}
 						</Button>
 						<Button
 							component={RouterLink}
-							to="/libraries"
+							to={`/libraries?edit=${id}`}
+							variant="outlined"
 							startIcon={<EditIcon />}
-							sx={{
-								color: "var(--ds-text-2)",
-								border: `1px solid ${DS.border}`,
-								backgroundColor: DS.bgSunken,
-								"&:hover": { borderColor: DS.redGlow, color: "var(--ds-text-strong)" },
-							}}
 						>
-							CONFIGURAR
+							EDITAR
 						</Button>
 					</Stack>
 				</Stack>
 
-				<Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 3 }}>
-					<Stat label="Series" value={String(series.length)} />
-					<Stat label="Tomos" value={String(volumes.length)} />
-					<Stat label="Páginas" value={String(totalPagesCount)} />
-					<Stat label="Peso" value={formatBytes(totalSize)} />
-				</Box>
+				<Stack
+					direction={{ xs: "column", sm: "row" }}
+					spacing={{ xs: 1.5, sm: 3 }}
+					sx={{ mt: 3, pt: 2, borderTop: `1px solid ${DS.border}` }}
+				>
+					<Box>
+						<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: DS.subtle }}>
+							SERIES
+						</Typography>
+						<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontSize: "20px", fontWeight: 700, color: "var(--ds-text-strong)" }}>
+							{series.length}
+						</Typography>
+					</Box>
+					<Box>
+						<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: DS.subtle }}>
+							TOMOS
+						</Typography>
+						<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontSize: "20px", fontWeight: 700, color: "var(--ds-text-strong)" }}>
+							{volumes.length}
+						</Typography>
+					</Box>
+					<Box>
+						<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: DS.subtle }}>
+							PÁGINAS
+						</Typography>
+						<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontSize: "20px", fontWeight: 700, color: "var(--ds-text-strong)" }}>
+							{totalPagesCount.toLocaleString()}
+						</Typography>
+					</Box>
+					<Box>
+						<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: DS.subtle }}>
+							TAMAÑO TOTAL
+						</Typography>
+						<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontSize: "20px", fontWeight: 700, color: "var(--ds-text-strong)" }}>
+							{formatBytes(totalSize)}
+						</Typography>
+					</Box>
+				</Stack>
 			</Box>
 
 			<Tabs
 				value={tab}
-				onChange={(_, next: number) => setTab(next)}
-				sx={{
-					borderBottom: `1px solid ${DS.border}`,
-					mb: 3,
-					"& .MuiTab-root": {
-						fontFamily: "'Rajdhani', sans-serif",
-						fontWeight: 700,
-						letterSpacing: "1.5px",
-						color: DS.muted,
-						"&.Mui-selected": { color: "var(--ds-text-strong)" },
-					},
-					"& .MuiTabs-indicator": { backgroundColor: DS.red, height: 2 },
+				onChange={(_, value: number) => {
+					setTab(value);
 				}}
+				sx={{ mb: 2, borderBottom: `1px solid ${DS.border}` }}
 			>
-				<Tab label={`Series (${String(series.length)})`} />
-				<Tab label={`Tomos (${String(volumes.length)})`} />
+				<Tab label={`SERIES (${String(visibleSeries.length)})`} />
+				<Tab label={`TOMOS (${String(visibleVolumes.length)})`} />
 			</Tabs>
 
 			{missingOpen && missing && (
@@ -396,83 +517,7 @@ export default function LibraryDetailPage() {
 				/>
 			)}
 
-			{tab === 0 ? (
-				<>
-					<CatalogToolbar
-						query={query}
-						onQueryChange={setQuery}
-						sort={seriesSort}
-						onSortChange={setSeriesSort}
-						direction={seriesDir}
-						onDirectionChange={setSeriesDir}
-						options={SERIES_SORTS}
-						placeholder="Buscar serie por nombre..."
-						shown={visibleSeries.length}
-						total={series.length}
-					/>
-					<Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: COVER_GRID }}>
-						{visibleSeries.map((item) => (
-							<MediaCard
-								key={item.id}
-								to={`/series/${item.id}`}
-								state={{ from: `/libraries/${id}`, label: library.name.toUpperCase() }}
-								title={item.name}
-								subtitle={`${String(item.mediaCount)} TOMOS`}
-								coverUrl={seriesApi.thumbnailUrl(item.id)}
-								width="100%"
-								// Solo la que el escaner esta leyendo ahora: encenderlas todas
-								// diria menos, porque no señalaria donde va.
-								scanning={scanning && item.name === progress?.currentSeries}
-							/>
-						))}
-
-						{/* Huecos de lo que el escaner todavia no ha creado. Salen del mismo ensayo
-						    que la vista previa del formulario, asi que la rejilla no esta vacia
-						    mientras se indexa. */}
-						{pending.map((item) => (
-							<PendingCard key={item.path} name={item.name} volumeCount={item.volumeCount} />
-						))}
-					</Box>
-				</>
-			) : (
-				<>
-					<CatalogToolbar
-						query={query}
-						onQueryChange={setQuery}
-						sort={mediaSort}
-						onSortChange={setMediaSort}
-						direction={mediaDir}
-						onDirectionChange={setMediaDir}
-						options={MEDIA_SORTS}
-						placeholder="Buscar tomo por nombre..."
-						shown={visibleVolumes.length}
-						total={volumes.length}
-					/>
-					<Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: COVER_GRID }}>
-						{visibleVolumes.map((item) => (
-							<MediaCard
-								key={item.id}
-								to={`/media/${item.id}`}
-								state={{ from: `/libraries/${id}`, label: library.name.toUpperCase() }}
-								title={mediaTitle(item)}
-								subtitle={mediaSubtitle(item)}
-								coverUrl={mediaApi.thumbnailUrl(item.id)}
-								progress={readProgress(item)}
-								width="100%"
-								scanning={item.name === indexingMedia}
-							/>
-						))}
-
-						{Array.from({ length: pendingVolumes }, (_, slot) => (
-							<PendingVolume
-								key={`tomo-pendiente-${String(slot)}`}
-								label={`TOMO ${String(visibleVolumes.length + slot + 1).padStart(2, "0")}`}
-								active={slot === 0}
-							/>
-						))}
-					</Box>
-				</>
-			)}
+			{tabContent}
 		</Box>
 	);
 }

@@ -1,7 +1,7 @@
 import { Box, LinearProgress, Typography } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
 import BrokenImageIcon from "@mui/icons-material/BrokenImage";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { DS } from "../theme";
 
 interface Props {
@@ -25,7 +25,7 @@ interface Props {
  * Tarjeta de portada del catálogo. La relación 2:3 se reserva antes de que llegue la
  * imagen: sin ella la rejilla salta al cargar cada miniatura.
  */
-export default function MediaCard({
+function MediaCard({
 	to,
 	title,
 	subtitle,
@@ -168,3 +168,5 @@ export default function MediaCard({
 		</Box>
 	);
 }
+
+export default memo(MediaCard);

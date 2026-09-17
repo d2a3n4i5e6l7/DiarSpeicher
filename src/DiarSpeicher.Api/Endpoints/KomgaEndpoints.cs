@@ -196,7 +196,7 @@ public static class KomgaEndpoints
             CancellationToken ct) =>
         {
             var user = RequestIdentity.GetAuthUser(context);
-            var (extractedPage, book) = await opdsService.GetBookPageAsync(user, id, pageNumber, zeroBased: false, trackProgression: true, ct);
+            var (extractedPage, book) = await opdsService.GetBookPageAsync(user, id, pageNumber, PageRequestKind.Reading, ct);
 
             if (book == null || extractedPage == null || extractedPage.Data.Length == 0)
             {

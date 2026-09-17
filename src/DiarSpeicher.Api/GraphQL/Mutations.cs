@@ -153,49 +153,6 @@ public class Mutation
         return session;
     }
 
-    /// <summary>
-    /// Accepts book uploads over GraphQL multipart. Delegates to the same service the REST
-    /// endpoint uses, so extension whitelist, per-file size limit and the scan trigger
-    /// behave identically on both surfaces.
-    /// </summary>
-    public async Task<UploadBooksPayload> UploadBooks(
-        IDiarSpeicherService diarSpeicherService,
-        AuthUserResolver auth,
-        UploadBooksInput input,
-        CancellationToken ct)
-    {
-        var inputs = new List<DiarSpeicherUploadFileInput>();
-        foreach (var file in input.Files)
-        {
-            inputs.Add(new DiarSpeicherUploadFileInput
-            {
-                FileName = file.Name,
-                Content = file.OpenReadStream()
-            });
-        }
-
-        var result = await diarSpeicherService.UploadToLibraryAsync(auth.Require(), input.LibraryId, input.Subpath, inputs, ct);
-
-        if (result.Outcome != UploadOutcome.Success)
-        {
-            throw new GraphQLException(result.Message ?? "The upload failed.");
-        }
-
-        // A successful outcome is expected to carry the response, but the type allows it to be
-        // null, and dereferencing it blind would surface as a 500 with no explanation.
-        if (result.Response is null)
-        {
-            throw new GraphQLException("The upload reported success without a response.");
-        }
-
-        return new UploadBooksPayload
-        {
-            UploadedCount = result.Response.UploadedCount,
-            ScanJobTriggered = result.Response.ScanJobTriggered,
-            Files = result.Response.Files.Select(f => f.Name).ToList()
-        };
-    }
-
     private static AuthUser RequireServerOwner(AuthUserResolver auth)
     {
         var user = auth.Require();
@@ -214,8 +171,6 @@ public record EditLibraryInput(string Id, string? Name, string? Description, str
 
 public record UpdateReadingProgressInput(string MediaId, int? Page, decimal? Percentage, bool? IsCompleted);
 
-public record UploadBooksInput(string LibraryId, string? Subpath, IReadOnlyList<IFile> Files);
-
 public class ScanJob
 {
     public string JobId { get; init; } = string.Empty;
@@ -223,9 +178,3 @@ public class ScanJob
     public bool Queued { get; init; }
 }
 
-public class UploadBooksPayload
-{
-    public int UploadedCount { get; init; }
-    public bool ScanJobTriggered { get; init; }
-    public List<string> Files { get; init; } = [];
-}

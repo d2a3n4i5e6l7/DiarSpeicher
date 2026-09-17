@@ -48,7 +48,7 @@ public sealed class MediaEngineTests : IDisposable
         var path = Path.Combine(_workDir, "roto.pdf");
         await File.WriteAllTextAsync(path, "esto no es un PDF");
 
-        var result = await new PdfBookProcessor().AnalyzeBookAsync(path, includeCover: true);
+        var result = await new PdfBookProcessor().AnalyzeBookAsync(path, new BookAnalysisOptions { IncludeCover = true });
 
         Assert.Equal(0, result.Pages);
         Assert.Null(result.Cover);

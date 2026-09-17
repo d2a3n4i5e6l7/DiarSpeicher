@@ -41,9 +41,6 @@ export default defineConfig(async ({ mode }) => {
 
 	return {
 		base: "./",
-		// El Gateway sirve la SPA, asi que el navegador siempre habla con su
-		// propio origen: la variable solo alimenta el proxy de dev, y llevarla
-		// al bundle dispararia un preflight CORS contra otro host.
 		define: {
 			"import.meta.env.VITE_GATEWAY_URL": JSON.stringify(""),
 		},
@@ -59,6 +56,25 @@ export default defineConfig(async ({ mode }) => {
 			outDir: "dist",
 			emptyOutDir: true,
 			sourcemap: false,
+			rollupOptions: {
+				output: {
+					manualChunks(id: string) {
+						if (id.includes("node_modules/epubjs")) {
+							return "epubjs";
+						}
+						if (
+							id.includes("node_modules/react/") ||
+							id.includes("node_modules/react-dom/") ||
+							id.includes("node_modules/react-router-dom/")
+						) {
+							return "vendor-react";
+						}
+						if (id.includes("node_modules/@mui") || id.includes("node_modules/@emotion")) {
+							return "vendor-mui";
+						}
+					},
+				},
+			},
 		},
 	};
 });

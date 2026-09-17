@@ -238,14 +238,9 @@ public static class DiarSpeicherEndpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            if (!user.HasPermission(Permissions.ManageLibrary))
-            {
-                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
-            }
-
             var result = await service.UpdateSeriesAsync(user, id, input, ct);
             return result == null ? Results.NotFound() : Results.Ok(result);
-        });
+        }).RequireManageLibrary();
 
         // La portada la ve cualquiera que ya puede ver la serie; cambiarla es gestion.
         group.MapGet("/series/{id}/thumbnail", async (
@@ -271,16 +266,11 @@ public static class DiarSpeicherEndpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            if (!user.HasPermission(Permissions.ManageLibrary))
-            {
-                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
-            }
-
             var applied = await service.SetSeriesThumbnailFromMediaAsync(user, id, input.MediaId, ct);
             return applied ? Results.Ok(new { updated = true }) : Results.NotFound();
-        });
+        }).RequireManageLibrary();
 
-        group.MapPost("/series/{id}/thumbnail", HandleSeriesCoverUpload).DisableAntiforgery();
+        group.MapPost("/series/{id}/thumbnail", HandleSeriesCoverUpload).DisableAntiforgery().RequireManageLibrary();
 
         group.MapDelete("/series/{id}/thumbnail", async (
             string id,
@@ -289,14 +279,9 @@ public static class DiarSpeicherEndpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            if (!user.HasPermission(Permissions.ManageLibrary))
-            {
-                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
-            }
-
             var cleared = await service.ClearSeriesThumbnailAsync(user, id, ct);
             return cleared ? Results.NoContent() : Results.NotFound();
-        });
+        }).RequireManageLibrary();
 
         group.MapGet("/series/{id}/media", async (
             string id,
@@ -323,11 +308,6 @@ public static class DiarSpeicherEndpoints
         CancellationToken ct)
     {
         var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-        if (!user.HasPermission(Permissions.ManageLibrary))
-        {
-            return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
-        }
-
         if (!httpContext.Request.HasFormContentType)
         {
             return Results.BadRequest(new { error = "Se espera multipart/form-data con la imagen." });
@@ -378,11 +358,6 @@ public static class DiarSpeicherEndpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            if (!user.HasPermission(Permissions.ManageLibrary))
-            {
-                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
-            }
-
             try
             {
                 var result = await service.CreateLibraryAsync(user, input, ct);
@@ -394,7 +369,7 @@ public static class DiarSpeicherEndpoints
             {
                 return Results.BadRequest(new { error = e.Message });
             }
-        });
+        }).RequireManageLibrary();
 
         group.MapPut("/libraries/{id}", async (
             string id,
@@ -404,11 +379,6 @@ public static class DiarSpeicherEndpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            if (!user.HasPermission(Permissions.ManageLibrary))
-            {
-                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
-            }
-
             try
             {
                 var result = await service.UpdateLibraryAsync(user, id, input, ct);
@@ -418,7 +388,7 @@ public static class DiarSpeicherEndpoints
             {
                 return Results.BadRequest(new { error = e.Message });
             }
-        });
+        }).RequireManageLibrary();
 
         group.MapGet("/libraries/{id}/missing", async (
             string id,
@@ -438,13 +408,8 @@ public static class DiarSpeicherEndpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            if (!user.HasPermission(Permissions.ManageLibrary))
-            {
-                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
-            }
-
             return Results.Ok(new { removed = await service.PurgeMissingAsync(user, id, ct) });
-        });
+        }).RequireManageLibrary();
 
         group.MapGet("/libraries/{id}/scan", (
             string id,
@@ -502,11 +467,6 @@ public static class DiarSpeicherEndpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            if (!user.HasPermission(Permissions.ManageLibrary))
-            {
-                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
-            }
-
             try
             {
                 return await service.DeleteLibraryAsync(user, id, deleteFiles, ct)
@@ -517,7 +477,7 @@ public static class DiarSpeicherEndpoints
             {
                 return Results.BadRequest(new { error = e.Message });
             }
-        });
+        }).RequireManageLibrary();
 
         group.MapDelete("/series/{id}", async (
             string id,
@@ -527,11 +487,6 @@ public static class DiarSpeicherEndpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            if (!user.HasPermission(Permissions.ManageLibrary))
-            {
-                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
-            }
-
             try
             {
                 return await service.DeleteSeriesAsync(user, id, deleteFiles, ct)
@@ -542,7 +497,7 @@ public static class DiarSpeicherEndpoints
             {
                 return Results.BadRequest(new { error = e.Message });
             }
-        });
+        }).RequireManageLibrary();
 
         group.MapDelete("/media/{id}", async (
             string id,
@@ -552,11 +507,6 @@ public static class DiarSpeicherEndpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            if (!user.HasPermission(Permissions.ManageLibrary))
-            {
-                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
-            }
-
             try
             {
                 return await service.DeleteMediaAsync(user, id, deleteFile, ct)
@@ -567,7 +517,7 @@ public static class DiarSpeicherEndpoints
             {
                 return Results.BadRequest(new { error = e.Message });
             }
-        });
+        }).RequireManageLibrary();
 
         group.MapPost("/libraries/{id}/upload", HandleLibraryUpload).DisableAntiforgery();
 
@@ -587,6 +537,18 @@ public static class DiarSpeicherEndpoints
             return success ? Results.Accepted($"/api/v2/libraries/{id}") : Results.NotFound();
         });
     }
+
+    private static RouteHandlerBuilder RequireManageLibrary(this RouteHandlerBuilder builder) =>
+        builder.AddEndpointFilter(async (ctx, next) =>
+        {
+            var user = ctx.HttpContext.Items[AuthUserKey] as AuthUser;
+            if (user is null || !user.HasPermission(Permissions.ManageLibrary))
+            {
+                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            return await next(ctx);
+        });
 
     private static async Task<IResult> HandleLibraryUpload(
         string id,
@@ -621,9 +583,12 @@ public static class DiarSpeicherEndpoints
         }
 
         var reader = new MultipartReader(boundary, httpContext.Request.Body);
-        string? subpath = httpContext.Request.Query["subpath"].FirstOrDefault();
 
-        var files = ReadMultipartFilesAsync(reader, s => { if (string.IsNullOrEmpty(subpath)) subpath = s; }, ct);
+        var (formSubpath, firstFile) = await ReadUntilFirstFileAsync(reader, ct);
+        var querySubpath = httpContext.Request.Query["subpath"].FirstOrDefault();
+        var subpath = string.IsNullOrEmpty(querySubpath) ? formSubpath : querySubpath;
+
+        var files = ReadMultipartFilesAsync(reader, firstFile, ct);
 
         var result = await service.UploadToLibraryAsync(user, id, subpath, files, ct);
 
@@ -638,12 +603,13 @@ public static class DiarSpeicherEndpoints
         };
     }
 
-    private static async IAsyncEnumerable<DiarSpeicherUploadFileInput> ReadMultipartFilesAsync(
+    private static async Task<(string? Subpath, DiarSpeicherUploadFileInput? FirstFile)> ReadUntilFirstFileAsync(
         MultipartReader reader,
-        Action<string> onSubpathFound,
-        [EnumeratorCancellation] CancellationToken ct)
+        CancellationToken ct)
     {
+        string? subpath = null;
         MultipartSection? section;
+
         while ((section = await reader.ReadNextSectionAsync(ct)) != null)
         {
             if (!ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var cd) || cd == null)
@@ -658,25 +624,49 @@ public static class DiarSpeicherEndpoints
                 {
                     using var streamReader = new StreamReader(section.Body);
                     var val = await streamReader.ReadToEndAsync(ct);
-                    if (!string.IsNullOrWhiteSpace(val))
-                    {
-                        onSubpathFound(val);
-                    }
+                    if (!string.IsNullOrWhiteSpace(val)) subpath = val;
                 }
                 continue;
             }
 
-            if (cd.IsFileDisposition())
-            {
-                var rawName = HeaderUtilities.RemoveQuotes(cd.FileNameStar.HasValue ? cd.FileNameStar.Value : cd.FileName.Value).Value;
-                if (string.IsNullOrWhiteSpace(rawName)) continue;
+            var file = ToFileInput(section, cd);
+            if (file != null) return (subpath, file);
+        }
 
-                yield return new DiarSpeicherUploadFileInput
-                {
-                    FileName = rawName,
-                    Content = section.Body
-                };
+        return (subpath, null);
+    }
+
+    private static DiarSpeicherUploadFileInput? ToFileInput(MultipartSection section, ContentDispositionHeaderValue cd)
+    {
+        if (!cd.IsFileDisposition()) return null;
+
+        var rawName = HeaderUtilities.RemoveQuotes(cd.FileNameStar.HasValue ? cd.FileNameStar.Value : cd.FileName.Value).Value;
+        if (string.IsNullOrWhiteSpace(rawName)) return null;
+
+        return new DiarSpeicherUploadFileInput
+        {
+            FileName = rawName,
+            Content = section.Body
+        };
+    }
+
+    private static async IAsyncEnumerable<DiarSpeicherUploadFileInput> ReadMultipartFilesAsync(
+        MultipartReader reader,
+        DiarSpeicherUploadFileInput? firstFile,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (firstFile != null) yield return firstFile;
+
+        MultipartSection? section;
+        while ((section = await reader.ReadNextSectionAsync(ct)) != null)
+        {
+            if (!ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var cd) || cd == null)
+            {
+                continue;
             }
+
+            var file = ToFileInput(section, cd);
+            if (file != null) yield return file;
         }
     }
 

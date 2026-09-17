@@ -32,8 +32,8 @@ public class HttpEpubProfileProvider : IEpubProfileProvider
         if (customProfile != null)
         {
             _logger.LogInformation(
-                "[EPUB Engine] Perfil personalizado '{Profile}' ({W}x{H}, AutoHeight={AH}) aplicado para UA: '{UA}'",
-                customProfile.Name, customProfile.Width, customProfile.Height, customProfile.AutoHeight, userAgent);
+                "[EPUB Engine] Perfil personalizado '{Profile}' ({W}x{H}) aplicado para UA: '{UA}'",
+                customProfile.Name, customProfile.Width, customProfile.Height, userAgent);
             return customProfile;
         }
 
@@ -49,8 +49,8 @@ public class HttpEpubProfileProvider : IEpubProfileProvider
         }
 
         _logger.LogInformation(
-            "[EPUB Engine] Perfil por defecto '{Profile}' ({W}x{H}, AutoHeight={AH}) aplicado para UA: '{UA}'",
-            fallback.Name, fallback.Width, fallback.Height, fallback.AutoHeight, userAgent);
+            "[EPUB Engine] Perfil por defecto '{Profile}' ({W}x{H}) aplicado para UA: '{UA}'",
+            fallback.Name, fallback.Width, fallback.Height, userAgent);
         return fallback;
     }
 

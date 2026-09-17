@@ -1,3 +1,4 @@
+using System.Buffers;
 using SkiaSharp;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Processors;
@@ -10,19 +11,26 @@ public static class PageMeasurer
         Stream stream,
         CancellationToken cancellationToken = default)
     {
-        var buffer = new byte[HeaderBytes];
-        var total = 0;
-
-        while (total < HeaderBytes)
+        var buffer = ArrayPool<byte>.Shared.Rent(HeaderBytes);
+        try
         {
-            var read = await stream.ReadAsync(buffer.AsMemory(total, HeaderBytes - total), cancellationToken);
-            if (read == 0) break;
-            total += read;
+            var total = 0;
+
+            while (total < HeaderBytes)
+            {
+                var read = await stream.ReadAsync(buffer.AsMemory(total, HeaderBytes - total), cancellationToken);
+                if (read == 0) break;
+                total += read;
+            }
+
+            if (total == 0) return (null, null);
+
+            return Measure(buffer.AsSpan(0, total));
         }
-
-        if (total == 0) return (null, null);
-
-        return Measure(buffer.AsSpan(0, total));
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     public static (int? Width, int? Height) Measure(ReadOnlySpan<byte> header)

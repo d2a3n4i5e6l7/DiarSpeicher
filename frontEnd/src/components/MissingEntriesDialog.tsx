@@ -21,15 +21,11 @@ interface Props {
 	onPurge: () => void;
 }
 
-/**
- * Lo que quedo en el indice sin nada detras en el disco. Purgarlo no toca un solo fichero:
- * los ficheros ya no estan, que es justo el motivo de que aparezcan aqui.
- */
 export default function MissingEntriesDialog({ report, working, onClose, onPurge }: Readonly<Props>) {
 	return (
 		<Dialog open onClose={onClose} maxWidth="sm" fullWidth>
 			<HudFrame />
-			<DialogTitle>// Entradas sin carpeta</DialogTitle>
+			<DialogTitle>{"// Entradas sin carpeta"}</DialogTitle>
 
 			<DialogContent sx={{ p: 3 }}>
 				<Typography sx={{ color: DS.platinum, mb: 2 }}>

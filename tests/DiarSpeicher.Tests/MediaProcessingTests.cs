@@ -10,7 +10,7 @@ using Xunit;
 
 namespace DiarSpeicher.Tests;
 
-public class MediaProcessingTests : IDisposable
+public sealed class MediaProcessingTests : IDisposable
 {
     private readonly string _tempDir;
 
@@ -315,7 +315,6 @@ public class MediaProcessingTests : IDisposable
         {
             Width = 1200,
             Height = 1920,
-            AutoHeight = false,
             FontSize = 40
         };
         var processor = new EpubBookProcessor(new TestEpubProfileProvider(customProfile));

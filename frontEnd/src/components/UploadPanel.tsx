@@ -4,14 +4,10 @@ import {
 	Button,
 	Card,
 	CardContent,
-	Chip,
-	Divider,
 	FormControl,
-	IconButton,
 	InputLabel,
 	LinearProgress,
 	List,
-	ListItem,
 	MenuItem,
 	Select,
 	Stack,
@@ -20,40 +16,19 @@ import {
 } from "@mui/material";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import CreateNewFolderIcon from "@mui/icons-material/CreateNewFolder";
-import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
 import PauseOutlinedIcon from "@mui/icons-material/PauseOutlined";
 import PlayArrowOutlinedIcon from "@mui/icons-material/PlayArrowOutlined";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { filesystemApi, type DiskUsage, type FolderEntry } from "../api/endpoints";
-import { TusUpload, type TusUploadStatus } from "../api/tusClient";
+import { TusUpload } from "../api/tusClient";
+import { formatBytes } from "../catalog/bytes";
 import HudFrame from "./HudFrame";
-
-function formatBytes(bytes: number, decimals = 2): string {
-	if (bytes === 0) return "0 Bytes";
-	const k = 1024;
-	const dm = Math.max(0, decimals);
-	const sizes = ["Bytes", "KB", "MB", "GB"];
-	const i = Math.floor(Math.log(bytes) / Math.log(k));
-	return `${Number.parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
-}
-
-interface UploadQueueItem {
-	id: string;
-	file: File;
-	tusUpload: TusUpload;
-	status: TusUploadStatus;
-	bytesUploaded: number;
-	percentage: number;
-	errorMessage?: string;
-}
+import UploadItemRow, { type UploadQueueItem } from "./UploadItemRow";
 
 interface Props {
 	libraryId: string;
-	/** Ruta en disco de la biblioteca: de ella salen las subcarpetas y el espacio libre. */
 	libraryPath: string;
-	/** Carpeta dentro de la biblioteca donde caen los ficheros. */
 	initialSubpath?: string;
 	onUploaded?: () => void;
 }
@@ -75,7 +50,7 @@ function DiskGauge({ disk }: Readonly<{ disk: DiskUsage }>) {
 						color: tight ? "var(--ds-warn)" : "var(--ds-muted)",
 					}}
 				>
-					{formatBytes(disk.freeBytes, 1)} libres de {formatBytes(disk.totalBytes, 1)}
+					{formatBytes(disk.freeBytes)} libres de {formatBytes(disk.totalBytes)}
 				</Typography>
 			</Stack>
 			<LinearProgress
@@ -89,6 +64,8 @@ function DiskGauge({ disk }: Readonly<{ disk: DiskUsage }>) {
 
 export default function UploadPanel({ libraryId, libraryPath, initialSubpath, onUploaded }: Readonly<Props>) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const isMountedRef = useRef(true);
+	const activeUploadsRef = useRef<Map<string, TusUpload>>(new Map());
 
 	const [subpath, setSubpath] = useState(initialSubpath ?? "");
 	const [items, setItems] = useState<UploadQueueItem[]>([]);
@@ -102,6 +79,16 @@ export default function UploadPanel({ libraryId, libraryPath, initialSubpath, on
 	const [error, setError] = useState<string | null>(null);
 	const [successCount, setSuccessCount] = useState<number | null>(null);
 
+	useEffect(() => {
+		isMountedRef.current = true;
+		const currentUploads = activeUploadsRef.current;
+		return () => {
+			isMountedRef.current = false;
+			for (const upload of currentUploads.values()) {
+				upload.pause();
+			}
+		};
+	}, []);
 
 	const loadDestination = useCallback((path: string, alive: () => boolean = () => true) => {
 		return Promise.allSettled([filesystemApi.browse(path), filesystemApi.disk(path)]).then(([listing, usage]) => {
@@ -124,13 +111,14 @@ export default function UploadPanel({ libraryId, libraryPath, initialSubpath, on
 
 	const createQueueItem = useCallback(
 		(file: File): UploadQueueItem => {
-			const itemId = `${file.name}-${file.size}-${Date.now()}-${Math.random()}`;
+			const itemId = `${file.name}-${file.size}-${Date.now()}-${crypto.randomUUID()}`;
 
 			const tusUploadInstance = new TusUpload({
 				file,
 				libraryId,
 				subpath: subpath.trim() || undefined,
 				onProgress: (uploaded, _total, pct) => {
+					if (!isMountedRef.current) return;
 					setItems((prev) =>
 						prev.map((it) =>
 							it.id === itemId
@@ -145,6 +133,8 @@ export default function UploadPanel({ libraryId, libraryPath, initialSubpath, on
 					);
 				},
 				onSuccess: () => {
+					activeUploadsRef.current.delete(itemId);
+					if (!isMountedRef.current) return;
 					setItems((prev) =>
 						prev.map((it) =>
 							it.id === itemId
@@ -161,6 +151,8 @@ export default function UploadPanel({ libraryId, libraryPath, initialSubpath, on
 					onUploaded?.();
 				},
 				onError: (err) => {
+					activeUploadsRef.current.delete(itemId);
+					if (!isMountedRef.current) return;
 					setItems((prev) =>
 						prev.map((it) =>
 							it.id === itemId
@@ -174,6 +166,8 @@ export default function UploadPanel({ libraryId, libraryPath, initialSubpath, on
 					);
 				},
 			});
+
+			activeUploadsRef.current.set(itemId, tusUploadInstance);
 
 			return {
 				id: itemId,
@@ -239,7 +233,9 @@ export default function UploadPanel({ libraryId, libraryPath, initialSubpath, on
 	};
 
 	const handleRemoveItem = async (item: UploadQueueItem) => {
+		activeUploadsRef.current.delete(item.id);
 		await item.tusUpload.cancel();
+		if (!isMountedRef.current) return;
 		setItems((prev) => prev.filter((it) => it.id !== item.id));
 	};
 
@@ -364,7 +360,6 @@ export default function UploadPanel({ libraryId, libraryPath, initialSubpath, on
 					</CardContent>
 				</Card>
 
-				{/* Zona Drag and Drop */}
 				<Card sx={{ overflow: "hidden" }}>
 					<HudFrame />
 					<CardContent>
@@ -408,7 +403,6 @@ export default function UploadPanel({ libraryId, libraryPath, initialSubpath, on
 							</Typography>
 						</Box>
 
-						{/* Cola de Subidas Granular */}
 						{items.length > 0 && (
 							<Box sx={{ mt: 3 }}>
 								<Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", mb: 2 }}>
@@ -452,113 +446,20 @@ export default function UploadPanel({ libraryId, libraryPath, initialSubpath, on
 								</Stack>
 
 								<List sx={{ border: 1, borderColor: "divider", borderRadius: 1.5, p: 0 }}>
-									{items.map((item, idx) => {
-										let statusChipColor: "default" | "primary" | "warning" | "success" | "error" = "default";
-										let statusText = "En cola";
-
-										if (item.status === "uploading") {
-											statusChipColor = "primary";
-											statusText = `Subiendo (${item.percentage}%)`;
-										} else if (item.status === "paused") {
-											statusChipColor = "warning";
-											statusText = `Pausado (${item.percentage}%)`;
-										} else if (item.status === "completed") {
-											statusChipColor = "success";
-											statusText = "Completado";
-										} else if (item.status === "error") {
-											statusChipColor = "error";
-											statusText = "Error";
-										}
-
-										return (
-											<React.Fragment key={item.id}>
-												{idx > 0 && <Divider />}
-												<ListItem sx={{ py: 1.5, display: "block" }}>
-													<Stack spacing={1}>
-														<Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
-															<Stack direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0 }}>
-																<InsertDriveFileIcon color="action" fontSize="small" />
-																<Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
-																	{item.file.name}
-																</Typography>
-																<Typography variant="caption" color="text.secondary">
-																	({formatBytes(item.file.size)})
-																</Typography>
-															</Stack>
-
-															<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-																<Chip
-																	label={statusText}
-																	size="small"
-																	color={statusChipColor}
-																	variant={item.status === "idle" ? "outlined" : "filled"}
-																/>
-
-																{item.status === "uploading" && (
-																	<IconButton
-																		size="small"
-																		color="warning"
-																		title="Pausar subida"
-																		onClick={() => handlePauseUpload(item)}
-																	>
-																		<PauseOutlinedIcon fontSize="small" />
-																	</IconButton>
-																)}
-
-																{(item.status === "paused" || item.status === "idle" || item.status === "error") && (
-																	<IconButton
-																		size="small"
-																		color="primary"
-																		title="Reanudar o Iniciar subida"
-																		onClick={() => {
-																			void handleStartUpload(item);
-																		}}
-																	>
-																		<PlayArrowOutlinedIcon fontSize="small" />
-																	</IconButton>
-																)}
-
-																<IconButton
-																	size="small"
-																	color="error"
-																	title="Cancelar y eliminar"
-																	onClick={() => {
-																		void handleRemoveItem(item);
-																	}}
-																>
-																	<DeleteOutlinedIcon fontSize="small" />
-																</IconButton>
-															</Stack>
-														</Stack>
-
-														{/* Barra de progreso */}
-														<Box sx={{ width: "100%" }}>
-															<LinearProgress
-																variant="determinate"
-																value={item.percentage}
-																color={item.status === "error" ? "error" : "primary"}
-																sx={{ height: 6, borderRadius: 3 }}
-															/>
-															<Stack direction="row" sx={{ justifyContent: "space-between", mt: 0.5 }}>
-																<Typography variant="caption" color="text.secondary">
-																	{formatBytes(item.bytesUploaded)} / {formatBytes(item.file.size)}
-																</Typography>
-																<Typography variant="caption" color="text.secondary">
-																	{item.percentage}%
-																</Typography>
-															</Stack>
-														</Box>
-
-														{item.errorMessage && (
-															<Typography variant="caption" color="error">
-																{item.errorMessage}
-															</Typography>
-														)}
-													</Stack>
-												</ListItem>
-											</React.Fragment>
-										);
-									})}
+									{items.map((item, idx) => (
+										<UploadItemRow
+											key={item.id}
+											item={item}
+											showDivider={idx > 0}
+											onPause={handlePauseUpload}
+											onStart={(it) => {
+												void handleStartUpload(it);
+											}}
+											onRemove={(it) => {
+												void handleRemoveItem(it);
+											}}
+										/>
+									))}
 								</List>
 							</Box>
 						)}

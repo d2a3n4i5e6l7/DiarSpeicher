@@ -52,8 +52,10 @@ public class DirectoryScanner : IDirectoryScanner
         var existingEmptySeries = ignoredEntries
             .Where(p => existingMap.ContainsKey(p));
 
+        var missingSeriesSet = new HashSet<string>(missingSeries, StringComparer.Ordinal);
+
         var candidatesToVisitOrAdd = validEntries
-            .Where(p => !missingSeries.Contains(p, StringComparer.Ordinal))
+            .Where(p => !missingSeriesSet.Contains(p))
             .Concat(existingEmptySeries)
             .Distinct(StringComparer.Ordinal);
 

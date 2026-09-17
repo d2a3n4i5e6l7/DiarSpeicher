@@ -40,7 +40,6 @@ export default function EpubProfilesTab({ profiles, onChange }: EpubProfilesTabP
 			...currentProfile,
 			...patch,
 			devicePattern: ".*",
-			autoHeight: false,
 			isDefault: true,
 		};
 		onChange([updated]);

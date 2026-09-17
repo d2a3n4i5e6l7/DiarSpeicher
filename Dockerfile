@@ -41,7 +41,7 @@ WORKDIR /app
 
 COPY --chown=1000:1000 --from=dotnet-builder /build/publish/ /app/
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN mkdir -p /data/db /data/thumbnails /data/cache/pages /data/manga_database /libraries \
+RUN mkdir -p /data/db /data/thumbnails /data/manga_database /libraries \
     && chown -R 1000:1000 /data \
     && chmod 1777 /tmp
 

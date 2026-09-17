@@ -55,23 +55,18 @@ builder.Services.Configure<LibraryRootsOptions>(builder.Configuration.GetSection
 builder.Services.Configure<TrashOptions>(builder.Configuration.GetSection(TrashOptions.SectionName));
 builder.Services.AddSingleton<ITrashService, TrashService>();
 builder.Services.AddHostedService<TrashPurgeService>();
+builder.Services.AddHostedService<PartialUploadPurgeService>();
 builder.Services.AddHostedService<ScanRecoveryService>();
 builder.Services.AddSingleton<IFolderIndex, FolderIndex>();
 builder.Services.AddHostedService<FolderIndexStartupService>();
 builder.Services.PostConfigure<StorageOptions>(ApplyUploadEnvironmentOverrides);
 builder.Services.AddOptions<MangaBakaOptions>().PostConfigure<IOptions<StorageOptions>>(ApplyMangaBakaStorageRoot);
-builder.Services.AddSingleton<IPageCache, DiskPageCache>();
-
 builder.Services.AddSingleton<IEpubProfileProvider, DiarSpeicher.Api.Services.HttpEpubProfileProvider>();
 builder.Services.AddSingleton<IBookProcessor, ZipBookProcessor>();
 builder.Services.AddSingleton<IBookProcessor, RarBookProcessor>();
 builder.Services.AddSingleton<IBookProcessor, EpubBookProcessor>();
 builder.Services.AddSingleton<IBookProcessor, PdfBookProcessor>();
-builder.Services.AddSingleton<CompositeBookProcessor>();
-
-builder.Services.AddSingleton<ICompositeBookProcessor>(sp => new CachingBookProcessor(
-    sp.GetRequiredService<CompositeBookProcessor>(),
-    sp.GetRequiredService<IPageCache>()));
+builder.Services.AddSingleton<ICompositeBookProcessor, CompositeBookProcessor>();
 
 builder.Services.AddSingleton<IThumbnailService, ThumbnailService>();
 
@@ -130,7 +125,6 @@ builder.Services
     .AddDataLoader<SeriesByIdDataLoader>()
     .AddDataLoader<LibraryByIdDataLoader>()
     .AddInMemorySubscriptions()
-    .AddUploadType()
     .AddFiltering()
     .AddSorting()
     .AddProjections()
@@ -198,7 +192,6 @@ static void EnsureDataDirectories(IServiceProvider services, string connectionSt
     {
         Path.GetFullPath(storage.RootPath),
         storage.ResolveThumbnailsPath(),
-        storage.ResolvePageCachePath(),
         storage.ResolveBackupPath(),
         storage.ResolveUploadsPath(),
         Path.Combine(Path.GetFullPath(storage.RootPath), "manga_database"),

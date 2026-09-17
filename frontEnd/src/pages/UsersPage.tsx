@@ -60,10 +60,6 @@ import {
 	type EpubDeviceProfile,
 } from "../api/endpoints";
 
-/**
- * Catalogo de respaldo por si GET /protocols no responde: sin el, el dialogo se
- * quedaria sin los interruptores de conexion y no se podria habilitar OPDS.
- */
 const FALLBACK_PROTOCOLS: ProtocolItem[] = [
 	{
 		id: PROTOCOL_API_KEY,
@@ -121,10 +117,6 @@ function serializePermissions(form: UserFormState): string {
 	return form.wildcard ? PERMISSION_WILDCARD : form.permissions.join(",");
 }
 
-/**
- * UserProtocols.Normalize del Gateway devuelve api_key cuando la lista queda vacia,
- * asi que mandarla vacia haria que la interfaz mostrase algo distinto a lo guardado.
- */
 function serializeProtocols(form: UserFormState): string {
 	return form.protocols.length > 0 ? form.protocols.join(",") : PROTOCOL_API_KEY;
 }
@@ -308,54 +300,44 @@ export default function UsersPage() {
 		}
 	};
 
-	const loadData = useCallback(async () => {
+	const loadData = useCallback(async (alive: () => boolean = () => true) => {
 		setLoading(true);
 		setError(null);
 		try {
 			const [userList, roleList] = await Promise.all([usersApi.list(), rolesApi.list()]);
-			setUsers(userList || []);
-			setRoles(roleList || []);
+			if (alive()) {
+				setUsers(userList || []);
+				setRoles(roleList || []);
+			}
 		} catch (err: unknown) {
-			setError(errorMessage(err, "Error cargando usuarios o roles."));
+			if (alive()) {
+				setError(errorMessage(err, "Error cargando usuarios o roles."));
+			}
 		} finally {
-			setLoading(false);
+			if (alive()) {
+				setLoading(false);
+			}
 		}
 	}, []);
 
 	useEffect(() => {
 		let isMounted = true;
 		const init = async () => {
-			try {
-				const [userList, roleList] = await Promise.all([usersApi.list(), rolesApi.list()]);
-				if (isMounted) {
-					setUsers(userList || []);
-					setRoles(roleList || []);
-				}
-			} catch (err: unknown) {
-				if (isMounted) {
-					setError(errorMessage(err, "Error cargando usuarios o roles."));
-				}
-			} finally {
-				if (isMounted) {
-					setLoading(false);
-				}
-			}
-
-			// El catalogo de protocolos es informativo: si falla, quedan los de respaldo.
+			await loadData(() => isMounted);
 			try {
 				const catalog = await usersApi.protocols();
 				if (isMounted && catalog?.protocols?.length) {
 					setProtocols(catalog.protocols);
 				}
 			} catch {
-				// Silencio deliberado: no es un error que el administrador deba resolver.
+				void 0;
 			}
 		};
 		void init();
 		return () => {
 			isMounted = false;
 		};
-	}, []);
+	}, [loadData]);
 
 	useEffect(() => {
 		if (!successMsg) return;
@@ -745,7 +727,6 @@ export default function UsersPage() {
 				{tableContent}
 			</Card>
 
-			{/* Modal: Crear Usuario */}
 			<Dialog open={openCreate} onClose={() => setOpenCreate(false)} maxWidth="sm" fullWidth>
 				<HudFrame />
 				<form
@@ -803,7 +784,6 @@ export default function UsersPage() {
 				</form>
 			</Dialog>
 
-			{/* Modal: Editar Usuario */}
 			<Dialog open={openEdit} onClose={() => setOpenEdit(false)} maxWidth="lg" fullWidth>
 				<HudFrame />
 				<form
@@ -845,7 +825,6 @@ export default function UsersPage() {
 				</form>
 			</Dialog>
 
-			{/* Modal: Cambiar Contraseña */}
 			<Dialog open={openPassword} onClose={() => setOpenPassword(false)} maxWidth="xs" fullWidth>
 				<HudFrame />
 				<form
@@ -877,7 +856,6 @@ export default function UsersPage() {
 				</form>
 			</Dialog>
 
-			{/* Modal: Confirmar Eliminación */}
 			<Dialog open={Boolean(deleteUser)} onClose={() => setDeleteUser(null)} maxWidth="xs" fullWidth>
 				<HudFrame />
 				<DialogTitle

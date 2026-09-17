@@ -51,44 +51,35 @@ async function toApiError(response: Response): Promise<ApiError> {
 	return new ApiError(response.status, message, body?.details ?? null);
 }
 
-export async function request<T>(path: string, init?: RequestInit, base: string = API_BASE): Promise<T> {
-	let response: Response;
-	const method = init?.method ?? "GET";
-	const fullPath = path.startsWith("http") || (base.length > 0 && path.startsWith(base)) ? path : `${base}${path}`;
-
-	let dpopHeaders: Partial<ClientProofHeaders> = {};
-	if (typeof window !== "undefined") {
-		try {
-			dpopHeaders = await signRequestProof(method, fullPath);
-		} catch {
-			dpopHeaders = {};
-		}
+function resolveFullPath(path: string, base: string): string {
+	if (path.startsWith("http")) {
+		return path;
 	}
+	if (base.length > 0 && path.startsWith(base)) {
+		return path;
+	}
+	return `${base}${path}`;
+}
 
+async function resolveDpopHeaders(method: string, fullPath: string): Promise<Partial<ClientProofHeaders>> {
+	if (typeof window === "undefined") {
+		return {};
+	}
 	try {
-		response = await fetch(fullPath, {
-			...init,
-			credentials: "include",
-			headers: {
-				Accept: "application/json",
-				...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-				...dpopHeaders,
-				...init?.headers,
-			},
-		});
-	} catch (cause) {
-		throw new ApiError(0, "No se pudo conectar con el servidor", String(cause));
+		return await signRequestProof(method, fullPath);
+	} catch {
+		return {};
 	}
+}
 
-	if (response.status === 401) {
-		unauthorizedHandler?.();
-		throw await toApiError(response);
+function handleFetchError(cause: unknown): never {
+	if ((cause instanceof DOMException || cause instanceof Error) && cause.name === "AbortError") {
+		throw cause;
 	}
+	throw new ApiError(0, "No se pudo conectar con el servidor", String(cause));
+}
 
-	if (!response.ok) {
-		throw await toApiError(response);
-	}
-
+async function parseResponseBody<T>(response: Response): Promise<T> {
 	if (response.status === 204 || response.headers.get("content-length") === "0") {
 		return undefined as T;
 	}
@@ -101,37 +92,111 @@ export async function request<T>(path: string, init?: RequestInit, base: string 
 	return JSON.parse(text) as T;
 }
 
+function buildRequestHeaders(init?: RequestInit, dpopHeaders: Partial<ClientProofHeaders> = {}): Headers {
+	const headers = new Headers(init?.headers);
+	headers.set("Accept", "application/json");
+	if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) {
+		headers.set("Content-Type", "application/json");
+	}
+	for (const [key, value] of Object.entries(dpopHeaders)) {
+		if (value) {
+			headers.set(key, value);
+		}
+	}
+	return headers;
+}
+
+export async function request<T>(path: string, init?: RequestInit, base: string = API_BASE): Promise<T> {
+	const method = init?.method ?? "GET";
+	const fullPath = resolveFullPath(path, base);
+	const dpopHeaders = await resolveDpopHeaders(method, fullPath);
+
+	let response: Response;
+	try {
+		response = await fetch(fullPath, {
+			...init,
+			credentials: "include",
+			headers: buildRequestHeaders(init, dpopHeaders),
+		});
+	} catch (cause) {
+		handleFetchError(cause);
+	}
+
+	if (response.status === 401) {
+		unauthorizedHandler?.();
+		throw await toApiError(response);
+	}
+
+	if (!response.ok) {
+		throw await toApiError(response);
+	}
+
+	return await parseResponseBody<T>(response);
+}
+
+export interface ClientOptions {
+	signal?: AbortSignal;
+}
+
 function makeClient(base: string) {
 	return {
-		get: <T>(path: string) => request<T>(path, undefined, base),
-		post: <T>(path: string, body?: unknown) =>
-			request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }, base),
-		put: <T>(path: string, body?: unknown) =>
-			request<T>(path, { method: "PUT", body: body === undefined ? undefined : JSON.stringify(body) }, base),
-		delete: <T>(path: string) => request<T>(path, { method: "DELETE" }, base),
-		upload: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }, base),
+		get: <T>(path: string, options?: ClientOptions) => request<T>(path, { signal: options?.signal }, base),
+		post: <T>(path: string, body?: unknown, options?: ClientOptions) =>
+			request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body), signal: options?.signal }, base),
+		put: <T>(path: string, body?: unknown, options?: ClientOptions) =>
+			request<T>(path, { method: "PUT", body: body === undefined ? undefined : JSON.stringify(body), signal: options?.signal }, base),
+		delete: <T>(path: string, options?: ClientOptions) => request<T>(path, { method: "DELETE", signal: options?.signal }, base),
+		upload: <T>(path: string, form: FormData, options?: ClientOptions) => request<T>(path, { method: "POST", body: form, signal: options?.signal }, base),
 	};
+}
+
+async function readAllChunks(
+	reader: ReadableStreamDefaultReader<Uint8Array>,
+	contentLength: number,
+	onProgress?: (loaded: number, total: number) => void,
+	signal?: AbortSignal
+): Promise<ArrayBuffer> {
+	const chunks: Uint8Array[] = [];
+	let loaded = 0;
+
+	while (true) {
+		if (signal?.aborted) {
+			await reader.cancel().catch(() => undefined);
+			throw new DOMException("The user aborted a request.", "AbortError");
+		}
+		const { done, value } = await reader.read();
+		if (done) {
+			break;
+		}
+		if (value) {
+			chunks.push(value);
+			loaded += value.length;
+			onProgress?.(loaded, contentLength);
+		}
+	}
+
+	const allChunks = new Uint8Array(loaded);
+	let position = 0;
+	for (const chunk of chunks) {
+		allChunks.set(chunk, position);
+		position += chunk.length;
+	}
+	return allChunks.buffer;
 }
 
 export async function downloadBinary(
 	path: string,
-	onProgress?: (loaded: number, total: number) => void
+	onProgress?: (loaded: number, total: number) => void,
+	signal?: AbortSignal
 ): Promise<ArrayBuffer> {
 	const method = "GET";
-	const fullPath = path.startsWith("http") || (API_BASE.length > 0 && path.startsWith(API_BASE)) ? path : `${API_BASE}${path}`;
-
-	let dpopHeaders: Partial<ClientProofHeaders> = {};
-	if (typeof window !== "undefined") {
-		try {
-			dpopHeaders = await signRequestProof(method, fullPath);
-		} catch {
-			dpopHeaders = {};
-		}
-	}
+	const fullPath = resolveFullPath(path, API_BASE);
+	const dpopHeaders = await resolveDpopHeaders(method, fullPath);
 
 	const response = await fetch(fullPath, {
 		method,
 		credentials: "include",
+		signal,
 		headers: {
 			...dpopHeaders,
 		},
@@ -151,27 +216,7 @@ export async function downloadBinary(
 		return await response.arrayBuffer();
 	}
 
-	const reader = response.body.getReader();
-	const chunks: Uint8Array[] = [];
-	let loaded = 0;
-
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		if (value) {
-			chunks.push(value);
-			loaded += value.length;
-			onProgress(loaded, contentLength);
-		}
-	}
-
-	const allChunks = new Uint8Array(loaded);
-	let position = 0;
-	for (const chunk of chunks) {
-		allChunks.set(chunk, position);
-		position += chunk.length;
-	}
-	return allChunks.buffer;
+	return await readAllChunks(response.body.getReader(), contentLength, onProgress, signal);
 }
 
 export const http = makeClient(API_BASE);

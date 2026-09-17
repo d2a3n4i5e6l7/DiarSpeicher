@@ -25,7 +25,7 @@ public static class ArchiveEntryReader
     public static async Task<ExtractedPage> ReadAsync(ArchiveEntryRef entry, CancellationToken ct)
     {
         await using var stream = await entry.OpenAsync(ct);
-        using var ms = new MemoryStream();
+        using var ms = new MemoryStream(entry.Size is > 0 and < int.MaxValue ? (int)entry.Size : 0);
         await stream.CopyToAsync(ms, ct);
 
         var contentType = ContentTypeExtensions.FromExtension(Path.GetExtension(entry.Name));

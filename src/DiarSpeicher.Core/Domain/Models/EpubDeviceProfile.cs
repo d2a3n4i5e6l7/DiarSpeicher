@@ -9,7 +9,6 @@ public class EpubDeviceProfile
     public string DevicePattern { get; set; } = "CDisplayEx|Android|Mobile|iPhone";
     public int Width { get; set; } = 1080;
     public int Height { get; set; } = 2400;
-    public bool AutoHeight { get; set; } = true;
     public int FontSize { get; set; } = 32;
     public float LineHeight { get; set; } = 1.6f;
     public string FontFamily { get; set; } = DefaultFontFamily;
@@ -27,7 +26,6 @@ public class EpubDeviceProfile
             DevicePattern = "CDisplayEx|Android|Mobile|iPhone",
             Width = 1080,
             Height = 2400,
-            AutoHeight = true,
             FontSize = 32,
             LineHeight = 1.6f,
             FontFamily = DefaultFontFamily,
@@ -43,7 +41,6 @@ public class EpubDeviceProfile
             DevicePattern = "iPad|Tablet",
             Width = 1600,
             Height = 2560,
-            AutoHeight = true,
             FontSize = 38,
             LineHeight = 1.6f,
             FontFamily = DefaultFontFamily,
@@ -59,7 +56,6 @@ public class EpubDeviceProfile
             DevicePattern = "Windows|Macintosh|X11",
             Width = 1920,
             Height = 1080,
-            AutoHeight = false,
             FontSize = 28,
             LineHeight = 1.5f,
             FontFamily = DefaultFontFamily,

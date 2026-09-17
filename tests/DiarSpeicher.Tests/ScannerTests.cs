@@ -12,7 +12,7 @@ using Xunit;
 
 namespace DiarSpeicher.Tests;
 
-public class ScannerTests : IDisposable
+public sealed class ScannerTests : IDisposable
 {
     private readonly string _tempRootDir;
 

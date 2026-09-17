@@ -55,7 +55,7 @@ public sealed class FrontCoverTests : IDisposable
         var path = Path.Combine(_dir, "declared.cbz");
         WriteCbz(path, frontCoverIndex: 2);
 
-        var result = await new ZipBookProcessor().AnalyzeBookAsync(path, includeCover: true);
+        var result = await new ZipBookProcessor().AnalyzeBookAsync(path, new BookAnalysisOptions { IncludeCover = true });
 
         Assert.Equal(4, result.Pages);
         Assert.Equal(2, result.Metadata?.FrontCoverIndex);
@@ -68,7 +68,7 @@ public sealed class FrontCoverTests : IDisposable
         var path = Path.Combine(_dir, "undeclared.cbz");
         WriteCbz(path, frontCoverIndex: null);
 
-        var result = await new ZipBookProcessor().AnalyzeBookAsync(path, includeCover: true);
+        var result = await new ZipBookProcessor().AnalyzeBookAsync(path, new BookAnalysisOptions { IncludeCover = true });
 
         Assert.Null(result.Metadata?.FrontCoverIndex);
         Assert.Equal("PAGE0", Marker(result.Cover!.Data));
@@ -80,7 +80,7 @@ public sealed class FrontCoverTests : IDisposable
         var path = Path.Combine(_dir, "outofrange.cbz");
         WriteCbz(path, frontCoverIndex: 99);
 
-        var result = await new ZipBookProcessor().AnalyzeBookAsync(path, includeCover: true);
+        var result = await new ZipBookProcessor().AnalyzeBookAsync(path, new BookAnalysisOptions { IncludeCover = true });
 
         Assert.Equal("PAGE0", Marker(result.Cover!.Data));
     }

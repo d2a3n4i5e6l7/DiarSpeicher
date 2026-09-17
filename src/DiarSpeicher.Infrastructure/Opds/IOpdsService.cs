@@ -1,5 +1,11 @@
 namespace DiarSpeicher.Infrastructure.Opds;
 
+public enum PageRequestKind
+{
+    Reading,
+    Cover
+}
+
 public interface IOpdsService
 {
     Task<string> GetCatalogXmlAsync(AuthUser user, string? apiKey, CancellationToken ct = default);
@@ -13,7 +19,7 @@ public interface IOpdsService
     Task<string> GetSeriesBooksFeedAsync(AuthUser user, string seriesId, int page, string? apiKey, CancellationToken ct = default);
     Task<string> GetBooksFeedAsync(AuthUser user, string? search, int page, string? apiKey, CancellationToken ct = default);
     Task<string> GetLatestBooksFeedAsync(AuthUser user, int page, string? apiKey, CancellationToken ct = default);
-    Task<(ExtractedPage? Page, Media? Media)> GetBookPageAsync(AuthUser user, string bookId, int pageNumber, bool zeroBased, bool trackProgression = true, CancellationToken ct = default);
+    Task<(ExtractedPage? Page, Media? Media)> GetBookPageAsync(AuthUser user, string bookId, int pageNumber, PageRequestKind kind = PageRequestKind.Reading, CancellationToken ct = default);
     Task<Media?> GetMediaForDownloadAsync(AuthUser user, string bookId, CancellationToken ct = default);
     Task<(byte[]? Data, string ContentType)> GetBookThumbnailAsync(AuthUser user, string bookId, CancellationToken ct = default);
 }

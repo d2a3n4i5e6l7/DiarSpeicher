@@ -755,15 +755,6 @@ export const DS = {
 	glowRedLift: RED_GLOW_LIFT,
 } as const;
 
-/** El lector no tiene modo dia: la pagina ya es lo mas claro de la pantalla y
- *  rodearla de porcelana la haria flotar. Su marco se queda oscuro siempre. */
-export const READER_CHROME = {
-	bg: "#000000",
-	surface: "#0D0F14",
-	border: "#282C38",
-	text: "#F0F2F6",
-	muted: "#8E95A5",
-} as const;
 
 export function buildTheme(mode: PaletteMode): Theme {
 	return createTheme({

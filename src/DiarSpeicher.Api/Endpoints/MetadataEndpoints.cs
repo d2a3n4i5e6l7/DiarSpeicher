@@ -253,7 +253,8 @@ public static class MetadataEndpoints
         MetadataImportCompleteRequest request,
         HttpContext httpContext,
         [FromServices] IMangaBakaIngestService ingest,
-        [FromServices] IOptions<MangaBakaOptions> options)
+        [FromServices] IOptions<MangaBakaOptions> options,
+        [FromServices] ILoggerFactory loggerFactory)
     {
         if (!IsAllowed(httpContext)) return Forbidden();
 
@@ -271,6 +272,19 @@ public static class MetadataEndpoints
         }
 
         var outcome = ingest.TryStartImportFile(partPath, fileName);
+        if (outcome != MangaBakaIngestOutcome.Started)
+        {
+            var logger = loggerFactory.CreateLogger("MetadataImport");
+            try
+            {
+                File.Delete(partPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                logger.LogWarning(ex, "La subida {UploadId} no arranco ({Outcome}) y su parcial {Path} sigue en disco", request.UploadId, outcome, partPath);
+            }
+        }
+
         return ToResult(outcome, ingest);
     }
 

@@ -47,6 +47,16 @@ export default function ReaderPage() {
 	const [panelOpen, setPanelOpen] = useState(false);
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [sliderValue, setSliderValue] = useState(1);
+	const [debouncedSliderValue, setDebouncedSliderValue] = useState(1);
+
+	useEffect(() => {
+		const timer = window.setTimeout(() => {
+			setDebouncedSliderValue(sliderValue);
+		}, 150);
+		return () => {
+			window.clearTimeout(timer);
+		};
+	}, [sliderValue]);
 
 	const fresh = loaded?.key === mediaId ? loaded : null;
 	const loading = fresh === null;
@@ -57,13 +67,7 @@ export default function ReaderPage() {
 	const step = settings.mode === "Double" ? 2 : 1;
 	const rtl = settings.direction === "RightToLeft";
 
-	/**
-	 * Refleja la página sobre la barra. Leyendo de derecha a izquierda la página 1 esta a la
-	 * derecha, y MUI no invierte el Slider por la propiedad CSS `direction`: coloca el pulgar
-	 * calculando un porcentaje desde la izquierda. Se invierte el valor, que ademas mantiene
-	 * el arrastre coherente con lo que se ve.
-	 */
-	const mirrorPage = (value: number) => (rtl ? Math.max(1, totalPages) + 1 - value : value);
+
 
 	// Proporción real de cada página ya cargada. Sin endpoint que exponga `MediaPages`,
 	// se aprende de las imágenes que ya llegaron y se reserva el hueco con la última
@@ -216,42 +220,7 @@ export default function ReaderPage() {
 		return () => document.removeEventListener("fullscreenchange", onChange);
 	}, []);
 
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			// En derecha-a-izquierda las flechas se invierten: la izquierda avanza.
-			switch (e.key) {
-				case "ArrowRight":
-					if (rtl) goPrev();
-					else goNext();
-					break;
-				case "ArrowLeft":
-					if (rtl) goNext();
-					else goPrev();
-					break;
-				case " ":
-				case "PageDown":
-					e.preventDefault();
-					goNext();
-					break;
-				case "PageUp":
-					e.preventDefault();
-					goPrev();
-					break;
-				case "f":
-				case "F":
-					toggleFullscreen();
-					break;
-				case "Escape":
-					if (!document.fullscreenElement) exit();
-					break;
-				default:
-					break;
-			}
-		};
-
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, [goNext, goPrev, rtl, toggleFullscreen, exit]);
+	useReaderKeyboard({ rtl, goNext, goPrev, toggleFullscreen, exit });
 
 	const onTouchStart = (e: React.TouchEvent) => {
 		const t = e.touches[0];
@@ -412,11 +381,26 @@ export default function ReaderPage() {
 	if (settings.mode === "ContinuousVertical") {
 		canvas = (
 			<Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0.5, width: "100%" }}>
-				{Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-					<Box key={`strip-${String(n)}`} data-page={n} sx={{ width: "100%", maxWidth: 1000 }}>
-						{renderPage(n, `img-${String(n)}`)}
-					</Box>
-				))}
+				{Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => {
+					const inWindow = Math.abs(n - page) <= 5;
+					const ratio = ratios[n] ?? lastRatio;
+					return (
+						<Box
+							key={`strip-${String(n)}`}
+							data-page={n}
+							sx={{
+								width: "100%",
+								maxWidth: 1000,
+								aspectRatio: String(ratio),
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "center",
+							}}
+						>
+							{inWindow ? renderPage(n, `img-${String(n)}`) : null}
+						</Box>
+					);
+				})}
 			</Box>
 		);
 	} else if (settings.mode === "Double") {
@@ -476,141 +460,31 @@ export default function ReaderPage() {
 				</>
 			)}
 
-			{/* Barra superior */}
-			<Box
-				sx={{
-					position: "absolute",
-					top: 0,
-					left: 0,
-					right: 0,
-					display: "flex",
-					alignItems: "center",
-					gap: 1.5,
-					px: 2,
-					py: 1.25,
-					background: "linear-gradient(180deg, rgba(5, 5, 8, 0.95) 0%, transparent 100%)",
-					borderBottom: `1px solid ${DS.border}`,
-					opacity: uiVisible ? 1 : 0,
-					transform: uiVisible ? "translateY(0)" : "translateY(-100%)",
-					transition: "opacity 0.25s ease, transform 0.25s ease",
-					pointerEvents: uiVisible ? "auto" : "none",
-					zIndex: 10,
-				}}
-			>
-				<Tooltip title="Salir del lector">
-					<IconButton onClick={exit} sx={{ color: DS.muted, "&:hover": { color: DS.redGlow } }}>
-						<CloseIcon fontSize="small" />
-					</IconButton>
-				</Tooltip>
+			<ReaderTopBar
+				visible={uiVisible}
+				title={mediaTitle(media)}
+				page={page}
+				totalPages={totalPages}
+				isFullscreen={isFullscreen}
+				onExit={exit}
+				onToggleFullscreen={toggleFullscreen}
+				onOpenSettings={() => setPanelOpen(true)}
+			/>
 
-				<Typography
-					sx={{
-						flexGrow: 1,
-						minWidth: 0,
-						fontFamily: "'Rajdhani', sans-serif",
-						fontSize: "15px",
-						fontWeight: 700,
-						letterSpacing: "1px",
-						textTransform: "uppercase",
-						color: "#FFFFFF",
-						overflow: "hidden",
-						textOverflow: "ellipsis",
-						whiteSpace: "nowrap",
-					}}
-				>
-					{mediaTitle(media)}
-				</Typography>
-
-				<Box component="span" className="ds-pill-mono">
-					{String(page).padStart(3, "0")} / {String(totalPages).padStart(3, "0")}
-				</Box>
-
-				<Tooltip title={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}>
-					<IconButton onClick={toggleFullscreen} sx={{ color: DS.muted, "&:hover": { color: "#FFFFFF" } }}>
-						{isFullscreen ? <FullscreenExitIcon fontSize="small" /> : <FullscreenIcon fontSize="small" />}
-					</IconButton>
-				</Tooltip>
-
-				<Tooltip title="Ajustes del lector">
-					<IconButton onClick={() => setPanelOpen(true)} sx={{ color: DS.muted, "&:hover": { color: "#FFFFFF" } }}>
-						<SettingsIcon fontSize="small" />
-					</IconButton>
-				</Tooltip>
-			</Box>
-
-			{/* Barra inferior: salto directo con miniatura de la página apuntada */}
-			<Box
-				sx={{
-					position: "absolute",
-					bottom: 0,
-					left: 0,
-					right: 0,
-					px: 3,
-					py: 1.5,
-					background: "linear-gradient(0deg, rgba(5, 5, 8, 0.95) 0%, transparent 100%)",
-					borderTop: `1px solid ${DS.border}`,
-					opacity: uiVisible ? 1 : 0,
-					transform: uiVisible ? "translateY(0)" : "translateY(100%)",
-					transition: "opacity 0.25s ease, transform 0.25s ease",
-					pointerEvents: uiVisible ? "auto" : "none",
-					zIndex: 10,
-				}}
-			>
-				<Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-					<IconButton
-						onClick={() => (rtl ? goNext() : goPrev())}
-						disabled={rtl ? page >= totalPages : page <= 1}
-						sx={{ color: DS.muted }}
-					>
-						<ChevronLeftIcon />
-					</IconButton>
-
-					<Box sx={{ flexGrow: 1, position: "relative" }}>
-						{sliderValue !== page && (
-							<Box
-								sx={{
-									position: "absolute",
-									bottom: 28,
-									left: `${String(((mirrorPage(sliderValue) - 1) / Math.max(1, totalPages - 1)) * 100)}%`,
-									transform: "translateX(-50%)",
-									width: 80,
-									border: `1px solid ${DS.red}`,
-									backgroundColor: DS.bgSunken,
-									pointerEvents: "none",
-								}}
-							>
-								<Box
-									component="img"
-									src={mediaApi.pageUrl(media.id, sliderValue)}
-									alt=""
-									sx={{ width: "100%", display: "block", aspectRatio: String(lastRatio), objectFit: "cover" }}
-								/>
-							</Box>
-						)}
-
-						<Slider
-							value={mirrorPage(sliderValue)}
-							min={1}
-							max={Math.max(1, totalPages)}
-							onChange={(_, value) => setSliderValue(mirrorPage(value))}
-							onChangeCommitted={(_, value) => goTo(mirrorPage(value))}
-							sx={{
-								color: DS.red,
-								"& .MuiSlider-thumb": { borderRadius: 0, width: 10, height: 18 },
-								"& .MuiSlider-rail": { backgroundColor: DS.border },
-							}}
-						/>
-					</Box>
-
-					<IconButton
-						onClick={() => (rtl ? goPrev() : goNext())}
-						disabled={rtl ? page <= 1 : page >= totalPages}
-						sx={{ color: DS.muted }}
-					>
-						<ChevronRightIcon />
-					</IconButton>
-				</Box>
-			</Box>
+			<ReaderBottomBar
+				visible={uiVisible}
+				page={page}
+				totalPages={totalPages}
+				sliderValue={sliderValue}
+				debouncedSliderValue={debouncedSliderValue}
+				mediaId={media.id}
+				lastRatio={lastRatio}
+				rtl={rtl}
+				onSliderChange={setSliderValue}
+				onSliderCommit={goTo}
+				onPrev={goPrev}
+				onNext={goNext}
+			/>
 
 			<ReaderSettingsPanel
 				open={panelOpen}
@@ -618,6 +492,233 @@ export default function ReaderPage() {
 				settings={settings}
 				onChange={updateSettings}
 			/>
+		</Box>
+	);
+}
+
+function useReaderKeyboard({
+	rtl,
+	goNext,
+	goPrev,
+	toggleFullscreen,
+	exit,
+}: {
+	rtl: boolean;
+	goNext: () => void;
+	goPrev: () => void;
+	toggleFullscreen: () => void;
+	exit: () => void;
+}) {
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === "ArrowRight") {
+				if (rtl) goPrev();
+				else goNext();
+			} else if (e.key === "ArrowLeft") {
+				if (rtl) goNext();
+				else goPrev();
+			} else if (e.key === " " || e.key === "PageDown") {
+				e.preventDefault();
+				goNext();
+			} else if (e.key === "PageUp") {
+				e.preventDefault();
+				goPrev();
+			} else if (e.key === "f" || e.key === "F") {
+				toggleFullscreen();
+			} else if (e.key === "Escape" && !document.fullscreenElement) {
+				exit();
+			}
+		};
+
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [goNext, goPrev, rtl, toggleFullscreen, exit]);
+}
+
+function ReaderTopBar({
+	visible,
+	title,
+	page,
+	totalPages,
+	isFullscreen,
+	onExit,
+	onToggleFullscreen,
+	onOpenSettings,
+}: Readonly<{
+	visible: boolean;
+	title: string;
+	page: number;
+	totalPages: number;
+	isFullscreen: boolean;
+	onExit: () => void;
+	onToggleFullscreen: () => void;
+	onOpenSettings: () => void;
+}>) {
+	return (
+		<Box
+			sx={{
+				position: "absolute",
+				top: 0,
+				left: 0,
+				right: 0,
+				display: "flex",
+				alignItems: "center",
+				gap: 1.5,
+				px: 2,
+				py: 1.25,
+				background: "linear-gradient(180deg, rgba(5, 5, 8, 0.95) 0%, transparent 100%)",
+				borderBottom: `1px solid ${DS.border}`,
+				opacity: visible ? 1 : 0,
+				transform: visible ? "translateY(0)" : "translateY(-100%)",
+				transition: "opacity 0.25s ease, transform 0.25s ease",
+				pointerEvents: visible ? "auto" : "none",
+				zIndex: 10,
+			}}
+		>
+			<Tooltip title="Salir del lector">
+				<IconButton onClick={onExit} sx={{ color: DS.muted, "&:hover": { color: DS.redGlow } }}>
+					<CloseIcon fontSize="small" />
+				</IconButton>
+			</Tooltip>
+
+			<Typography
+				sx={{
+					flexGrow: 1,
+					minWidth: 0,
+					fontFamily: "'Rajdhani', sans-serif",
+					fontSize: "15px",
+					fontWeight: 700,
+					letterSpacing: "1px",
+					textTransform: "uppercase",
+					color: "#FFFFFF",
+					overflow: "hidden",
+					textOverflow: "ellipsis",
+					whiteSpace: "nowrap",
+				}}
+			>
+				{title}
+			</Typography>
+
+			<Box component="span" className="ds-pill-mono">
+				{String(page).padStart(3, "0")} / {String(totalPages).padStart(3, "0")}
+			</Box>
+
+			<Tooltip title={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}>
+				<IconButton onClick={onToggleFullscreen} sx={{ color: DS.muted, "&:hover": { color: "#FFFFFF" } }}>
+					{isFullscreen ? <FullscreenExitIcon fontSize="small" /> : <FullscreenIcon fontSize="small" />}
+				</IconButton>
+			</Tooltip>
+
+			<Tooltip title="Ajustes del lector">
+				<IconButton onClick={onOpenSettings} sx={{ color: DS.muted, "&:hover": { color: "#FFFFFF" } }}>
+					<SettingsIcon fontSize="small" />
+				</IconButton>
+			</Tooltip>
+		</Box>
+	);
+}
+
+function ReaderBottomBar({
+	visible,
+	page,
+	totalPages,
+	sliderValue,
+	debouncedSliderValue,
+	mediaId,
+	lastRatio,
+	rtl,
+	onSliderChange,
+	onSliderCommit,
+	onPrev,
+	onNext,
+}: Readonly<{
+	visible: boolean;
+	page: number;
+	totalPages: number;
+	sliderValue: number;
+	debouncedSliderValue: number;
+	mediaId: string;
+	lastRatio: number;
+	rtl: boolean;
+	onSliderChange: (val: number) => void;
+	onSliderCommit: (val: number) => void;
+	onPrev: () => void;
+	onNext: () => void;
+}>) {
+	const mirrorPage = (value: number) => (rtl ? Math.max(1, totalPages) + 1 - value : value);
+
+	return (
+		<Box
+			sx={{
+				position: "absolute",
+				bottom: 0,
+				left: 0,
+				right: 0,
+				px: 3,
+				py: 1.5,
+				background: "linear-gradient(0deg, rgba(5, 5, 8, 0.95) 0%, transparent 100%)",
+				borderTop: `1px solid ${DS.border}`,
+				opacity: visible ? 1 : 0,
+				transform: visible ? "translateY(0)" : "translateY(100%)",
+				transition: "opacity 0.25s ease, transform 0.25s ease",
+				pointerEvents: visible ? "auto" : "none",
+				zIndex: 10,
+			}}
+		>
+			<Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+				<IconButton
+					onClick={() => (rtl ? onNext() : onPrev())}
+					disabled={rtl ? page >= totalPages : page <= 1}
+					sx={{ color: DS.muted }}
+				>
+					<ChevronLeftIcon />
+				</IconButton>
+
+				<Box sx={{ flexGrow: 1, position: "relative" }}>
+					{sliderValue !== page && (
+						<Box
+							sx={{
+								position: "absolute",
+								bottom: 28,
+								left: `${String(((mirrorPage(sliderValue) - 1) / Math.max(1, totalPages - 1)) * 100)}%`,
+								transform: "translateX(-50%)",
+								width: 80,
+								border: `1px solid ${DS.red}`,
+								backgroundColor: DS.bgSunken,
+								pointerEvents: "none",
+							}}
+						>
+							<Box
+								component="img"
+								src={mediaApi.pageUrl(mediaId, debouncedSliderValue)}
+								alt=""
+								sx={{ width: "100%", display: "block", aspectRatio: String(lastRatio), objectFit: "cover" }}
+							/>
+						</Box>
+					)}
+
+					<Slider
+						value={mirrorPage(sliderValue)}
+						min={1}
+						max={Math.max(1, totalPages)}
+						onChange={(_, value) => onSliderChange(mirrorPage(value))}
+						onChangeCommitted={(_, value) => onSliderCommit(mirrorPage(value))}
+						sx={{
+							color: DS.red,
+							"& .MuiSlider-thumb": { borderRadius: 0, width: 10, height: 18 },
+							"& .MuiSlider-rail": { backgroundColor: DS.border },
+						}}
+					/>
+				</Box>
+
+				<IconButton
+					onClick={() => (rtl ? onPrev() : onNext())}
+					disabled={rtl ? page <= 1 : page >= totalPages}
+					sx={{ color: DS.muted }}
+				>
+					<ChevronRightIcon />
+				</IconButton>
+			</Box>
 		</Box>
 	);
 }

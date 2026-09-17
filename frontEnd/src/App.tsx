@@ -1,5 +1,5 @@
 import { Box, CircularProgress, CssBaseline, ThemeProvider, type PaletteMode } from "@mui/material";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { buildTheme } from "./theme";
 import { ColorModeContext } from "./theme/ColorModeContext";
@@ -9,18 +9,32 @@ import { onUnauthorized } from "./api/client";
 import { getPublicKeyBase64, resetKeyPair } from "./auth/dpop";
 import LoginPage from "./pages/LoginPage";
 import AppLayout from "./layout/AppLayout";
-import UsersPage from "./pages/UsersPage";
-import RolesPage from "./pages/RolesPage";
-import LibrariesPage from "./pages/LibrariesPage";
 import HomePage from "./pages/HomePage";
 import SeriesGridPage from "./pages/SeriesGridPage";
 import SeriesDetailPage from "./pages/SeriesDetailPage";
 import MediaDetailPage from "./pages/MediaDetailPage";
-import LibraryDetailPage from "./pages/LibraryDetailPage";
-import MetadataPage from "./pages/MetadataPage";
-import TrashPage from "./pages/TrashPage";
-import ReaderPage from "./pages/ReaderPage";
 import { LibraryFilterContext, LIBRARY_FILTER_KEY } from "./catalog/LibraryFilterContext";
+
+const UsersPage = lazy(() => import("./pages/UsersPage"));
+const RolesPage = lazy(() => import("./pages/RolesPage"));
+const LibrariesPage = lazy(() => import("./pages/LibrariesPage"));
+const LibraryDetailPage = lazy(() => import("./pages/LibraryDetailPage"));
+const MetadataPage = lazy(() => import("./pages/MetadataPage"));
+const TrashPage = lazy(() => import("./pages/TrashPage"));
+const ReaderPage = lazy(() => import("./pages/ReaderPage"));
+
+const SuspenseFallback = (
+	<Box
+		sx={{
+			minHeight: "60vh",
+			display: "flex",
+			alignItems: "center",
+			justifyContent: "center",
+		}}
+	>
+		<CircularProgress />
+	</Box>
+);
 
 const THEME_KEY = "diarspeicher-theme-mode";
 
@@ -53,7 +67,7 @@ export default function App() {
 				localStorage.setItem(LIBRARY_FILTER_KEY, next);
 			}
 		} catch {
-			/* sin almacenamiento el filtro dura lo que la sesión */
+			void 0;
 		}
 	}, []);
 
@@ -63,7 +77,7 @@ export default function App() {
 			try {
 				localStorage.setItem(THEME_KEY, next);
 			} catch {
-				/* storage error */
+				void 0;
 			}
 			return next;
 		});
@@ -139,12 +153,12 @@ export default function App() {
 		try {
 			await authApi.logout();
 		} catch {
-			/* ignore logout api error */
+			void 0;
 		} finally {
 			try {
 				await resetKeyPair();
 			} catch {
-				/* ignore key reset error */
+				void 0;
 			}
 			setUser(null);
 		}
@@ -199,23 +213,24 @@ export default function App() {
 		mainContent = <LoginPage />;
 	} else {
 		mainContent = (
-			<Routes>
-				{/* El lector vive fuera de AppLayout: sin drawer ni barra superior. */}
-				<Route path="/read/:mediaId" element={<ReaderPage />} />
-				<Route element={<AppLayout />}>
-					<Route index element={<HomePage />} />
-					<Route path="/series" element={<SeriesGridPage />} />
-					<Route path="/series/:id" element={<SeriesDetailPage />} />
-					<Route path="/media/:id" element={<MediaDetailPage />} />
-					<Route path="/users" element={<UsersPage />} />
-					<Route path="/roles" element={<RolesPage />} />
-					<Route path="/metadata" element={<MetadataPage />} />
-					<Route path="/trash" element={<TrashPage />} />
-					<Route path="/libraries" element={<LibrariesPage />} />
-					<Route path="/libraries/:id" element={<LibraryDetailPage />} />
-					<Route path="*" element={<Navigate to="/" replace />} />
-				</Route>
-			</Routes>
+			<Suspense fallback={SuspenseFallback}>
+				<Routes>
+					<Route path="/read/:mediaId" element={<ReaderPage />} />
+					<Route element={<AppLayout />}>
+						<Route index element={<HomePage />} />
+						<Route path="/series" element={<SeriesGridPage />} />
+						<Route path="/series/:id" element={<SeriesDetailPage />} />
+						<Route path="/media/:id" element={<MediaDetailPage />} />
+						<Route path="/users" element={<UsersPage />} />
+						<Route path="/roles" element={<RolesPage />} />
+						<Route path="/metadata" element={<MetadataPage />} />
+						<Route path="/trash" element={<TrashPage />} />
+						<Route path="/libraries" element={<LibrariesPage />} />
+						<Route path="/libraries/:id" element={<LibraryDetailPage />} />
+						<Route path="*" element={<Navigate to="/" replace />} />
+					</Route>
+				</Routes>
+			</Suspense>
 		);
 	}
 

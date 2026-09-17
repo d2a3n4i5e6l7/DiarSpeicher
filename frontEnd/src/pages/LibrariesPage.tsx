@@ -5,7 +5,6 @@ import {
 	Button,
 	Card,
 	CardContent,
-	Chip,
 	FormControlLabel,
 	Switch,
 	CircularProgress,
@@ -17,7 +16,6 @@ import {
 	IconButton,
 	LinearProgress,
 	Stack,
-	TextField,
 	Tooltip,
 	Typography,
 } from "@mui/material";
@@ -45,15 +43,11 @@ import { filterAndSortLibraries, LIBRARY_SORTS } from "../catalog/sorting";
 import {
 	filesystemApi,
 	librariesApi,
-	DEFAULT_LIBRARY_CONFIG,
 	type FolderEntry,
-	type LibraryConfig,
 	type LibraryItem,
-	type ScanPreview as ScanPreviewData,
 	type ScanStatus,
 } from "../api/endpoints";
-import LibraryConfigForm from "../components/LibraryConfigForm";
-import FolderPickerDialog from "../components/FolderPickerDialog";
+import LibraryFormDialog from "../components/LibraryFormDialog";
 import UploadPanel from "../components/UploadPanel";
 import DeleteScopeNotice from "../components/DeleteScopeNotice";
 import { scanLabel, formatDuration } from "../catalog/useScanProgress";
@@ -77,13 +71,17 @@ function formatDate(iso: string | null | undefined): string {
 	}
 }
 
+function filterActiveScanningIds(scanningIds: string[], scans: ScanStatus[]): string[] {
+	const activeSet = new Set(scans.map((s) => s.libraryId));
+	return scanningIds.filter((id) => activeSet.has(id));
+}
+
 export default function LibrariesPage() {
 	const [libraries, setLibraries] = useState<LibraryItem[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 
-	// Los avisos se van solos: se quedaban en pantalla hasta recargar la pagina.
 	useEffect(() => {
 		if (!notice) return;
 
@@ -103,19 +101,10 @@ export default function LibrariesPage() {
 
 	const [editing, setEditing] = useState<LibraryItem | null>(null);
 	const [formOpen, setFormOpen] = useState(false);
-	const [name, setName] = useState("");
-	const [path, setPath] = useState("");
-	const [pickerOpen, setPickerOpen] = useState(false);
-	const [previewPath, setPreviewPath] = useState("");
-	const [formError, setFormError] = useState<string | null>(null);
 	const [activeScans, setActiveScans] = useState<ScanStatus[]>([]);
-	// Apagado siempre al abrir: un borrado del disco no se hereda del intento anterior.
 	const [deleteFiles, setDeleteFiles] = useState(false);
 	const [uploadTarget, setUploadTarget] = useState<{ library: LibraryItem; subpath: string } | null>(null);
 	const [expanded, setExpanded] = useState<string | null>(null);
-	const [description, setDescription] = useState("");
-	const [emoji, setEmoji] = useState("");
-	const [config, setConfig] = useState<LibraryConfig>(DEFAULT_LIBRARY_CONFIG);
 	const [saving, setSaving] = useState(false);
 	const [pendingDelete, setPendingDelete] = useState<LibraryItem | null>(null);
 
@@ -124,17 +113,13 @@ export default function LibrariesPage() {
 	const load = useCallback(async (silent = false) => {
 		if (!silent) setLoading(true);
 		try {
-			// La cola viaja aparte de la lista: el estado de la biblioteca no distingue
-			// "escaneando" de "esperando turno", y la cola tiene un solo lector.
 			const [list, scans] = await Promise.all([
 				librariesApi.list(),
 				librariesApi.activeScans().catch(() => [] as ScanStatus[]),
 			]);
 			setLibraries(list ?? []);
 			setActiveScans(scans);
-			// Un escaneo diminuto termina antes del primer sondeo: el id se suelta cuando ya
-			// no aparece en la cola del servidor, no con un temporizador a ojo.
-			setScanningIds((prev) => prev.filter((id) => scans.some((scan) => scan.libraryId === id)));
+			setScanningIds((prev) => filterActiveScanningIds(prev, scans));
 			if (!silent) setError(null);
 		} catch (err: unknown) {
 			setError(errorMessage(err, "Error cargando las bibliotecas."));
@@ -147,9 +132,15 @@ export default function LibrariesPage() {
 		let isMounted = true;
 		const init = async () => {
 			try {
-				const list = await librariesApi.list();
+				const [list, scans] = await Promise.all([
+					librariesApi.list(),
+					librariesApi.activeScans().catch(() => [] as ScanStatus[]),
+				]);
 				if (isMounted) {
 					setLibraries(list ?? []);
+					setActiveScans(scans);
+					setScanningIds((prev) => filterActiveScanningIds(prev, scans));
+					setError(null);
 				}
 			} catch (err: unknown) {
 				if (isMounted) {
@@ -161,9 +152,7 @@ export default function LibrariesPage() {
 				}
 			}
 		};
-
 		void init();
-
 		return () => {
 			isMounted = false;
 		};
@@ -195,65 +184,12 @@ export default function LibrariesPage() {
 
 	const openForCreate = () => {
 		setEditing(null);
-		setName("");
-		setPath("");
-		setPreviewPath("");
-		setFormError(null);
-		setDescription("");
-		setEmoji("");
-		setConfig(DEFAULT_LIBRARY_CONFIG);
 		setFormOpen(true);
 	};
 
 	const openForEdit = (library: LibraryItem) => {
 		setEditing(library);
-		setName(library.name);
-		setPath(library.path);
-		setPreviewPath("");
-		setFormError(null);
-		setDescription(library.description ?? "");
-		setEmoji(library.emoji ?? "");
-		setConfig(library.config ?? DEFAULT_LIBRARY_CONFIG);
 		setFormOpen(true);
-	};
-
-	const handleSubmit = async (e: React.SyntheticEvent) => {
-		e.preventDefault();
-		if (!name.trim() || !path.trim()) {
-			setFormError("El nombre y la ruta de la biblioteca son obligatorios.");
-			return;
-		}
-
-		setSaving(true);
-		setFormError(null);
-		try {
-			if (editing) {
-				await librariesApi.update(editing.id, {
-					name: name.trim(),
-					// Solo viaja si cambió: el backend reescribe rutas de series y tomos al recibirla.
-					path: path.trim() === editing.path ? undefined : path.trim(),
-					description: description.trim(),
-					emoji: emoji.trim() || undefined,
-					config,
-				});
-				setNotice(`Biblioteca "${name}" actualizada.`);
-			} else {
-				await librariesApi.create({
-					name: name.trim(),
-					path: path.trim(),
-					description: description.trim(),
-					emoji: emoji.trim() || undefined,
-					config,
-				});
-				setNotice(`Biblioteca "${name}" dada de alta correctamente.`);
-			}
-			setFormOpen(false);
-			await load(true);
-		} catch (err: unknown) {
-			setFormError(errorMessage(err, "Error guardando la biblioteca."));
-		} finally {
-			setSaving(false);
-		}
 	};
 
 	const handleDelete = async () => {
@@ -385,9 +321,6 @@ export default function LibrariesPage() {
 					const queued = active?.queued ?? false;
 					const scanning = active !== undefined && !queued;
 					const missing = library.missingSeries + library.missingVolumes;
-					// Desde que entra en la cola hasta que acaba. Antes solo cubria la fase de
-					// escaneo, asi que el engranaje se paraba mientras esperaba turno y entre
-					// una serie y la siguiente, justo cuando mas falta hace saber que sigue vivo.
 					const busy = active !== undefined || scanningIds.includes(library.id);
 
 					let statusDotColor = "var(--ds-ok)";
@@ -416,7 +349,6 @@ export default function LibrariesPage() {
 								overflow: "hidden",
 								transition: "transform 0.25s ease, filter 0.25s ease, opacity 0.25s ease",
 								"&:hover": { transform: "translateY(-2px)" },
-								// Esperando turno: apagada hasta que la cola llegue a ella.
 								...(queued && { filter: "grayscale(1)", opacity: 0.55 }),
 							}}
 						>
@@ -572,8 +504,6 @@ export default function LibrariesPage() {
 												<SyncIcon
 													fontSize="small"
 													sx={{
-														// Ambar mientras trabaja: el rojo es el color de todo lo
-														// demas en la tarjeta y ahi no se distinguiria.
 														color: busy ? "var(--ds-warn)" : "inherit",
 														animation: busy ? "spin 1.2s linear infinite" : "none",
 														"@keyframes spin": {
@@ -707,7 +637,6 @@ export default function LibrariesPage() {
 									</Collapse>
 								</Box>
 
-								{/* Cuadrícula de Métricas Tácticas */}
 								<Box
 									sx={{
 										display: "grid",
@@ -780,7 +709,6 @@ export default function LibrariesPage() {
 									</Box>
 								</Box>
 
-								{/* Descripción si existe */}
 								{library.description && (
 									<Typography
 										variant="body2"
@@ -797,7 +725,6 @@ export default function LibrariesPage() {
 									</Typography>
 								)}
 
-								{/* Pie de tarjeta con estado y fecha */}
 								<Box
 									sx={{
 										mt: "auto",
@@ -875,6 +802,42 @@ export default function LibrariesPage() {
 					);
 				})}
 			</Box>
+		);
+	}
+
+	let uploadDialog: React.ReactNode = null;
+	if (uploadTarget) {
+		const subpathLabel = uploadTarget.subpath ? ` / ${uploadTarget.subpath}` : "";
+		const uploadDialogTitle = `// Subir a ${uploadTarget.library.name}${subpathLabel}`;
+		uploadDialog = (
+			<Dialog
+				open
+				onClose={() => {
+					setUploadTarget(null);
+				}}
+				maxWidth="md"
+				fullWidth
+			>
+				<HudFrame />
+				<DialogTitle>{uploadDialogTitle}</DialogTitle>
+				<DialogContent sx={{ p: 3 }}>
+					<UploadPanel
+						libraryId={uploadTarget.library.id}
+						libraryPath={uploadTarget.library.path}
+						initialSubpath={uploadTarget.subpath}
+					/>
+				</DialogContent>
+				<DialogActions>
+					<Button
+						onClick={() => {
+							setUploadTarget(null);
+							void load(true);
+						}}
+					>
+						Cerrar
+					</Button>
+				</DialogActions>
+			</Dialog>
 		);
 	}
 
@@ -964,200 +927,16 @@ export default function LibrariesPage() {
 
 			{contentSection}
 
-			{/* Diálogo de Alta / Edición Táctico */}
-			<Dialog
+			<LibraryFormDialog
 				open={formOpen}
-				onClose={() => !saving && setFormOpen(false)}
-				maxWidth="lg"
-				fullWidth
-				slotProps={{
-					paper: {
-						sx: {
-							backgroundColor: "var(--ds-bg-overlay)",
-							border: "1px solid var(--ds-red)",
-							boxShadow: "0 12px 50px rgba(0,0,0,0.9)",
-							position: "relative",
-						},
-					},
+				editing={editing}
+				onClose={() => setFormOpen(false)}
+				onSaved={(msg) => {
+					setNotice(msg);
+					void load(true);
 				}}
-			>
-				<HudFrame />
+			/>
 
-				<form onSubmit={(e) => { void handleSubmit(e); }} noValidate>
-					<DialogTitle
-						sx={{
-							fontFamily: "'Orbitron', sans-serif",
-							fontSize: "18px",
-							fontWeight: 900,
-							letterSpacing: "1.5px",
-							borderBottom: "1px solid var(--ds-border-head)",
-							backgroundColor: "var(--ds-bg-sunken)",
-							color: "var(--ds-text-strong)",
-							py: 2,
-						}}
-					>
-						{editing ? `// EDITAR BIBLIOTECA: ${editing.name}` : "// REGISTRAR NUEVA BIBLIOTECA DE ARCHIVO"}
-					</DialogTitle>
-
-					<DialogContent
-						sx={{
-							p: 3,
-							display: "grid",
-							gap: 3,
-							gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) minmax(0, 1fr)" },
-							alignItems: "start",
-						}}
-					>
-						<Stack spacing={2.5} sx={{ mt: 1 }}>
-							{formError && (
-								<Alert
-									severity="error"
-									onClose={() => {
-										setFormError(null);
-									}}
-								>
-									{formError}
-								</Alert>
-							)}
-
-							<TextField
-								label="Nombre de la biblioteca"
-								value={name}
-								onChange={(e) => setName(e.target.value)}
-								required
-								fullWidth
-								disabled={saving}
-								placeholder="Ej. Manga Seinen, Cómics DC, Novelas Ligeras"
-							/>
-
-							<Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
-								<TextField
-									label="Ruta en el sistema de ficheros"
-									value={path}
-									onChange={(e) => setPath(e.target.value)}
-									required
-									fullWidth
-									disabled={saving}
-									helperText={
-										editing && path.trim() !== editing.path
-											? "Mover la biblioteca reapunta el registro; los ficheros no se tocan."
-											: "Dentro de una de las carpetas declaradas en el compose."
-									}
-									placeholder="/libraries/manga"
-									slotProps={{
-										input: {
-											sx: { fontFamily: "'JetBrains Mono', monospace", fontSize: "13px" },
-										},
-									}}
-								/>
-								<Button
-									variant="outlined"
-									disabled={saving}
-									onClick={() => {
-										setPickerOpen(true);
-									}}
-									startIcon={<FolderOpenIcon fontSize="small" />}
-									sx={{ mt: 1, flexShrink: 0, whiteSpace: "nowrap" }}
-								>
-									Examinar
-								</Button>
-							</Stack>
-
-							<TextField
-								label="Descripción opcional"
-								value={description}
-								onChange={(e) => setDescription(e.target.value)}
-								fullWidth
-								multiline
-								rows={2}
-								disabled={saving}
-								placeholder="Metadatos o notas internas sobre el contenido de este almacén."
-							/>
-
-							<Box
-								sx={{
-									backgroundColor: "var(--ds-bg-sunken)",
-									border: "1px solid var(--ds-border-head)",
-									borderRadius: "3px",
-									p: 2,
-								}}
-							>
-								<Typography
-									sx={{
-										fontFamily: "'Rajdhani', sans-serif",
-										fontWeight: 700,
-										fontSize: "14px",
-										letterSpacing: "1px",
-										color: "var(--ds-text-strong)",
-										textTransform: "uppercase",
-										mb: 2,
-									}}
-								>
-									Escáner y lector
-								</Typography>
-								<LibraryConfigForm value={config} onChange={setConfig} disabled={saving} />
-							</Box>
-						</Stack>
-
-						<ScanPreview
-							path={previewPath}
-							typedPath={path.trim()}
-							pattern={config.libraryPattern}
-							onRun={() => {
-								setPreviewPath(path.trim());
-							}}
-						/>
-					</DialogContent>
-
-					<DialogActions
-						sx={{
-							p: 2.5,
-							borderTop: "1px solid var(--ds-border-soft)",
-							backgroundColor: "var(--ds-bg-sunken)",
-							justifyContent: "space-between",
-						}}
-					>
-						<Button
-							onClick={() => setFormOpen(false)}
-							disabled={saving}
-							sx={{
-								color: "var(--ds-muted)",
-								fontFamily: "'Rajdhani', sans-serif",
-								fontWeight: 700,
-								"&:hover": { color: "var(--ds-text-strong)" },
-							}}
-						>
-							CANCELAR
-						</Button>
-						{(() => {
-							let submitLabel = "CREAR NODO";
-							if (saving) {
-								submitLabel = "PROCESANDO...";
-							} else if (editing) {
-								submitLabel = "GUARDAR CAMBIOS";
-							}
-							return (
-								<Button
-									type="submit"
-									variant="contained"
-									disabled={saving}
-									className="btn-tactical"
-									sx={{
-										background: "var(--ds-red)",
-										borderColor: "var(--ds-red-glow)",
-										color: "#FFFFFF",
-										px: 3,
-									}}
-								>
-									{submitLabel}
-								</Button>
-							);
-						})()}
-					</DialogActions>
-				</form>
-			</Dialog>
-
-			{/* Diálogo de Confirmación de Borrado */}
 			<Dialog
 				open={pendingDelete !== null}
 				onClose={() => !saving && setPendingDelete(null)}
@@ -1260,59 +1039,11 @@ export default function LibrariesPage() {
 				</DialogActions>
 			</Dialog>
 
-			{uploadTarget && (
-				<Dialog
-					open
-					onClose={() => {
-						setUploadTarget(null);
-					}}
-					maxWidth="md"
-					fullWidth
-				>
-					<HudFrame />
-					<DialogTitle>
-						{`// Subir a ${uploadTarget.library.name}${uploadTarget.subpath ? ` / ${uploadTarget.subpath}` : ""}`}
-					</DialogTitle>
-					<DialogContent sx={{ p: 3 }}>
-						<UploadPanel
-							libraryId={uploadTarget.library.id}
-							libraryPath={uploadTarget.library.path}
-							initialSubpath={uploadTarget.subpath}
-						/>
-					</DialogContent>
-					<DialogActions>
-						<Button
-							onClick={() => {
-								setUploadTarget(null);
-								void load(true);
-							}}
-						>
-							Cerrar
-						</Button>
-					</DialogActions>
-				</Dialog>
-			)}
-
-			{pickerOpen && (
-				<FolderPickerDialog
-					initialPath={path.trim() || undefined}
-					onClose={() => {
-						setPickerOpen(false);
-					}}
-					onSelect={(chosen) => {
-						setPath(chosen);
-						setPreviewPath(chosen);
-					}}
-				/>
-			)}
+			{uploadDialog}
 		</Box>
 	);
 }
 
-/**
- * Carpetas de primer nivel de una biblioteca. Se piden al desplegar y no antes: una rejilla
- * de bibliotecas lanzaria una peticion por tarjeta solo para pintarse.
- */
 function LibraryFolderList({
 	library,
 	onUpload,
@@ -1387,155 +1118,6 @@ function LibraryFolderList({
 					</Tooltip>
 				</Box>
 			))}
-		</Box>
-	);
-}
-
-/**
- * Ensayo del escaneo antes de guardar. Lo calcula el backend llamando al escaner de verdad:
- * reimplementar aqui las reglas de clasificacion haria que la vista previa empezase a mentir
- * en cuanto alguien tocase el escaner.
- */
-function ScanPreview({
-	path,
-	typedPath,
-	pattern,
-	onRun,
-}: Readonly<{ path: string; typedPath: string; pattern: string; onRun: () => void }>) {
-	const [preview, setPreview] = useState<{ key: string; data: ScanPreviewData | null; error: string | null } | null>(
-		null,
-	);
-
-	const key = `${path}#${pattern}`;
-
-	// Solo se ensaya sobre una ruta ya decidida. Hacerlo mientras se teclea recorreria el
-	// disco entero cada vez que lo escrito casase con una carpeta real de paso.
-	useEffect(() => {
-		if (!path) return;
-
-		let cancelled = false;
-		filesystemApi.preview(path, pattern).then(
-			(data) => {
-				if (!cancelled) setPreview({ key, data, error: null });
-			},
-			(e: unknown) => {
-				if (!cancelled) {
-					setPreview({
-						key,
-						data: null,
-						error: e instanceof Error ? e.message : "No se pudo leer esa carpeta.",
-					});
-				}
-			},
-		);
-
-		return () => {
-			cancelled = true;
-		};
-	}, [key, path, pattern]);
-
-	const fresh = preview?.key === key ? preview : null;
-	const stale = typedPath.length > 0 && typedPath !== path;
-
-	return (
-		<Box
-			sx={{
-				backgroundColor: "var(--ds-bg-sunken)",
-				border: "1px solid var(--ds-border-head)",
-				borderRadius: "3px",
-				p: 2,
-				mt: 1,
-				minHeight: 260,
-			}}
-		>
-			<Typography
-				sx={{
-					fontFamily: "'Rajdhani', sans-serif",
-					fontWeight: 700,
-					fontSize: "14px",
-					letterSpacing: "1px",
-					color: "var(--ds-text-strong)",
-					textTransform: "uppercase",
-					mb: 0.5,
-				}}
-			>
-				Así quedaría
-			</Typography>
-			<Typography sx={{ fontSize: "11px", color: "var(--ds-muted)", mb: 2 }}>
-				Ensayo sobre el disco. No se guarda nada hasta que pulses crear.
-			</Typography>
-
-			{(!path || stale) && (
-				<Stack spacing={1.5} sx={{ alignItems: "flex-start" }}>
-					<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "var(--ds-subtle)" }}>
-						{typedPath
-							? "La ruta cambió. Recorrer el disco cuesta, así que se hace cuando lo pidas."
-							: "Elige una ruta con Examinar, o escríbela y pulsa aquí."}
-					</Typography>
-					<Button variant="outlined" size="small" disabled={!typedPath} onClick={onRun} startIcon={<RefreshIcon />}>
-						Calcular
-					</Button>
-				</Stack>
-			)}
-
-			{path && !stale && !fresh && <LinearProgress sx={{ height: 2 }} />}
-
-			{fresh?.error && !stale && (
-				<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "var(--ds-red-glow)" }}>
-					{fresh.error}
-				</Typography>
-			)}
-
-			{fresh?.data && !stale && (
-				<>
-					<Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: "wrap", gap: 1 }}>
-						<Chip size="small" label={`${String(fresh.data.series.length)} series`} />
-						<Chip size="small" label={`${String(fresh.data.totalVolumes)} tomos`} variant="outlined" />
-					</Stack>
-
-					{fresh.data.series.length === 0 && (
-						<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "var(--ds-subtle)" }}>
-							Ninguna serie. No hay ficheros reconocibles ahí dentro.
-						</Typography>
-					)}
-
-					<Box sx={{ maxHeight: 300, overflowY: "auto" }}>
-						{fresh.data.series.map((serie) => (
-							<Box
-								key={serie.path}
-								sx={{
-									display: "flex",
-									alignItems: "center",
-									gap: 1,
-									px: 1,
-									py: 0.7,
-									borderBottom: "1px solid var(--ds-border-soft)",
-								}}
-							>
-								<CollectionsBookmarkIcon sx={{ fontSize: 15, color: "var(--ds-red-light)", flexShrink: 0 }} />
-								<Box sx={{ minWidth: 0, flexGrow: 1 }}>
-									<Typography
-										noWrap
-										sx={{ fontFamily: "'Rajdhani', sans-serif", fontSize: "13px", fontWeight: 600, color: "var(--ds-platinum)" }}
-									>
-										{serie.name}
-									</Typography>
-									{serie.isRoot && (
-										<Typography sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", color: "var(--ds-subtle)" }}>
-											tomos sueltos en la raíz
-										</Typography>
-									)}
-								</Box>
-								<Typography
-									sx={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "var(--ds-muted)", flexShrink: 0 }}
-								>
-									{serie.volumeCount}
-								</Typography>
-							</Box>
-						))}
-					</Box>
-				</>
-			)}
 		</Box>
 	);
 }

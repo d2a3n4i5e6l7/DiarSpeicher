@@ -11,6 +11,8 @@ public sealed record BookAnalysisOptions
     public bool ComputeFileHash { get; init; } = true;
     public bool ComputeKoreaderHash { get; init; } = true;
     public bool ReadEmbeddedMetadata { get; init; } = true;
+    public bool IncludeCover { get; init; }
+    public bool MeasurePages { get; init; }
 
     public static readonly BookAnalysisOptions Default = new();
 }
@@ -18,7 +20,7 @@ public sealed record BookAnalysisOptions
 public interface IBookProcessor
 {
     bool CanProcess(string extension);
-    Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null);
+    Task<ProcessedBook> AnalyzeBookAsync(string path, BookAnalysisOptions? options = null, CancellationToken cancellationToken = default);
     Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
 }
 
@@ -40,9 +42,11 @@ public class ZipBookProcessor : IBookProcessor
         return clean is "cbz" or "zip";
     }
 
-    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null)
+    public async Task<ProcessedBook> AnalyzeBookAsync(string path, BookAnalysisOptions? options = null, CancellationToken cancellationToken = default)
     {
         var analysis = options ?? BookAnalysisOptions.Default;
+        var includeCover = analysis.IncludeCover;
+        var measurePages = analysis.MeasurePages;
         ExtractedMetadata? metadata = null;
         List<string> tags = [];
         var pageCount = 0;
@@ -164,9 +168,11 @@ public class RarBookProcessor : IBookProcessor
         return clean is "cbr" or "rar";
     }
 
-    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null)
+    public async Task<ProcessedBook> AnalyzeBookAsync(string path, BookAnalysisOptions? options = null, CancellationToken cancellationToken = default)
     {
         var analysis = options ?? BookAnalysisOptions.Default;
+        var includeCover = analysis.IncludeCover;
+        var measurePages = analysis.MeasurePages;
         ExtractedMetadata? metadata = null;
         List<string> tags = [];
         var pageCount = 0;
@@ -305,9 +311,11 @@ public class EpubBookProcessor : IBookProcessor
         return clean == "epub";
     }
 
-    public async Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null)
+    public async Task<ProcessedBook> AnalyzeBookAsync(string path, BookAnalysisOptions? options = null, CancellationToken cancellationToken = default)
     {
         var analysis = options ?? BookAnalysisOptions.Default;
+        var includeCover = analysis.IncludeCover;
+        var measurePages = analysis.MeasurePages;
         var metadata = new ExtractedMetadata();
         var tags = new List<string>();
         int chapterCount = 0;
@@ -635,7 +643,7 @@ public class EpubBookProcessor : IBookProcessor
 public interface ICompositeBookProcessor
 {
     IBookProcessor? GetProcessor(string path);
-    Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null);
+    Task<ProcessedBook> AnalyzeAsync(string path, BookAnalysisOptions? options = null, CancellationToken cancellationToken = default);
     Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default);
 }
 
@@ -654,7 +662,7 @@ public class CompositeBookProcessor : ICompositeBookProcessor
         return _processors.FirstOrDefault(p => p.CanProcess(ext));
     }
 
-    public async Task<ProcessedBook> AnalyzeAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null)
+    public async Task<ProcessedBook> AnalyzeAsync(string path, BookAnalysisOptions? options = null, CancellationToken cancellationToken = default)
     {
         var analysis = options ?? BookAnalysisOptions.Default;
         var processor = GetProcessor(path);
@@ -670,7 +678,7 @@ public class CompositeBookProcessor : ICompositeBookProcessor
             };
         }
 
-        return await processor.AnalyzeBookAsync(path, includeCover, cancellationToken, measurePages, analysis);
+        return await processor.AnalyzeBookAsync(path, analysis, cancellationToken);
     }
 
     public Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)

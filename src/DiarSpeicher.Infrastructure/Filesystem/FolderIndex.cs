@@ -30,6 +30,8 @@ public sealed class FolderIndex : IFolderIndex, IDisposable
     private readonly LibraryRootsOptions _roots;
     private readonly ILogger<FolderIndex> _logger;
     private readonly string _databasePath;
+    private Task? _refreshTask;
+
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private volatile bool _running;
@@ -130,7 +132,7 @@ public sealed class FolderIndex : IFolderIndex, IDisposable
         if (!_refreshLock.Wait(0)) return false;
 
         _running = true;
-        _ = Task.Run(() =>
+        _refreshTask = Task.Run(() =>
         {
             try
             {
@@ -344,7 +346,17 @@ public sealed class FolderIndex : IFolderIndex, IDisposable
     public void Dispose()
     {
         _lifetime.Cancel();
+
+        var finished = _refreshTask?.Wait(TimeSpan.FromSeconds(5)) ?? true;
+
         _lifetime.Dispose();
-        _refreshLock.Dispose();
+
+        if (finished)
+        {
+            _refreshLock.Dispose();
+            return;
+        }
+
+        _logger.LogWarning("El repaso del indice de carpetas seguia corriendo al apagar; su cerrojo se deja sin liberar");
     }
 }

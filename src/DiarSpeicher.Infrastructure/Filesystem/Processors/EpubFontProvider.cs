@@ -34,6 +34,12 @@ public static class EpubFontProvider
     // lo que el proceso. Por eso los llamantes no deben envolverlas en using.
     private static readonly ConcurrentDictionary<string, SKTypeface?> Cache = new();
 
+    private const int BookFaceLimit = 16;
+
+    private static readonly ConcurrentDictionary<string, (SKTypeface? Face, long Used)> BookFaces = new();
+
+    private static long _bookFaceTicks;
+
     private static string FontsDirectory => Path.Combine(AppContext.BaseDirectory, "Fonts");
 
     /// <summary>
@@ -101,23 +107,47 @@ public static class EpubFontProvider
         // Sin negrita propia no se sustituye por la regular: eso lo decide el llamante.
         if (bold && Math.Abs(elegida.Weight - objetivo) > 200) return null;
 
-        return Cache.GetOrAdd($"book:{uid}:{elegida.Path}", _ =>
+        var bytes = LoadFaceBytes(archive, elegida.Path, uid, cifrados);
+        if (bytes.Length == 0) return null;
+
+        var clave = Convert.ToHexString(SHA256.HashData(bytes));
+        if (BookFaces.TryGetValue(clave, out var guardada))
         {
-            var entrada = archive.GetEntry(elegida.Path);
-            if (entrada == null) return null;
+            BookFaces[clave] = (guardada.Face, Interlocked.Increment(ref _bookFaceTicks));
+            return guardada.Face;
+        }
 
-            using var ms = new MemoryStream();
-            using (var s = entrada.Open()) s.CopyTo(ms);
-            var bytes = ms.ToArray();
+        var creada = SKTypeface.FromStream(new MemoryStream(bytes));
+        TrimBookFaces();
+        BookFaces[clave] = (creada, Interlocked.Increment(ref _bookFaceTicks));
+        return creada;
+    }
 
-            if (cifrados.TryGetValue(elegida.Path, out var algoritmo))
-            {
-                bytes = Deobfuscate(bytes, uid, algoritmo);
-                if (bytes.Length == 0) return null;
-            }
+    private static byte[] LoadFaceBytes(
+        ZipArchive archive,
+        string ruta,
+        string uid,
+        IReadOnlyDictionary<string, string> cifrados)
+    {
+        var entrada = archive.GetEntry(ruta);
+        if (entrada == null) return [];
 
-            return SKTypeface.FromStream(new MemoryStream(bytes));
-        });
+        using var ms = new MemoryStream(entrada.Length is > 0 and < int.MaxValue ? (int)entrada.Length : 0);
+        using (var s = entrada.Open()) s.CopyTo(ms);
+        var bytes = ms.ToArray();
+
+        return cifrados.TryGetValue(ruta, out var algoritmo)
+            ? Deobfuscate(bytes, uid, algoritmo)
+            : bytes;
+    }
+
+    private static void TrimBookFaces()
+    {
+        while (BookFaces.Count >= BookFaceLimit)
+        {
+            var vieja = BookFaces.OrderBy(e => e.Value.Used).Select(e => e.Key).FirstOrDefault();
+            if (vieja == null || !BookFaces.TryRemove(vieja, out _)) return;
+        }
     }
 
     private static readonly Regex FontFaceRegex =
@@ -191,7 +221,9 @@ public static class EpubFontProvider
             if (container == null) return "";
 
             XNamespace cn = "urn:oasis:names:tc:opendocument:xmlns:container";
-            var rootfile = XDocument.Load(container.Open()).Descendants(cn + "rootfile").FirstOrDefault();
+            XDocument contenedor;
+            using (var s = container.Open()) contenedor = XDocument.Load(s);
+            var rootfile = contenedor.Descendants(cn + "rootfile").FirstOrDefault();
             var opfPath = rootfile?.Attribute("full-path")?.Value;
             if (opfPath == null) return "";
 
@@ -200,7 +232,8 @@ public static class EpubFontProvider
 
             XNamespace on = "http://www.idpf.org/2007/opf";
             XNamespace dc = "http://purl.org/dc/elements/1.1/";
-            var doc = XDocument.Load(opf.Open());
+            XDocument doc;
+            using (var s = opf.Open()) doc = XDocument.Load(s);
             var idref = doc.Root?.Attribute("unique-identifier")?.Value;
 
             var ids = doc.Descendants(dc + "identifier").ToList();
@@ -224,7 +257,10 @@ public static class EpubFontProvider
         try
         {
             XNamespace e = "http://www.w3.org/2001/04/xmlenc#";
-            foreach (var datos in XDocument.Load(enc.Open()).Descendants(e + "EncryptedData"))
+            XDocument cifrado;
+            using (var s = enc.Open()) cifrado = XDocument.Load(s);
+
+            foreach (var datos in cifrado.Descendants(e + "EncryptedData"))
             {
                 var alg = datos.Descendants(e + "EncryptionMethod").FirstOrDefault()?.Attribute("Algorithm")?.Value;
                 var uri = datos.Descendants(e + "CipherReference").FirstOrDefault()?.Attribute("URI")?.Value;

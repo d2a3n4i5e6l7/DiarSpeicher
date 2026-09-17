@@ -26,6 +26,8 @@ import { downloadBinary } from "../api/client";
 import { formatBytes, mediaTitle } from "../catalog/mediaHelpers";
 import { DS } from "../theme";
 
+const PROGRESS_DEBOUNCE_MS = 1200;
+
 interface Props {
 	media: MediaItem;
 	onExit: () => void;
@@ -70,10 +72,37 @@ const EPUB_THEMES = {
 	},
 };
 
+interface RelocatedLocation {
+	start?: {
+		displayed?: {
+			page: number;
+			total: number;
+		};
+		percentage?: number;
+	};
+}
+
+function parseRelocatedLocation(loc: unknown) {
+	const location = loc as RelocatedLocation | null;
+	if (!location?.start) return null;
+	if (location.start.displayed && location.start.displayed.page > 0) {
+		const cur = location.start.displayed.page;
+		const tot = location.start.displayed.total;
+		return { page: cur, total: tot, isCompleted: cur >= tot, percentage: undefined };
+	}
+	if (typeof location.start.percentage === "number") {
+		const pct = Math.max(1, Math.round(location.start.percentage * 100));
+		return { page: pct, total: 100, isCompleted: pct >= 99, percentage: pct };
+	}
+	return null;
+}
+
 export default function EpubReader({ media, onExit }: Readonly<Props>) {
 	const viewerRef = useRef<HTMLDivElement | null>(null);
 	const bookRef = useRef<Book | null>(null);
 	const renditionRef = useRef<Rendition | null>(null);
+	const progressTimer = useRef<number | null>(null);
+	const lastProgressRef = useRef<{ page: number; percentage?: number; isCompleted: boolean } | null>(null);
 
 	const [loading, setLoading] = useState(true);
 	const [statusText, setStatusText] = useState("Conectando con el almacén...");
@@ -99,9 +128,20 @@ export default function EpubReader({ media, onExit }: Readonly<Props>) {
 		}, 3000);
 	}, []);
 
-	// Inicializar y descargar ePub
+	const scheduleProgress = useCallback((payload: { page: number; percentage?: number; isCompleted: boolean }) => {
+		lastProgressRef.current = payload;
+		if (progressTimer.current !== null) {
+			window.clearTimeout(progressTimer.current);
+		}
+		const sendProgress = () => {
+			void mediaApi.updateProgress(media.id, payload).catch(() => undefined);
+		};
+		progressTimer.current = window.setTimeout(sendProgress, PROGRESS_DEBOUNCE_MS);
+	}, [media.id]);
+
 	useEffect(() => {
 		let isMounted = true;
+		const abortController = new AbortController();
 		const container = viewerRef.current;
 		if (!container) return;
 
@@ -111,13 +151,18 @@ export default function EpubReader({ media, onExit }: Readonly<Props>) {
 
 		const loadBook = async () => {
 			try {
-				const buffer = await downloadBinary(mediaApi.fileUrl(media.id), (loaded, total) => {
-					if (!isMounted) return;
-					const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
-					const loadedStr = formatBytes(loaded);
-					const totalStr = total > 0 ? formatBytes(total) : "";
-					setStatusText(`Descargando libro: ${loadedStr}${totalStr ? ` de ${totalStr}` : ""} (${String(pct)}%)`);
-				});
+				const buffer = await downloadBinary(
+					mediaApi.fileUrl(media.id),
+					(loaded, total) => {
+						if (!isMounted) return;
+						const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+						const loadedStr = formatBytes(loaded);
+						const totalStr = total > 0 ? formatBytes(total) : "";
+						const totalPart = totalStr ? ` de ${totalStr}` : "";
+						setStatusText(`Descargando libro: ${loadedStr}${totalPart} (${String(pct)}%)`);
+					},
+					abortController.signal
+				);
 
 				if (!isMounted) return;
 				setStatusText("Desempaquetando libro y maquetando...");
@@ -144,7 +189,6 @@ export default function EpubReader({ media, onExit }: Readonly<Props>) {
 				setLoading(false);
 				wakeUi();
 
-				// Generar tabla de contenidos
 				void book.loaded.navigation
 					.then((nav) => {
 						if (isMounted && nav?.toc) {
@@ -153,36 +197,26 @@ export default function EpubReader({ media, onExit }: Readonly<Props>) {
 					})
 					.catch(() => undefined);
 
-				// Generar localizaciones para cálculo de páginas
-				void book.locations.generate(1024).then(() => {
-					if (!isMounted) return;
-					const total = media.pages > 0 ? media.pages : 100;
-					setTotalLocations(total);
-				}).catch(() => undefined);
+				const total = media.pages > 0 ? media.pages : 100;
+				setTotalLocations(total);
 
-				// Evento de cambio de página/ubicación
-				rendition.on("relocated", (loc: unknown) => {
-					const location = loc as { start?: { displayed?: { page: number; total: number }; percentage?: number } } | null;
-					if (location?.start) {
-						if (location.start.displayed && location.start.displayed.page > 0) {
-							const cur = location.start.displayed.page;
-							const tot = location.start.displayed.total;
-							setCurrentProgress(cur);
-							if (tot > 0) setTotalLocations(tot);
-							void mediaApi.updateProgress(media.id, { page: cur, isCompleted: cur >= tot }).catch(() => undefined);
-						} else if (typeof location.start.percentage === "number") {
-							const pct = Math.max(1, Math.round(location.start.percentage * 100));
-							setCurrentProgress(pct);
-							setTotalLocations(100);
-							void mediaApi.updateProgress(media.id, { page: pct, percentage: pct, isCompleted: pct >= 99 }).catch(() => undefined);
-						}
-					}
-				});
+				const onRelocated = (loc: unknown) => {
+					const parsed = parseRelocatedLocation(loc);
+					if (!parsed) return;
+					setCurrentProgress(parsed.page);
+					if (parsed.total > 0) setTotalLocations(parsed.total);
+					scheduleProgress({ page: parsed.page, percentage: parsed.percentage, isCompleted: parsed.isCompleted });
+				};
+
+				rendition.on("relocated", onRelocated);
 
 				rendition.on("click", () => {
 					wakeUi();
 				});
 			} catch (err: unknown) {
+				if ((err instanceof DOMException || err instanceof Error) && err.name === "AbortError") {
+					return;
+				}
 				if (!isMounted) return;
 				setError(err instanceof Error ? err.message : "Error al abrir el archivo EPUB.");
 				setLoading(false);
@@ -193,14 +227,21 @@ export default function EpubReader({ media, onExit }: Readonly<Props>) {
 
 		return () => {
 			isMounted = false;
+			abortController.abort();
+			if (progressTimer.current !== null) {
+				window.clearTimeout(progressTimer.current);
+				if (lastProgressRef.current) {
+					void mediaApi.updateProgress(media.id, lastProgressRef.current).catch(() => undefined);
+				}
+			}
 			try {
 				renditionRef.current?.destroy();
 				bookRef.current?.destroy();
 			} catch {
-				// Silencio al desmontar
+				void 0;
 			}
 		};
-	}, [media.id, media.pages, wakeUi]);
+	}, [media.id, media.pages, scheduleProgress, wakeUi]);
 
 	const goNext = useCallback(() => {
 		if (renditionRef.current) {

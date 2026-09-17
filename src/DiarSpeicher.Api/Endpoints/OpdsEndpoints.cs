@@ -186,7 +186,12 @@ public static class OpdsEndpoints
             var zeroBased = zero_based ?? true;
 
             var isCover = cover ?? false;
-            var (extractedPage, book) = await opdsService.GetBookPageAsync(user, id, page, zeroBased, trackProgression: !isCover, ct);
+            var (extractedPage, book) = await opdsService.GetBookPageAsync(
+                user,
+                id,
+                zeroBased ? page + 1 : page,
+                isCover ? PageRequestKind.Cover : PageRequestKind.Reading,
+                ct);
 
             if (book == null)
             {

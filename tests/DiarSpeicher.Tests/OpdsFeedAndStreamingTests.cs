@@ -249,13 +249,12 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
 
         var user = new AuthUser { Id = "reader_1", Username = "reader_john", IsServerOwner = false };
 
-        // Solicitar página 0 con zero_based = true (debe leer página 1 en el CBZ)
+        // El servicio recibe la pagina ya normalizada a base 1; de zero_based se encarga el endpoint.
         var (extractedPage, book) = await service.GetBookPageAsync(
             user,
             _kidBookId,
-            pageNumber: 0,
-            zeroBased: true,
-            trackProgression: true);
+            pageNumber: 1,
+            PageRequestKind.Reading);
 
         Assert.NotNull(book);
         Assert.NotNull(extractedPage);

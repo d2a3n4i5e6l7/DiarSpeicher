@@ -30,7 +30,6 @@ public static class EpubRasterizer
 
     private static readonly Regex ImgTagRegex = new(@"<img[^>]+src=[""']([^""']+)[""']", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex SvgImageRegex = new(@"<image[^>]+(?:href|xlink:href)=[""']([^""']+)[""']", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ParagraphRegex = new(@"<(?:p|h[1-6]|div|blockquote)[^>]*>(.*?)</(?:p|h[1-6]|div|blockquote)>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex HtmlTagRegex = new(@"<[^>]+>", RegexOptions.Compiled);
 
     public record RenderBlock(string Text, bool IsHeading, int HeadingLevel);
@@ -40,6 +39,48 @@ public static class EpubRasterizer
     public record PageMeta(int PageNumber, int TotalPages, string? BookTitle, int ChapterIndex = 0, int SubpageIndex = 0, int TotalSubpages = 1);
 
     public record LayoutMetrics(float ContentWidth, float LineHeight, float HeadingLineHeight, float ParagraphSpacing, float MarginY);
+
+    public record PageGeometry(
+        int Width,
+        int MarginX,
+        int MarginY,
+        float ContentWidth,
+        int BaseFontSize,
+        float LineHeight,
+        float HeadingFontSize,
+        float HeadingLineHeight,
+        float ParagraphSpacing,
+        float ContentTop,
+        float AvailableHeight)
+    {
+        public const float HeaderHeight = 110f;
+        public const float FooterHeight = 90f;
+
+        public static PageGeometry For(EpubDeviceProfile profile)
+        {
+            var width = Math.Max(480, profile.Width);
+            var marginX = Math.Max(24, profile.MarginHorizontal);
+            var marginY = Math.Max(40, profile.MarginVertical);
+            var baseFontSize = Math.Max(16, profile.FontSize);
+            var headingFontSize = baseFontSize * 1.35f;
+
+            return new PageGeometry(
+                width,
+                marginX,
+                marginY,
+                width - (marginX * 2),
+                baseFontSize,
+                baseFontSize * Math.Max(1.2f, profile.LineHeight),
+                headingFontSize,
+                headingFontSize * 1.3f,
+                baseFontSize * 0.75f,
+                marginY + HeaderHeight,
+                Math.Max(300f, profile.Height - (marginY * 2) - HeaderHeight - FooterHeight));
+        }
+
+        public LayoutMetrics ToMetrics() =>
+            new(ContentWidth, LineHeight, HeadingLineHeight, ParagraphSpacing, MarginY);
+    }
 
     public static async Task<EpubBookPageMap> GetOrBuildPageMapAsync(
         ZipArchive archive,
@@ -58,26 +99,17 @@ public static class EpubRasterizer
             return cached.Map;
         }
 
-        var width = Math.Max(480, profile.Width);
-        var marginX = Math.Max(24, profile.MarginHorizontal);
-        var marginY = Math.Max(40, profile.MarginVertical);
-        var contentWidth = width - (marginX * 2);
-
-        var baseFontSize = Math.Max(16, profile.FontSize);
-        var lineHeight = baseFontSize * Math.Max(1.2f, profile.LineHeight);
-        var headingFontSize = baseFontSize * 1.35f;
-        var headingLineHeight = headingFontSize * 1.3f;
-        var paragraphSpacing = baseFontSize * 0.75f;
+        var geometry = PageGeometry.For(profile);
+        var marginY = geometry.MarginY;
 
         var fonts = EpubFontProvider.Resolve(profile, archive);
-        using var textFont = new SKFont(fonts.Regular, baseFontSize) { Subpixel = true };
-        using var headingFont = new SKFont(fonts.Bold, headingFontSize) { Subpixel = true };
+        using var textFont = new SKFont(fonts.Regular, geometry.BaseFontSize) { Subpixel = true };
+        using var headingFont = new SKFont(fonts.Bold, geometry.HeadingFontSize) { Subpixel = true };
 
-        var metrics = new LayoutMetrics(contentWidth, lineHeight, headingLineHeight, paragraphSpacing, marginY);
+        var metrics = geometry.ToMetrics();
 
-        const float headerHeight = 110f;
-        const float footerHeight = 90f;
-        var availableHeight = Math.Max(300f, profile.Height - (marginY * 2) - headerHeight - footerHeight);
+        const float headerHeight = PageGeometry.HeaderHeight;
+        var availableHeight = geometry.AvailableHeight;
 
         var targets = new List<EpubSubpageTarget>();
 
@@ -107,12 +139,6 @@ public static class EpubRasterizer
                 continue;
             }
 
-            if (profile.AutoHeight)
-            {
-                targets.Add(new EpubSubpageTarget(chapter.FullName, i + 1, 0, 1, IsImageOnly: false));
-                continue;
-            }
-
             var (_, totalContentHeight) = MeasureLayout(blocks, textFont, headingFont, metrics);
             var usableContentHeight = Math.Max(1f, totalContentHeight - headerHeight - marginY);
             var subpageCount = Math.Max(1, (int)Math.Ceiling(usableContentHeight / availableHeight));
@@ -129,7 +155,7 @@ public static class EpubRasterizer
     }
 
     public static string BuildProfileKey(EpubDeviceProfile profile) =>
-        $"{profile.Width}x{profile.Height}:{profile.FontSize}:{profile.LineHeight}:{profile.MarginHorizontal}:{profile.MarginVertical}:{profile.AutoHeight}:{profile.FontFamily}:{profile.Theme}";
+        $"{profile.Width}x{profile.Height}:{profile.FontSize}:{profile.LineHeight}:{profile.MarginHorizontal}:{profile.MarginVertical}:{profile.FontFamily}:{profile.Theme}";
 
     private static DateTime GetFileWrittenAtUtc(string epubPath)
     {
@@ -299,6 +325,8 @@ public static class EpubRasterizer
 
     private static readonly IHtmlParser HtmlParser = new HtmlParser();
 
+    private static readonly string BlockSelector = string.Join(',', BlockSelectors);
+
     private static readonly string[] BlockSelectors =
         ["h1", "h2", "h3", "h4", "h5", "h6", "p", "blockquote", "li", "dd", "dt", "figcaption", "pre"];
 
@@ -315,10 +343,10 @@ public static class EpubRasterizer
         using var doc = HtmlParser.ParseDocument(html);
 
         var bloques = new List<RenderBlock>();
-        foreach (var el in doc.QuerySelectorAll(string.Join(',', BlockSelectors)))
+        foreach (var el in doc.QuerySelectorAll(BlockSelector))
         {
             // Un <p> dentro de un <li> ya lo aporta el <p>: solo cuentan las hojas.
-            if (el.QuerySelector(string.Join(',', BlockSelectors)) != null) continue;
+            if (el.QuerySelector(BlockSelector) != null) continue;
 
             var texto = WhitespaceRegex.Replace(el.TextContent, " ").Trim();
             if (texto.Length == 0) continue;
@@ -341,14 +369,6 @@ public static class EpubRasterizer
     }
 
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
-
-    private static RenderBlock ParseBlock(string tagBlock, string innerHtml)
-    {
-        var text = CleanHtmlText(innerHtml);
-        var isHeading = tagBlock.StartsWith("<h", StringComparison.OrdinalIgnoreCase);
-        var level = isHeading && char.IsDigit(tagBlock[2]) ? (int)char.GetNumericValue(tagBlock[2]) : 0;
-        return new RenderBlock(text, isHeading, level);
-    }
 
     private static string CleanHtmlText(string raw)
     {
@@ -386,57 +406,38 @@ public static class EpubRasterizer
         int subpageIndex,
         ZipArchive? archive = null)
     {
-        var width = Math.Max(480, profile.Width);
-        var marginX = Math.Max(24, profile.MarginHorizontal);
-        var marginY = Math.Max(40, profile.MarginVertical);
-        var contentWidth = width - (marginX * 2);
+        var geometry = PageGeometry.For(profile);
+        var width = geometry.Width;
+        var marginX = geometry.MarginX;
+        var marginY = geometry.MarginY;
 
         var colors = GetColors(profile.Theme);
-        var baseFontSize = Math.Max(16, profile.FontSize);
-        var lineHeight = baseFontSize * Math.Max(1.2f, profile.LineHeight);
-        var headingFontSize = baseFontSize * 1.35f;
-        var headingLineHeight = headingFontSize * 1.3f;
-        var paragraphSpacing = baseFontSize * 0.75f;
 
         var fonts = EpubFontProvider.Resolve(profile, archive);
         var typeface = fonts.Regular;
-        using var textFont = new SKFont(fonts.Regular, baseFontSize) { Subpixel = true };
-        using var headingFont = new SKFont(fonts.Bold, headingFontSize) { Subpixel = true };
+        using var textFont = new SKFont(fonts.Regular, geometry.BaseFontSize) { Subpixel = true };
+        using var headingFont = new SKFont(fonts.Bold, geometry.HeadingFontSize) { Subpixel = true };
 
         using var textPaint = new SKPaint { Color = colors.Text, IsAntialias = true };
         using var headingPaint = new SKPaint { Color = colors.Heading, IsAntialias = true };
 
-        var metrics = new LayoutMetrics(contentWidth, lineHeight, headingLineHeight, paragraphSpacing, marginY);
-        var (layoutItems, totalContentHeight) = MeasureLayout(blocks, textFont, headingFont, metrics);
+        var metrics = geometry.ToMetrics();
+        var (layoutItems, _) = MeasureLayout(blocks, textFont, headingFont, metrics);
 
-        const float headerHeight = 110f;
-        const float footerHeight = 90f;
-        var contentTop = marginY + headerHeight;
+        var contentTop = geometry.ContentTop;
 
-        int finalHeight;
-        List<(string text, float y, bool isHeading)> pageItems;
+        var finalHeight = profile.Height;
+        var availableHeight = geometry.AvailableHeight;
+        var subpageStart = subpageIndex * availableHeight;
+        var subpageEnd = subpageStart + availableHeight;
 
-        if (profile.AutoHeight)
+        var pageItems = new List<(string text, float y, bool isHeading)>();
+        foreach (var (text, y, isHeading) in layoutItems)
         {
-            var totalRequiredHeight = totalContentHeight + footerHeight + marginY;
-            finalHeight = (int)Math.Max(profile.Height, totalRequiredHeight);
-            pageItems = layoutItems;
-        }
-        else
-        {
-            finalHeight = profile.Height;
-            var availableHeight = Math.Max(300f, profile.Height - (marginY * 2) - headerHeight - footerHeight);
-            var subpageStart = subpageIndex * availableHeight;
-            var subpageEnd = subpageStart + availableHeight;
-
-            pageItems = new List<(string text, float y, bool isHeading)>();
-            foreach (var (text, y, isHeading) in layoutItems)
+            var relY = y - contentTop;
+            if (relY >= subpageStart && relY < subpageEnd)
             {
-                var relY = y - contentTop;
-                if (relY >= subpageStart && relY < subpageEnd)
-                {
-                    pageItems.Add((text, contentTop + (relY - subpageStart), isHeading));
-                }
+                pageItems.Add((text, contentTop + (relY - subpageStart), isHeading));
             }
         }
 
@@ -464,8 +465,7 @@ public static class EpubRasterizer
         SKFont headingFont,
         LayoutMetrics metrics)
     {
-        const float headerHeight = 110f;
-        var currentY = metrics.MarginY + headerHeight;
+        var currentY = metrics.MarginY + PageGeometry.HeaderHeight;
         var items = new List<(string text, float y, bool isHeading)>();
 
         foreach (var block in blocks)
@@ -494,31 +494,29 @@ public static class EpubRasterizer
     private static List<string> WrapText(string text, SKFont font, float maxWidth)
     {
         var lines = new List<string>();
-        var words = text.Split(' ');
-        var currentLine = "";
+        var buffer = new char[text.Length + 1];
+        var length = 0;
 
-        foreach (var word in words)
+        foreach (var word in text.Split(' '))
         {
-            var testLine = string.IsNullOrEmpty(currentLine) ? word : $"{currentLine} {word}";
-            var measured = font.MeasureText(testLine);
-            if (measured <= maxWidth)
+            var candidate = length == 0 ? word.Length : length + 1 + word.Length;
+
+            if (length > 0) buffer[length] = ' ';
+            word.CopyTo(0, buffer, candidate - word.Length, word.Length);
+
+            if (font.MeasureText(buffer.AsSpan(0, candidate)) <= maxWidth)
             {
-                currentLine = testLine;
+                length = candidate;
+                continue;
             }
-            else
-            {
-                if (!string.IsNullOrEmpty(currentLine))
-                {
-                    lines.Add(currentLine);
-                }
-                currentLine = word;
-            }
+
+            if (length > 0) lines.Add(new string(buffer, 0, length));
+
+            word.CopyTo(0, buffer, 0, word.Length);
+            length = word.Length;
         }
 
-        if (!string.IsNullOrEmpty(currentLine))
-        {
-            lines.Add(currentLine);
-        }
+        if (length > 0) lines.Add(new string(buffer, 0, length));
 
         return lines;
     }

@@ -288,13 +288,17 @@ public class MangaBakaIngestService : IMangaBakaIngestService
             }
         }
 
-        await using (var archiveStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.None))
+        try
         {
+            await using var archiveStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.None);
             Report(MangaBakaState.Decompressing, null, "Descomprimiendo el volcado");
             await DecompressAsync(archiveStream, "series.sqlite.zst", cancellationToken);
         }
+        finally
+        {
+            TryDelete(archivePath);
+        }
 
-        File.Delete(archivePath);
         await BuildSearchIndexAsync(cancellationToken);
         Succeed();
     }
@@ -303,6 +307,18 @@ public class MangaBakaIngestService : IMangaBakaIngestService
     /// Acepta las dos formas en que llega el volcado: comprimido en crudo (`.zst`) o dentro
     /// de un contenedor (`.tar.gz`), del que se extrae el primer `.sqlite` que aparezca.
     /// </summary>
+    private void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Quedo el volcado parcial {Path} sin borrar; ocupa disco hasta el proximo intento", path);
+        }
+    }
+
     private async Task DecompressAsync(Stream archive, string fileName, CancellationToken cancellationToken)
     {
         var target = _options.ResolveSqlitePath();

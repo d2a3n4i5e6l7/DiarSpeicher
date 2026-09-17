@@ -17,8 +17,6 @@ public class StorageOptions
     /// <summary>Overrides the thumbnail directory. Defaults to "&lt;RootPath&gt;/thumbnails".</summary>
     public string? ThumbnailsPath { get; set; }
 
-    public PageCacheOptions PageCache { get; set; } = new();
-
     public ThumbnailOptions Thumbnails { get; set; } = new();
 
     public UploadOptions Upload { get; set; } = new();
@@ -36,11 +34,6 @@ public class StorageOptions
         Path.GetFullPath(string.IsNullOrWhiteSpace(ThumbnailsPath)
             ? Path.Combine(RootPath, "thumbnails")
             : ThumbnailsPath);
-
-    public string ResolvePageCachePath() =>
-        Path.GetFullPath(string.IsNullOrWhiteSpace(PageCache.Path)
-            ? Path.Combine(RootPath, "cache", "pages")
-            : PageCache.Path);
 
     public string ResolveBackupPath() =>
         Path.GetFullPath(string.IsNullOrWhiteSpace(Backup.Path)
@@ -92,34 +85,6 @@ public class ThumbnailOptions
 }
 
 /// <summary>
-/// Disk cache for extracted book pages. Decompressing a page is CPU-bound work repeated on
-/// every read of the same page, so results are kept on disk and evicted least-recently-used
-/// once the cache exceeds <see cref="MaxBytes"/>.
-/// </summary>
-public class PageCacheOptions
-{
-    public bool Enabled { get; set; } = true;
-
-    /// <summary>Overrides the cache directory. Defaults to "&lt;RootPath&gt;/cache/pages".</summary>
-    public string? Path { get; set; }
-
-    /// <summary>Upper bound on total cache size. Default 2 GiB.</summary>
-    public long MaxBytes { get; set; } = 2L * 1024 * 1024 * 1024;
-
-    /// <summary>
-    /// Pages larger than this are served but never cached, so one oversized page cannot
-    /// evict the rest of the cache. Default 32 MiB.
-    /// </summary>
-    public long MaxEntryBytes { get; set; } = 32L * 1024 * 1024;
-
-    /// <summary>
-    /// Eviction runs down to this fraction of <see cref="MaxBytes"/> rather than stopping at
-    /// the limit, so a full cache does not evict on every single write. Default 0.9.
-    /// </summary>
-    public double EvictionTargetRatio { get; set; } = 0.9;
-}
-
-/// <summary>
 /// Filesystem watching, so copying a file into a library indexes it without a manual scan.
 /// </summary>
 public class WatcherOptions
@@ -163,6 +128,8 @@ public class UploadOptions
     /// Default 5 GB. Environment: DIAR_MAX_FILE_UPLOAD_SIZE.
     /// </summary>
     public long MaxFileUploadSize { get; set; } = 5L * 1024 * 1024 * 1024;
+
+    public int AbandonedUploadHours { get; set; } = 24;
 
     public static readonly string[] DefaultAllowedExtensions = [".cbz", ".cbr", ".epub", ".pdf", ".zip"];
 

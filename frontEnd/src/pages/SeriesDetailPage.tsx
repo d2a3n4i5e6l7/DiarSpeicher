@@ -36,7 +36,7 @@ import MetadataMatchDialog from "../components/MetadataMatchDialog";
 import RenameSeriesDialog from "../components/RenameSeriesDialog";
 import DeleteScopeNotice from "../components/DeleteScopeNotice";
 import SeriesCoverDialog from "../components/SeriesCoverDialog";
-import { mediaApi, metadataApi, seriesApi, type MediaItem, type SeriesItem } from "../api/endpoints";
+import { mediaApi, metadataApi, seriesApi, type MediaItem, type SeriesItem, type ScanStatus, type SeriesMetadataItem } from "../api/endpoints";
 import {
 	estimatedMinutes,
 	formatBytes,
@@ -110,8 +110,6 @@ export default function SeriesDetailPage() {
 	const [renameOpen, setRenameOpen] = useState(false);
 	const [coverOpen, setCoverOpen] = useState(false);
 	const [confirmDelete, setConfirmDelete] = useState(false);
-	const [deleteFiles, setDeleteFiles] = useState(false);
-	const [deleting, setDeleting] = useState(false);
 	const navigate = useNavigate();
 	const location = useLocation();
 	// Se incrementa tras emparejar o revertir: fuerza a releer la ficha con lo nuevo.
@@ -124,19 +122,29 @@ export default function SeriesDetailPage() {
 
 	useEffect(() => {
 		let mounted = true;
-		Promise.all([seriesApi.get(id), seriesApi.media(id, 0, 100)])
+		const controller = new AbortController();
+
+		Promise.all([
+			seriesApi.get(id, controller.signal),
+			seriesApi.media(id, 0, 100, controller.signal),
+		])
 			.then(([detail, media]) => {
-				// La API ya devuelve los tomos en su orden natural: no se reordena aquí.
-				if (mounted) setResult({ key: requestKey, series: detail, volumes: media.data });
+				if (mounted && !controller.signal.aborted) {
+					setResult({ key: requestKey, series: detail, volumes: media.data });
+				}
 			})
 			.catch((err: unknown) => {
-				if (mounted) {
+				if ((err instanceof DOMException || err instanceof Error) && err.name === "AbortError") {
+					return;
+				}
+				if (mounted && !controller.signal.aborted) {
 					setResult({ key: requestKey, error: errorMessage(err, "No se pudo cargar la serie.") });
 				}
 			});
 
 		return () => {
 			mounted = false;
+			controller.abort();
 		};
 	}, [id, requestKey]);
 
@@ -175,17 +183,15 @@ export default function SeriesDetailPage() {
 	useEffect(() => {
 		if (completedMedia !== null) {
 			wasIndexing.current = true;
-			queueMicrotask(() => {
+			const timer = setTimeout(() => {
 				setReloadToken((token) => token + 1);
-			});
-			return;
+			}, 500);
+			return () => clearTimeout(timer);
 		}
 
 		if (wasIndexing.current) {
 			wasIndexing.current = false;
-			queueMicrotask(() => {
-				setReloadToken((token) => token + 1);
-			});
+			setReloadToken((token) => token + 1);
 		}
 	}, [completedMedia]);
 
@@ -298,76 +304,20 @@ export default function SeriesDetailPage() {
 						>
 							{series.name}
 						</Typography>
-						<Tooltip title="Renombrar serie">
-							<IconButton
-								size="small"
-								onClick={() => setRenameOpen(true)}
-								sx={{
-									color: DS.muted,
-									border: `1px solid ${DS.border}`,
-									borderRadius: 0,
-									"&:hover": { color: "var(--ds-text-strong)", borderColor: DS.red },
-								}}
-							>
-								<EditIcon fontSize="small" />
-							</IconButton>
-						</Tooltip>
-						<Tooltip title="Cambiar portada">
-							<IconButton
-								size="small"
-								onClick={() => setCoverOpen(true)}
-								sx={{
-									color: DS.muted,
-									border: `1px solid ${DS.border}`,
-									borderRadius: 0,
-									"&:hover": { color: "var(--ds-text-strong)", borderColor: DS.red },
-								}}
-							>
-								<ImageIcon fontSize="small" />
-							</IconButton>
-						</Tooltip>
-						<Tooltip title="Eliminar serie">
-							<IconButton
-								size="small"
-								onClick={() => { setConfirmDelete(true); }}
-								sx={{
-									color: DS.muted,
-									border: `1px solid ${DS.border}`,
-									borderRadius: 0,
-									"&:hover": { color: DS.redGlow, borderColor: DS.redDark },
-								}}
-							>
-								<DeleteOutlinedIcon fontSize="small" />
-							</IconButton>
-						</Tooltip>
+						<SeriesHeaderActions
+							onRename={() => setRenameOpen(true)}
+							onCover={() => setCoverOpen(true)}
+							onDelete={() => setConfirmDelete(true)}
+						/>
 					</Stack>
 
-					<Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1, mt: 1.5 }}>
-						<MetaChip label="TOMOS" value={series.mediaCount || volumes.length} />
-						<MetaChip label="PÁGS" value={stats.totalPages} />
-						<MetaChip
-							label="LECTURA"
-							value={stats.totalPages > 0 ? formatDuration(estimatedMinutes(stats.totalPages)) : null}
-						/>
-						<MetaChip label="PESO" value={stats.totalSize > 0 ? formatBytes(stats.totalSize) : null} />
-						<MetaChip label="" value={external?.status ?? series.status ?? null} />
-						<MetaChip label="" value={external?.year ?? null} />
-						<MetaChip label="EDITORIAL" value={external?.publisher ?? null} />
-						<MetaChip label="AUTOR" value={external?.writers ?? null} />
-						<MetaChip label="" value={external?.genres ?? null} />
-						{completeness && (
-							<Chip
-								size="small"
-								label={completeness.label}
-								sx={{
-									fontFamily: "'JetBrains Mono', monospace",
-									backgroundColor: completeness.complete ? "rgba(var(--ds-ok-rgb), 0.12)" : "rgba(var(--ds-warn-rgb), 0.15)",
-									color: completeness.complete ? "var(--ds-ok-light)" : "var(--ds-warn-light)",
-									border: `1px solid ${completeness.complete ? "var(--ds-ok-dark)" : "var(--ds-warn-dark)"}`,
-								}}
-							/>
-						)}
-						</Stack>
+					<SeriesMetaChips
+						series={series}
+						volumesCount={volumes.length}
+						stats={stats}
+						external={external}
+						completeness={completeness}
+					/>
 
 						{external && (
 							<Stack direction="row" spacing={1} sx={{ alignItems: "center", mt: 1.5 }}>
@@ -447,35 +397,11 @@ export default function SeriesDetailPage() {
 						</Box>
 					)}
 
-					<Box
-						sx={{
-							mt: 3,
-							pt: 3,
-							borderTop: `1px solid ${DS.borderSoft}`,
-							display: "grid",
-							gap: { xs: 0, sm: 4 },
-							gridTemplateColumns: { xs: "1fr", sm: "repeat(auto-fit, minmax(220px, 1fr))" },
-						}}
-					>
-						<Box>
-							<DataField label="Autores" value={external?.writers} />
-							<DataField label="Géneros" value={external?.genres} />
-							<DataField label="Formato" value={volumeFormats} />
-						</Box>
-						<Box>
-							<DataField label="Publicación" value={external?.status} />
-							<DataField label="Editorial" value={external?.publisher} />
-							<DataField label="Año" value={external?.year} />
-						</Box>
-						<Box>
-							<DataField label="Tipo" value={external?.type} />
-							<DataField label="Capítulos" value={external?.totalChapters} />
-							<DataField
-								label="Volúmenes"
-								value={external?.finalVolume ? `${String(volumes.length)} de ${String(external.finalVolume)}` : null}
-							/>
-						</Box>
-					</Box>
+					<SeriesMetadataGrid
+						external={external}
+						volumeFormats={volumeFormats}
+						volumeCount={volumes.length}
+					/>
 				</Box>
 			</Box>
 
@@ -499,133 +425,27 @@ export default function SeriesDetailPage() {
 				<Tab label="Detalles" />
 			</Tabs>
 
-			{tab === 0 && (
-				<Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: COVER_GRID }}>
-					{volumes.map((volume) => (
-						<MediaCard
-							key={volume.id}
-							to={`/media/${volume.id}`}
-							state={{ from: `/series/${id}`, label: series.name.toUpperCase() }}
-							title={mediaTitle(volume)}
-							subtitle={mediaSubtitle(volume)}
-							coverUrl={mediaApi.thumbnailUrl(volume.id)}
-							progress={readProgress(volume)}
-							badge={volume.metadata?.number !== undefined ? `#${String(volume.metadata.number)}` : undefined}
-							width="100%"
-						/>
-					))}
-
-					{indexing !== null &&
-						Array.from({ length: indexing.totalMedia }, (_, slot) => {
-							const done = slot < indexing.completedMedia;
-							const active = slot === indexing.completedMedia;
-
-							return (
-								<Box
-									key={`hueco-${String(slot)}`}
-									sx={{
-										position: "relative",
-										overflow: "hidden",
-										aspectRatio: "2 / 3",
-										display: "flex",
-										alignItems: "center",
-										justifyContent: "center",
-										backgroundColor: DS.bgSunken,
-										border: `1px solid ${done ? DS.red : DS.borderSoft}`,
-										opacity: done ? 1 : 0.6,
-										transition: "opacity 0.3s ease, border-color 0.3s ease",
-									}}
-								>
-									<Typography
-										sx={{
-											fontFamily: "'Rajdhani', sans-serif",
-											fontSize: "12px",
-											letterSpacing: "1px",
-											color: active ? DS.redGlow : DS.muted,
-										}}
-									>
-										{done ? "LISTO" : active ? "INDEXANDO" : String(slot + 1).padStart(2, "0")}
-									</Typography>
-
-									{/* Capa aparte: .ds-scanline se coloca en absoluto sobre su padre, asi que
-									    puesta en la propia tarjeta la sacaria de la rejilla. */}
-									{active && <Box className="ds-scanline" />}
-								</Box>
-							);
-						})}
-				</Box>
+			{tab === 0 ? (
+				<SeriesVolumesTab volumes={volumes} seriesId={id} seriesName={series.name} indexing={indexing} />
+			) : (
+				<SeriesDetailsTab
+					series={series}
+					volumesCount={volumes.length}
+					totalPages={stats.totalPages}
+					totalSize={stats.totalSize}
+					external={external}
+				/>
 			)}
 
-			{tab === 1 && (
-				<Box sx={{ maxWidth: READABLE_WIDTH }}>
-					<DetailRow label="ID de serie" value={series.id} />
-					<DetailRow label="Ruta en disco" value={series.path} />
-					<DetailRow label="Biblioteca" value={series.libraryId} />
-					<DetailRow label="Estado" value={series.status} />
-					<DetailRow label="Tomos indexados" value={String(volumes.length)} />
-					<DetailRow label="Páginas totales" value={stats.totalPages > 0 ? String(stats.totalPages) : null} />
-					<DetailRow label="Peso en disco" value={stats.totalSize > 0 ? formatBytes(stats.totalSize) : null} />
-					<DetailRow label="Catálogo externo" value={external?.source} />
-					<DetailRow label="Id externo" value={external?.externalId ? String(external.externalId) : null} />
-					<DetailRow label="Ficha de origen" value={external?.link} />
-							</Box>
-						)}
-
-						<Dialog open={confirmDelete} onClose={() => { setConfirmDelete(false); }} maxWidth="sm" fullWidth>
-							<HudFrame />
-							<DialogTitle>// Eliminar serie</DialogTitle>
-							<DialogContent sx={{ p: 3 }}>
-								<Typography sx={{ color: DS.platinum, mb: 2 }}>
-									¿Seguro que quieres eliminar <strong>{series.name}</strong> y sus {volumes.length} tomos?
-								</Typography>
-
-								{!deleteFiles && (
-									<Alert severity="info">
-										Solo se quita del índice. La carpeta sigue en el disco y volverá a aparecer en el próximo escaneo.
-									</Alert>
-								)}
-
-								<FormControlLabel
-									sx={{ mt: 2 }}
-									control={
-										<Switch
-											checked={deleteFiles}
-											onChange={(e) => { setDeleteFiles(e.target.checked); }}
-											disabled={deleting}
-										/>
-									}
-									label={
-										<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, letterSpacing: "1px" }}>
-											ELIMINAR TAMBIÉN LA CARPETA DEL DISCO
-										</Typography>
-									}
-								/>
-
-								{deleteFiles && <DeleteScopeNotice path={series.path} />}
-							</DialogContent>
-							<DialogActions>
-								<Button onClick={() => { setConfirmDelete(false); }} sx={{ color: DS.muted }}>
-									CANCELAR
-								</Button>
-								<Button
-									variant="contained"
-									disabled={deleting}
-									onClick={() => {
-										setDeleting(true);
-										void seriesApi
-											.delete(series.id, deleteFiles)
-											.then(() => {
-												void navigate(series.libraryId ? `/libraries/${series.libraryId}` : "/series");
-											})
-											.catch(() => {
-												setDeleting(false);
-											});
-									}}
-								>
-									{deleting ? "ELIMINANDO..." : "ELIMINAR"}
-								</Button>
-							</DialogActions>
-						</Dialog>
+						<DeleteSeriesDialog
+							open={confirmDelete}
+							seriesName={series.name}
+							seriesPath={series.path}
+							seriesId={series.id}
+							libraryId={series.libraryId}
+							volumeCount={volumes.length}
+							onClose={() => setConfirmDelete(false)}
+						/>
 
 						<MetadataMatchDialog
 							open={matchOpen}
@@ -655,5 +475,329 @@ export default function SeriesDetailPage() {
 							/>
 						)}
 					</Box>
+	);
+}
+
+function DeleteSeriesDialog({
+	open,
+	seriesName,
+	seriesPath,
+	seriesId,
+	libraryId,
+	volumeCount,
+	onClose,
+}: Readonly<{
+	open: boolean;
+	seriesName: string;
+	seriesPath: string;
+	seriesId: string;
+	libraryId?: string;
+	volumeCount: number;
+	onClose: () => void;
+}>) {
+	const navigate = useNavigate();
+	const [deleteFiles, setDeleteFiles] = useState(false);
+	const [deleting, setDeleting] = useState(false);
+
+	const handleDelete = () => {
+		setDeleting(true);
+		void seriesApi
+			.delete(seriesId, deleteFiles)
+			.then(() => {
+				void navigate(libraryId ? `/libraries/${libraryId}` : "/series");
+			})
+			.catch(() => {
+				setDeleting(false);
+			});
+	};
+
+	return (
+		<Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+			<HudFrame />
+			<DialogTitle>{"// Eliminar serie"}</DialogTitle>
+			<DialogContent sx={{ p: 3 }}>
+				<Typography sx={{ color: DS.platinum, mb: 2 }}>
+					¿Seguro que quieres eliminar <strong>{seriesName}</strong> y sus {volumeCount} tomos?
+				</Typography>
+
+				{!deleteFiles && (
+					<Alert severity="info">
+						Solo se quita del índice. La carpeta sigue en el disco y volverá a aparecer en el próximo escaneo.
+					</Alert>
+				)}
+
+				<FormControlLabel
+					sx={{ mt: 2 }}
+					control={
+						<Switch
+							checked={deleteFiles}
+							onChange={(e) => { setDeleteFiles(e.target.checked); }}
+							disabled={deleting}
+						/>
+					}
+					label={
+						<Typography sx={{ fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, letterSpacing: "1px" }}>
+							ELIMINAR TAMBIÉN LA CARPETA DEL DISCO
+						</Typography>
+					}
+				/>
+
+				{deleteFiles && <DeleteScopeNotice path={seriesPath} />}
+			</DialogContent>
+			<DialogActions>
+				<Button onClick={onClose} sx={{ color: DS.muted }}>
+					CANCELAR
+				</Button>
+				<Button
+					variant="contained"
+					disabled={deleting}
+					onClick={handleDelete}
+				>
+					{deleting ? "ELIMINANDO..." : "ELIMINAR"}
+				</Button>
+			</DialogActions>
+		</Dialog>
+	);
+}
+
+function SeriesHeaderActions({
+	onRename,
+	onCover,
+	onDelete,
+}: Readonly<{
+	onRename: () => void;
+	onCover: () => void;
+	onDelete: () => void;
+}>) {
+	return (
+		<>
+			<Tooltip title="Renombrar serie">
+				<IconButton
+					size="small"
+					onClick={onRename}
+					sx={{
+						color: DS.muted,
+						border: `1px solid ${DS.border}`,
+						borderRadius: 0,
+						"&:hover": { color: "var(--ds-text-strong)", borderColor: DS.red },
+					}}
+				>
+					<EditIcon fontSize="small" />
+				</IconButton>
+			</Tooltip>
+			<Tooltip title="Cambiar portada">
+				<IconButton
+					size="small"
+					onClick={onCover}
+					sx={{
+						color: DS.muted,
+						border: `1px solid ${DS.border}`,
+						borderRadius: 0,
+						"&:hover": { color: "var(--ds-text-strong)", borderColor: DS.red },
+					}}
+				>
+					<ImageIcon fontSize="small" />
+				</IconButton>
+			</Tooltip>
+			<Tooltip title="Eliminar serie">
+				<IconButton
+					size="small"
+					onClick={onDelete}
+					sx={{
+						color: DS.muted,
+						border: `1px solid ${DS.border}`,
+						borderRadius: 0,
+						"&:hover": { color: DS.redGlow, borderColor: DS.redDark },
+					}}
+				>
+					<DeleteOutlinedIcon fontSize="small" />
+				</IconButton>
+			</Tooltip>
+		</>
+	);
+}
+
+function SeriesVolumesTab({
+	volumes,
+	seriesId,
+	seriesName,
+	indexing,
+}: Readonly<{
+	volumes: MediaItem[];
+	seriesId: string;
+	seriesName: string;
+	indexing: ScanStatus | null;
+}>) {
+	return (
+		<Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: COVER_GRID }}>
+			{volumes.map((volume) => (
+				<MediaCard
+					key={volume.id}
+					to={`/media/${volume.id}`}
+					state={{ from: `/series/${seriesId}`, label: seriesName.toUpperCase() }}
+					title={mediaTitle(volume)}
+					subtitle={mediaSubtitle(volume)}
+					coverUrl={mediaApi.thumbnailUrl(volume.id)}
+					progress={readProgress(volume)}
+					badge={volume.metadata?.number !== undefined ? `#${String(volume.metadata.number)}` : undefined}
+					width="100%"
+				/>
+			))}
+
+			{indexing !== null &&
+				Array.from({ length: indexing.totalMedia }, (_, slot) => {
+					const done = slot < indexing.completedMedia;
+					const active = slot === indexing.completedMedia;
+					let label = String(slot + 1).padStart(2, "0");
+					if (done) {
+						label = "LISTO";
+					} else if (active) {
+						label = "INDEXANDO";
+					}
+
+					return (
+						<Box
+							key={`hueco-${String(slot)}`}
+							sx={{
+								position: "relative",
+								overflow: "hidden",
+								aspectRatio: "2 / 3",
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "center",
+								backgroundColor: DS.bgSunken,
+								border: `1px solid ${done ? DS.red : DS.borderSoft}`,
+								opacity: done ? 1 : 0.6,
+								transition: "opacity 0.3s ease, border-color 0.3s ease",
+							}}
+						>
+							<Typography
+								sx={{
+									fontFamily: "'Rajdhani', sans-serif",
+									fontSize: "12px",
+									letterSpacing: "1px",
+									color: active ? DS.redGlow : DS.muted,
+								}}
+							>
+								{label}
+							</Typography>
+							{active && <Box className="ds-scanline" />}
+						</Box>
+					);
+				})}
+		</Box>
+	);
+}
+
+function SeriesDetailsTab({
+	series,
+	volumesCount,
+	totalPages,
+	totalSize,
+	external,
+}: Readonly<{
+	series: SeriesItem;
+	volumesCount: number;
+	totalPages: number;
+	totalSize: number;
+	external: SeriesMetadataItem | null;
+}>) {
+	return (
+		<Box sx={{ maxWidth: READABLE_WIDTH }}>
+			<DetailRow label="ID de serie" value={series.id} />
+			<DetailRow label="Ruta en disco" value={series.path} />
+			<DetailRow label="Biblioteca" value={series.libraryId} />
+			<DetailRow label="Estado" value={series.status} />
+			<DetailRow label="Tomos indexados" value={String(volumesCount)} />
+			<DetailRow label="Páginas totales" value={totalPages > 0 ? String(totalPages) : null} />
+			<DetailRow label="Peso en disco" value={totalSize > 0 ? formatBytes(totalSize) : null} />
+			<DetailRow label="Catálogo externo" value={external?.source} />
+			<DetailRow label="Id externo" value={external?.externalId ? String(external.externalId) : null} />
+			<DetailRow label="Ficha de origen" value={external?.link} />
+		</Box>
+	);
+}
+function SeriesMetaChips({
+	series,
+	volumesCount,
+	stats,
+	external,
+	completeness,
+}: Readonly<{
+	series: SeriesItem;
+	volumesCount: number;
+	stats: { totalPages: number; totalSize: number };
+	external: SeriesMetadataItem | null;
+	completeness: { label: string; complete: boolean } | null;
+}>) {
+	return (
+		<Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1, mt: 1.5 }}>
+			<MetaChip label="TOMOS" value={series.mediaCount || volumesCount} />
+			<MetaChip label="PÁGS" value={stats.totalPages} />
+			<MetaChip
+				label="LECTURA"
+				value={stats.totalPages > 0 ? formatDuration(estimatedMinutes(stats.totalPages)) : null}
+			/>
+			<MetaChip label="PESO" value={stats.totalSize > 0 ? formatBytes(stats.totalSize) : null} />
+			<MetaChip label="" value={external?.status ?? series.status ?? null} />
+			<MetaChip label="" value={external?.year ?? null} />
+			<MetaChip label="EDITORIAL" value={external?.publisher ?? null} />
+			<MetaChip label="AUTOR" value={external?.writers ?? null} />
+			<MetaChip label="" value={external?.genres ?? null} />
+			{completeness && (
+				<Chip
+					size="small"
+					label={completeness.label}
+					sx={{
+						fontFamily: "'JetBrains Mono', monospace",
+						backgroundColor: completeness.complete ? "rgba(var(--ds-ok-rgb), 0.12)" : "rgba(var(--ds-warn-rgb), 0.15)",
+						color: completeness.complete ? "var(--ds-ok-light)" : "var(--ds-warn-light)",
+						border: `1px solid ${completeness.complete ? "var(--ds-ok-dark)" : "var(--ds-warn-dark)"}`,
+					}}
+				/>
+			)}
+		</Stack>
+	);
+}
+
+function SeriesMetadataGrid({
+	external,
+	volumeFormats,
+	volumeCount,
+}: Readonly<{
+	external: SeriesMetadataItem | null;
+	volumeFormats: string;
+	volumeCount: number;
+}>) {
+	return (
+		<Box
+			sx={{
+				mt: 3,
+				pt: 3,
+				borderTop: `1px solid ${DS.borderSoft}`,
+				display: "grid",
+				gap: { xs: 0, sm: 4 },
+				gridTemplateColumns: { xs: "1fr", sm: "repeat(auto-fit, minmax(220px, 1fr))" },
+			}}
+		>
+			<Box>
+				<DataField label="Autores" value={external?.writers} />
+				<DataField label="Géneros" value={external?.genres} />
+				<DataField label="Formato" value={volumeFormats} />
+			</Box>
+			<Box>
+				<DataField label="Publicación" value={external?.status} />
+				<DataField label="Editorial" value={external?.publisher} />
+				<DataField label="Año" value={external?.year} />
+			</Box>
+			<Box>
+				<DataField label="Tipo" value={external?.type} />
+				<DataField label="Capítulos" value={external?.totalChapters} />
+				<DataField
+					label="Volúmenes"
+					value={external?.finalVolume ? `${String(volumeCount)} de ${String(external.finalVolume)}` : null}
+				/>
+			</Box>
+		</Box>
 	);
 }

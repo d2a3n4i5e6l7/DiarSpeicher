@@ -1,5 +1,4 @@
 using DiarSpeicher.Core.Domain.Komga;
-using SkiaSharp;
 
 namespace DiarSpeicher.Infrastructure.Komga;
 
@@ -242,49 +241,24 @@ public class KomgaService : IKomgaService
     private async Task<List<MediaPage>> MeasurePagesAsync(Media book, CancellationToken ct)
     {
         if (_pageProcessor is null) return [];
-        if (book.Extension.TrimStart('.').Equals("epub", StringComparison.OrdinalIgnoreCase) || book.Path.EndsWith(".epub", StringComparison.OrdinalIgnoreCase)) return [];
+        if (EpubPageMapStore.IsEpub(book)) return [];
 
         _logger.LogInformation(
             "Midiendo {Pages} paginas de {BookId}; la primera apertura de un libro es lenta",
             book.Pages, book.Id);
 
-        var rows = new List<MediaPage>(book.Pages);
-        for (var i = 1; i <= book.Pages; i++)
+        var analyzed = await _pageProcessor.AnalyzeAsync(book.Path, new BookAnalysisOptions { MeasurePages = true }, ct);
+
+        var rows = analyzed.PageDimensions.Select(p => new MediaPage
         {
-            ct.ThrowIfCancellationRequested();
-
-            var row = new MediaPage
-            {
-                MediaId = book.Id,
-                Number = i,
-                FileName = $"page_{i:D4}.jpg",
-                MediaType = "image/jpeg"
-            };
-
-            try
-            {
-                var page = await _pageProcessor.ExtractPageAsync(book.Path, i, ct);
-                if (page is not null && page.Data.Length > 0)
-                {
-                    row.MediaType = page.ContentType.ToMimeType();
-                    row.SizeBytes = page.Data.Length;
-
-                    using var data = SKData.CreateCopy(page.Data);
-                    using var codec = SKCodec.Create(data);
-                    if (codec is not null)
-                    {
-                        row.Width = codec.Info.Width;
-                        row.Height = codec.Info.Height;
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "No se pudo medir la pagina {Page} de {BookId}", i, book.Id);
-            }
-
-            rows.Add(row);
-        }
+            MediaId = book.Id,
+            Number = p.Number,
+            FileName = p.FileName,
+            MediaType = p.MediaType,
+            Width = p.Width,
+            Height = p.Height,
+            SizeBytes = p.SizeBytes
+        }).ToList();
 
         try
         {
@@ -463,7 +437,7 @@ public class KomgaService : IKomgaService
         {
             var target = map.Pages[i - 1];
             int width = profile.Width;
-            int? height = profile.AutoHeight ? null : profile.Height;
+            int? height = profile.Height;
             string mediaType = "image/webp";
 
             if (target.IsImageOnly && target.ImageWidth.HasValue && target.ImageHeight.HasValue)

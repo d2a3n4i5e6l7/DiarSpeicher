@@ -4,7 +4,13 @@ namespace DiarSpeicher.Infrastructure.Reading;
 
 public class EpubPageMapStore : IEpubPageMapStore
 {
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Builders = new();
+    private const int BuilderStripes = 64;
+
+    private static readonly SemaphoreSlim[] Builders =
+        [.. Enumerable.Range(0, BuilderStripes).Select(_ => new SemaphoreSlim(1, 1))];
+
+    private static SemaphoreSlim BuilderFor(string key) =>
+        Builders[(uint)StringComparer.Ordinal.GetHashCode(key) % BuilderStripes];
 
     private readonly DiarSpeicherDbContext _db;
     private readonly ILogger<EpubPageMapStore> _logger;
@@ -27,7 +33,7 @@ public class EpubPageMapStore : IEpubPageMapStore
         var stored = await FindAsync(book.Id, profileKey, ct);
         if (IsUsable(stored, fileModifiedAt)) return stored!.TotalPages;
 
-        var gate = Builders.GetOrAdd($"{book.Id}:{profileKey}", _ => new SemaphoreSlim(1, 1));
+        var gate = BuilderFor($"{book.Id}:{profileKey}");
         await gate.WaitAsync(ct);
         try
         {

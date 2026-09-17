@@ -146,7 +146,7 @@ public static class OpdsV2Endpoints
         {
             var user = RequestIdentity.GetAuthUser(context);
             var zeroBased = zero_based ?? true;
-            var (extractedPage, book) = await opdsService.GetBookPageAsync(user, id, page, zeroBased, trackProgression: true, ct);
+            var (extractedPage, book) = await opdsService.GetBookPageAsync(user, id, zeroBased ? page + 1 : page, PageRequestKind.Reading, ct);
 
             if (book == null || extractedPage == null || extractedPage.Data.Length == 0)
             {

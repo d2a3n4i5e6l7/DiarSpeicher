@@ -412,8 +412,7 @@ public class OpdsService : IOpdsService
         AuthUser user,
         string bookId,
         int pageNumber,
-        bool zeroBased,
-        bool trackProgression = true,
+        PageRequestKind kind = PageRequestKind.Reading,
         CancellationToken ct = default)
     {
         var book = await _db.Media.ForUser(user)
@@ -421,15 +420,14 @@ public class OpdsService : IOpdsService
 
         if (book == null) return (null, null);
 
-        var correctPage = zeroBased ? pageNumber + 1 : pageNumber;
-        var isEpub = book.Extension.TrimStart('.').Equals("epub", StringComparison.OrdinalIgnoreCase)
-            || book.Path.EndsWith(".epub", StringComparison.OrdinalIgnoreCase);
+        var correctPage = pageNumber;
+        var isEpub = EpubPageMapStore.IsEpub(book);
         if (correctPage < 1 || (!isEpub && book.Pages > 0 && correctPage > book.Pages))
         {
             return (null, book);
         }
 
-        if (trackProgression && !string.IsNullOrWhiteSpace(user.Id))
+        if (kind == PageRequestKind.Reading && !string.IsNullOrWhiteSpace(user.Id))
         {
             await RecordReadingProgressAsync(user, book, correctPage, ct);
         }

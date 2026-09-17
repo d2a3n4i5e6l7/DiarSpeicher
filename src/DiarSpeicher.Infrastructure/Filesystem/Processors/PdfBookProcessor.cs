@@ -10,12 +10,15 @@ public class PdfBookProcessor : IBookProcessor
     public bool CanProcess(string extension) =>
         extension.TrimStart('.').Equals("pdf", StringComparison.OrdinalIgnoreCase);
 
-    public Task<ProcessedBook> AnalyzeBookAsync(string path, bool includeCover = false, CancellationToken cancellationToken = default, bool measurePages = false, BookAnalysisOptions? options = null)
+    public Task<ProcessedBook> AnalyzeBookAsync(string path, BookAnalysisOptions? options = null, CancellationToken cancellationToken = default)
     {
         var analysis = options ?? BookAnalysisOptions.Default;
+        var includeCover = analysis.IncludeCover;
+        var measurePages = analysis.MeasurePages;
         var pageCount = 0;
         ExtractedMetadata? metadata = null;
         ExtractedPage? cover = null;
+        var dimensions = new List<MeasuredPage>();
 
         try
         {
@@ -31,6 +34,11 @@ public class PdfBookProcessor : IBookProcessor
                 cover = ExtractLargestImage(document.GetPage(1), cancellationToken)
                     ?? RasterizePage(path, 1);
             }
+
+            if (measurePages && pageCount > 0)
+            {
+                dimensions = MeasurePages(document, path, pageCount, cancellationToken);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -41,7 +49,8 @@ public class PdfBookProcessor : IBookProcessor
         {
             Pages = pageCount,
             Metadata = metadata,
-            Cover = cover
+            Cover = cover,
+            PageDimensions = dimensions
         });
     }
 
@@ -68,6 +77,70 @@ public class PdfBookProcessor : IBookProcessor
         {
             return Task.FromResult<ExtractedPage?>(null);
         }
+    }
+
+    private static List<MeasuredPage> MeasurePages(PdfDocument document, string path, int pageCount, CancellationToken cancellationToken)
+    {
+        var paginas = new List<MeasuredPage>(pageCount);
+        double? escala = null;
+
+        for (var numero = 1; numero <= pageCount; numero++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var pagina = document.GetPage(numero);
+            var incrustada = ExtractLargestImage(pagina, cancellationToken);
+
+            int? ancho;
+            int? alto;
+            string tipo;
+            long? bytes = null;
+
+            if (incrustada != null)
+            {
+                (ancho, alto) = PixelSize(incrustada);
+                tipo = incrustada.ContentType.ToMimeType();
+                bytes = incrustada.Data.Length;
+            }
+            else
+            {
+                escala ??= LearnRasterScale(path, numero, pagina.Width);
+                (ancho, alto) = escala is { } s && pagina.Width > 0
+                    ? ((int?)Math.Round(pagina.Width * s), (int?)Math.Round(pagina.Height * s))
+                    : (null, null);
+                tipo = ContentType.Webp.ToMimeType();
+            }
+
+            paginas.Add(new MeasuredPage
+            {
+                Number = numero,
+                FileName = $"page_{numero:D4}.jpg",
+                MediaType = tipo,
+                Width = ancho,
+                Height = alto,
+                SizeBytes = bytes
+            });
+        }
+
+        return paginas;
+    }
+
+    private static double? LearnRasterScale(string path, int pageNumber, double widthInPoints)
+    {
+        if (widthInPoints <= 0) return null;
+
+        var dibujada = RasterizePage(path, pageNumber);
+        if (dibujada == null) return null;
+
+        var (ancho, _) = PixelSize(dibujada);
+        return ancho is > 0 ? ancho.Value / widthInPoints : null;
+    }
+
+    private static (int? Width, int? Height) PixelSize(ExtractedPage page)
+    {
+        using var data = SKData.CreateCopy(page.Data);
+        using var codec = SKCodec.Create(data);
+        return codec is null ? (null, null) : (codec.Info.Width, codec.Info.Height);
     }
 
     /// <summary>
