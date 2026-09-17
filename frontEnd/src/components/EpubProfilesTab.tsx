@@ -5,14 +5,12 @@ import {
 	Chip,
 	Divider,
 	FormControl,
-	FormControlLabel,
 	IconButton,
 	InputLabel,
 	MenuItem,
 	Select,
 	Slider,
 	Stack,
-	Switch,
 	TextField,
 	Tooltip,
 	Typography,
@@ -42,6 +40,7 @@ export default function EpubProfilesTab({ profiles, onChange }: EpubProfilesTabP
 			...currentProfile,
 			...patch,
 			devicePattern: ".*",
+			autoHeight: false,
 			isDefault: true,
 		};
 		onChange([updated]);
@@ -55,7 +54,6 @@ export default function EpubProfilesTab({ profiles, onChange }: EpubProfilesTabP
 	const themeStylesMap: Record<string, { bg: string; text: string; heading: string; accent: string; border: string; muted: string }> = {
 		light: { bg: "#FFFFFF", text: "#111111", heading: "#000000", accent: "#880000", border: "#D0D0D0", muted: "#666666" },
 		core: { bg: "#050508", text: "#F0F2F6", heading: "#FFFFFF", accent: "#C21818", border: "#282C38", muted: "#8E95A5" },
-		oled: { bg: "#000000", text: "#FFFFFF", heading: "#FFFFFF", accent: "#FF2E2E", border: "#1C1C1C", muted: "#757575" },
 		sepia: { bg: "#1C1814", text: "#E4D8C8", heading: "#E29D62", accent: "#C27838", border: "#332B24", muted: "#968270" },
 	};
 	const themeStyles = themeStylesMap[currentProfile.theme] ?? themeStylesMap.core;
@@ -140,11 +138,11 @@ export default function EpubProfilesTab({ profiles, onChange }: EpubProfilesTabP
 							onChange={(e) => updateProfile({ name: e.target.value })}
 						/>
 
-						{/* Dimensiones y Scroll Continuo */}
+						{/* Dimensiones */}
 						<Box
 							sx={{
 								display: "grid",
-								gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr 1.2fr" },
+								gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
 								gap: 2,
 								alignItems: "center",
 							}}
@@ -164,20 +162,6 @@ export default function EpubProfilesTab({ profiles, onChange }: EpubProfilesTabP
 								fullWidth
 								value={currentProfile.height}
 								onChange={(e) => updateProfile({ height: Math.max(480, Number(e.target.value)) })}
-							/>
-							<FormControlLabel
-								control={
-									<Switch
-										checked={currentProfile.autoHeight}
-										onChange={(e) => updateProfile({ autoHeight: e.target.checked })}
-									/>
-								}
-								label={
-									<Box>
-										<Typography sx={{ fontSize: "12px", fontWeight: 700 }}>Scroll Continuo</Typography>
-										<Typography sx={{ fontSize: "10px", color: DS.muted }}>Tira vertical CDisplayEx</Typography>
-									</Box>
-								}
 							/>
 						</Box>
 
@@ -209,14 +193,13 @@ export default function EpubProfilesTab({ profiles, onChange }: EpubProfilesTabP
 									value={currentProfile.theme}
 									onChange={(e) => {
 										const val = e.target.value;
-										if (val === "light" || val === "core" || val === "oled" || val === "sepia") {
+										if (val === "light" || val === "core" || val === "sepia") {
 											updateProfile({ theme: val });
 										}
 									}}
 								>
 									<MenuItem value="light">Blanco Tinta Electrónica (#FFFFFF)</MenuItem>
 									<MenuItem value="core">Iron Blood Core (#050508)</MenuItem>
-									<MenuItem value="oled">Negro Puro OLED (#000000)</MenuItem>
 									<MenuItem value="sepia">Sepia Táctico (#1C1814)</MenuItem>
 								</Select>
 							</FormControl>
@@ -390,7 +373,7 @@ export default function EpubProfilesTab({ profiles, onChange }: EpubProfilesTabP
 									color: themeStyles.muted,
 								}}
 							>
-								{currentProfile.autoHeight ? "SCROLL CONTINUO" : "PÁG. FIJA"}
+								PÁG. FIJA
 							</Typography>
 						</Box>
 

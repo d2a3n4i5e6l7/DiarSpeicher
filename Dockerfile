@@ -11,6 +11,7 @@ RUN RID="linux-x64"; \
     dotnet restore src/DiarSpeicher.Api/DiarSpeicher.Api.csproj -r "$RID"
 
 COPY src/ src/
+COPY frontEnd/public/fonts/ frontEnd/public/fonts/
 
 RUN RID="linux-x64"; \
     if [ "$TARGETARCH" = "arm64" ]; then RID="linux-arm64"; fi; \

@@ -112,8 +112,7 @@ public sealed class ScanProgressTests : IDisposable
             new ThumbnailService(composite, NullLogger<ThumbnailService>.Instance),
             new ArchiveConversionService(NullLogger<ArchiveConversionService>.Instance),
             NullLogger<LibraryScannerService>.Instance,
-            storageOptions: null,
-            progressPublisher: progressPublisher);
+            new LibraryScannerOptions { ProgressPublisher = progressPublisher });
     }
 
     private async Task<string> SeedLibraryAsync(int seriesCount)

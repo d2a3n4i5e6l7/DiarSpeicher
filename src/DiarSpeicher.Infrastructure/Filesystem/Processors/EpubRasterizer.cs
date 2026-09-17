@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using AngleSharp.Html.Parser;
 using System.Text.RegularExpressions;
 using SkiaSharp;
 
@@ -68,10 +69,9 @@ public static class EpubRasterizer
         var headingLineHeight = headingFontSize * 1.3f;
         var paragraphSpacing = baseFontSize * 0.75f;
 
-        using var typeface = SKTypeface.FromFamilyName(profile.FontFamily) ?? SKTypeface.Default;
-        using var textFont = new SKFont(typeface, baseFontSize) { Subpixel = true };
-        using var headingTypeface = SKTypeface.FromFamilyName(profile.FontFamily, SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright) ?? typeface;
-        using var headingFont = new SKFont(headingTypeface, headingFontSize) { Subpixel = true };
+        var fonts = EpubFontProvider.Resolve(profile, archive);
+        using var textFont = new SKFont(fonts.Regular, baseFontSize) { Subpixel = true };
+        using var headingFont = new SKFont(fonts.Bold, headingFontSize) { Subpixel = true };
 
         var metrics = new LayoutMetrics(contentWidth, lineHeight, headingLineHeight, paragraphSpacing, marginY);
 
@@ -262,7 +262,7 @@ public static class EpubRasterizer
 
         var blocks = ExtractBlocks(textHtml);
         var meta = new PageMeta(globalPageNumber, totalBookPages, bookTitle, target.ChapterSpineIndex, target.SubpageIndex, target.TotalSubpagesInChapter);
-        return RenderSubpageToWebp(blocks, meta, profile, target.SubpageIndex);
+        return RenderSubpageToWebp(blocks, meta, profile, target.SubpageIndex, archive);
     }
 
     private static string? FindMainImageSrc(string html)
@@ -297,24 +297,50 @@ public static class EpubRasterizer
         return string.Join('/', stack);
     }
 
+    private static readonly IHtmlParser HtmlParser = new HtmlParser();
+
+    private static readonly string[] BlockSelectors =
+        ["h1", "h2", "h3", "h4", "h5", "h6", "p", "blockquote", "li", "dd", "dt", "figcaption", "pre"];
+
+    /// <summary>
+    /// Los bloques de texto del capitulo, en orden y con su etiqueta real.
+    ///
+    /// Antes esto era una expresion regular que emparejaba aperturas y cierres distintos: un
+    /// &lt;div&gt; cerraba con un &lt;/h1&gt; y el titulo del capitulo acababa clasificado como
+    /// parrafo. Contra tres libros de tres editoriales se perdian todos o casi todos los
+    /// titulos, porque envolver el contenido en div o section es lo normal.
+    /// </summary>
     private static List<RenderBlock> ExtractBlocks(string html)
     {
-        var matches = ParagraphRegex.Matches(html);
-        if (matches.Count > 0)
+        using var doc = HtmlParser.ParseDocument(html);
+
+        var bloques = new List<RenderBlock>();
+        foreach (var el in doc.QuerySelectorAll(string.Join(',', BlockSelectors)))
         {
-            return matches
-                .Select(m => ParseBlock(m.Value, m.Groups[1].Value))
-                .Where(b => !string.IsNullOrWhiteSpace(b.Text))
-                .ToList();
+            // Un <p> dentro de un <li> ya lo aporta el <p>: solo cuentan las hojas.
+            if (el.QuerySelector(string.Join(',', BlockSelectors)) != null) continue;
+
+            var texto = WhitespaceRegex.Replace(el.TextContent, " ").Trim();
+            if (texto.Length == 0) continue;
+
+            var nivel = el.TagName.Length == 2 && el.TagName[0] == 'H' && char.IsDigit(el.TagName[1])
+                ? el.TagName[1] - '0'
+                : 0;
+
+            bloques.Add(new RenderBlock(texto, nivel > 0, nivel));
         }
 
+        if (bloques.Count > 0) return bloques;
+
         var clean = CleanHtmlText(html);
-        var lines = clean.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return lines
+        return clean
+            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(line => !string.IsNullOrWhiteSpace(line))
             .Select(line => new RenderBlock(line, false, 0))
             .ToList();
     }
+
+    private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
 
     private static RenderBlock ParseBlock(string tagBlock, string innerHtml)
     {
@@ -339,12 +365,6 @@ public static class EpubRasterizer
             SKColor.Parse("#000000"),
             SKColor.Parse("#555555"),
             SKColor.Parse("#C21818")),
-        "oled" => new ThemeColors(
-            SKColor.Parse("#000000"),
-            SKColor.Parse("#FFFFFF"),
-            SKColor.Parse("#FF3E3E"),
-            SKColor.Parse("#757575"),
-            SKColor.Parse("#C21818")),
         "sepia" => new ThemeColors(
             SKColor.Parse("#1C1814"),
             SKColor.Parse("#EAD9C2"),
@@ -363,7 +383,8 @@ public static class EpubRasterizer
         List<RenderBlock> blocks,
         PageMeta meta,
         EpubDeviceProfile profile,
-        int subpageIndex)
+        int subpageIndex,
+        ZipArchive? archive = null)
     {
         var width = Math.Max(480, profile.Width);
         var marginX = Math.Max(24, profile.MarginHorizontal);
@@ -377,10 +398,10 @@ public static class EpubRasterizer
         var headingLineHeight = headingFontSize * 1.3f;
         var paragraphSpacing = baseFontSize * 0.75f;
 
-        using var typeface = SKTypeface.FromFamilyName(profile.FontFamily) ?? SKTypeface.Default;
-        using var textFont = new SKFont(typeface, baseFontSize) { Subpixel = true };
-        using var headingTypeface = SKTypeface.FromFamilyName(profile.FontFamily, SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright) ?? typeface;
-        using var headingFont = new SKFont(headingTypeface, headingFontSize) { Subpixel = true };
+        var fonts = EpubFontProvider.Resolve(profile, archive);
+        var typeface = fonts.Regular;
+        using var textFont = new SKFont(fonts.Regular, baseFontSize) { Subpixel = true };
+        using var headingFont = new SKFont(fonts.Bold, headingFontSize) { Subpixel = true };
 
         using var textPaint = new SKPaint { Color = colors.Text, IsAntialias = true };
         using var headingPaint = new SKPaint { Color = colors.Heading, IsAntialias = true };
@@ -519,34 +540,14 @@ public static class EpubRasterizer
         canvas.DrawLine(width - marginX, marginY, width - marginX - bracketSize, marginY, accentPaint);
         canvas.DrawLine(width - marginX, marginY, width - marginX, marginY + bracketSize, accentPaint);
 
-        using var headerPaint = new SKPaint { Color = colors.Muted, IsAntialias = true };
+        using var headerPaint = new SKPaint { Color = colors.Accent, IsAntialias = true };
         using var headerFont = new SKFont(typeface, 20f);
 
         var titleStr = string.IsNullOrWhiteSpace(meta.BookTitle) ? "DIARSPEICHER ARCHIVE" : meta.BookTitle.ToUpperInvariant();
-        if (titleStr.Length > 36) titleStr = string.Concat(titleStr.AsSpan(0, 33), "...");
+        if (titleStr.Length > 46) titleStr = string.Concat(titleStr.AsSpan(0, 43), "...");
 
         var headerY = marginY + 36f;
         canvas.DrawText(titleStr, marginX + 12f, headerY, SKTextAlign.Left, headerFont, headerPaint);
-
-        string pageIndicator;
-        if (meta.TotalSubpages > 1)
-        {
-            pageIndicator = $"CH. {meta.ChapterIndex:D2} · PÁG. {meta.SubpageIndex + 1}/{meta.TotalSubpages}";
-        }
-        else if (meta.ChapterIndex > 0)
-        {
-            pageIndicator = $"CH. {meta.ChapterIndex:D2}";
-        }
-        else
-        {
-            pageIndicator = "";
-        }
-
-        if (!string.IsNullOrEmpty(pageIndicator))
-        {
-            var pageLen = headerFont.MeasureText(pageIndicator);
-            canvas.DrawText(pageIndicator, width - marginX - pageLen - 12f, headerY, SKTextAlign.Left, headerFont, headerPaint);
-        }
 
         using var barPaint = new SKPaint { Color = colors.Accent.WithAlpha(110), StrokeWidth = 1f, IsStroke = true, IsAntialias = true };
         canvas.DrawLine(marginX, marginY + 54f, width - marginX, marginY + 54f, barPaint);
@@ -566,13 +567,15 @@ public static class EpubRasterizer
         using var barPaint = new SKPaint { Color = colors.Accent.WithAlpha(90), StrokeWidth = 1f, IsStroke = true, IsAntialias = true };
         canvas.DrawLine(marginX, footerY - 24f, width - marginX, footerY - 24f, barPaint);
 
-        using var footerPaint = new SKPaint { Color = colors.Muted.WithAlpha(180), IsAntialias = true };
+        using var logoPaint = new SKPaint { Color = colors.Muted.WithAlpha(180), IsAntialias = true };
+        using var pagePaint = new SKPaint { Color = colors.Accent, IsAntialias = true };
         using var footerFont = new SKFont(typeface, 16f);
 
-        canvas.DrawText("DIARSPEICHER // PROTOCOL ARCHIVE", marginX + 8f, footerY, SKTextAlign.Left, footerFont, footerPaint);
+        canvas.DrawText("DIARSPEICHER", marginX + 8f, footerY, SKTextAlign.Left, footerFont, logoPaint);
 
-        var rightLabel = $"[ PÁG. {meta.PageNumber:D3} // {meta.TotalPages:D3} ]";
+        var pct = meta.TotalPages > 0 ? meta.PageNumber * 100f / meta.TotalPages : 0f;
+        var rightLabel = $"{meta.PageNumber} / {meta.TotalPages}  ·  {pct:F0}%";
         var rightLen = footerFont.MeasureText(rightLabel);
-        canvas.DrawText(rightLabel, width - marginX - rightLen - 8f, footerY, SKTextAlign.Left, footerFont, footerPaint);
+        canvas.DrawText(rightLabel, width - marginX - rightLen - 8f, footerY, SKTextAlign.Left, footerFont, pagePaint);
     }
 }

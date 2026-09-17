@@ -97,6 +97,11 @@ builder.Services.AddSingleton<IArchiveConversionService, ArchiveConversionServic
 builder.Services.AddSingleton<IMangaBakaCatalog, MangaBakaCatalog>();
 builder.Services.AddSingleton<IMangaBakaIngestService, MangaBakaIngestService>();
 builder.Services.AddScoped<ISeriesMetadataMatcher, SeriesMetadataMatcher>();
+builder.Services.AddScoped(sp => new LibraryScannerOptions
+{
+    Storage = sp.GetService<IOptions<StorageOptions>>(),
+    ProgressPublisher = sp.GetService<IScanProgressPublisher>()
+});
 builder.Services.AddScoped<ILibraryScannerService, LibraryScannerService>();
 builder.Services.AddSingleton<IScannerQueue, ScannerQueue>();
 builder.Services.AddHostedService<ScanBackgroundService>();
