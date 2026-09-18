@@ -5,28 +5,28 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="AngleSharp" Version="1.8.1" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11">
+    <PackageReference Include="AngleSharp" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <!-- "runtime" es obligatorio aunque arrastre Roslyn al publish: dotnet ef necesita
            el ensamblado de Design en la salida del proyecto de arranque para construir el
            modelo. Quitarlo ahorra 22 MB y rompe "dotnet ef migrations add". -->
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.11">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools">
       <!-- "runtime" es obligatorio aunque arrastre Roslyn al publish: dotnet ef necesita
            el ensamblado de Design en la salida del proyecto de arranque para construir el
            modelo. Quitarlo ahorra 22 MB y rompe "dotnet ef migrations add". -->
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
-    <PackageReference Include="PdfPig" Version="0.1.16" />
-    <PackageReference Include="PDFtoImage" Version="5.4.0" />
-    <PackageReference Include="SharpCompress" Version="0.50.4" />
-    <PackageReference Include="SkiaSharp" Version="4.151.2" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.151.2" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="PdfPig" />
+    <PackageReference Include="PDFtoImage" />
+    <PackageReference Include="SharpCompress" />
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" />
   </ItemGroup>
 
   <PropertyGroup>

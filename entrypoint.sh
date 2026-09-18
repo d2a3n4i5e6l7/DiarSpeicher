@@ -30,10 +30,6 @@ mkdir -p /tmp
 as_root chmod 1777 /tmp
 as_root chown -R "$PUID:$PGID" /tmp
 
-DOTNET_EXTRACT="${DOTNET_BUNDLE_EXTRACT_BASE_DIR:-/tmp/.net}"
-mkdir -p "$DOTNET_EXTRACT"
-as_root chown -R "$PUID:$PGID" "$DOTNET_EXTRACT"
-
 umask 0002
 
 if [ "$IS_ROOT" = true ] && [ "$PUID" != "0" ]; then
