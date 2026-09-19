@@ -28,7 +28,15 @@ public class DiarSpeicherDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        ConfigureLibraries(modelBuilder);
+        ConfigureSeries(modelBuilder);
+        ConfigureMedia(modelBuilder);
+        ConfigureTags(modelBuilder);
+        ConfigureUsersAndSessions(modelBuilder);
+    }
 
+    private static void ConfigureLibraries(ModelBuilder modelBuilder)
+    {
         modelBuilder.Entity<Library>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -62,7 +70,10 @@ public class DiarSpeicherDbContext : DbContext
             entity.Property(e => e.DefaultReadingMode).HasConversion<string>();
             entity.Property(e => e.DefaultLibraryViewMode).HasConversion<string>();
         });
+    }
 
+    private static void ConfigureSeries(ModelBuilder modelBuilder)
+    {
         modelBuilder.Entity<Series>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -89,7 +100,10 @@ public class DiarSpeicherDbContext : DbContext
             entity.HasKey(e => e.SeriesId);
             entity.Property(e => e.SeriesId).HasMaxLength(32);
         });
+    }
 
+    private static void ConfigureMedia(ModelBuilder modelBuilder)
+    {
         modelBuilder.Entity<Media>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -104,13 +118,7 @@ public class DiarSpeicherDbContext : DbContext
             entity.HasIndex(e => e.Hash);
             entity.HasIndex(e => e.KoreaderHash);
             entity.HasIndex(e => e.DeletedAt);
-
-            // "Latest books" orders by creation date on every call; without this the query
-            // scans the table and sorts it into a temporary B-tree.
             entity.HasIndex(e => e.CreatedAt);
-
-            // Listar los tomos de una serie filtra por SeriesId y ordena por SortName, asi que
-            // el indice compuesto sirve las dos mitades y evita el sort temporal.
             entity.HasIndex(e => new { e.SeriesId, e.SortName });
 
             entity.HasOne(e => e.Metadata)
@@ -128,8 +136,6 @@ public class DiarSpeicherDbContext : DbContext
 
         modelBuilder.Entity<MediaPage>(entity =>
         {
-            // Clave compuesta: una pagina se identifica por su libro y su numero, no tiene
-            // identidad propia, y asi el upsert de la primera medicion no puede duplicar filas.
             entity.HasKey(e => new { e.MediaId, e.Number });
             entity.Property(e => e.MediaId).HasMaxLength(32);
             entity.Property(e => e.FileName).HasMaxLength(255).IsRequired();
@@ -152,7 +158,10 @@ public class DiarSpeicherDbContext : DbContext
                 .HasForeignKey(e => e.MediaId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+    }
 
+    private static void ConfigureTags(ModelBuilder modelBuilder)
+    {
         modelBuilder.Entity<Tag>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -191,7 +200,10 @@ public class DiarSpeicherDbContext : DbContext
             entity.HasKey(e => e.Path);
             entity.Property(e => e.Path).IsRequired();
         });
+    }
 
+    private static void ConfigureUsersAndSessions(ModelBuilder modelBuilder)
+    {
         modelBuilder.Entity<ReadingSession>(entity =>
         {
             entity.HasKey(e => e.Id);

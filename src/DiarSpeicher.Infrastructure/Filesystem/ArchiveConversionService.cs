@@ -70,15 +70,7 @@ public class ArchiveConversionService : IArchiveConversionService
                 var deleted = false;
                 if (hardDeleteSource && File.Exists(source))
                 {
-                    // A la papelera, no a File.Delete: esto corre solo dentro del escaneo,
-                    // sin que nadie confirme nada, asi que un CBR convertido mal o un CBZ
-                    // corrupto se llevaria el original sin vuelta atras.
-                    deleted = _trash.TryMoveToTrash(source, out _) == TrashOutcome.Moved;
-
-                    if (!deleted)
-                    {
-                        _logger.LogWarning("No se pudo retirar el CBR {Source}; se deja en su sitio", source);
-                    }
+                    deleted = TryRetireSource(source);
                 }
 
                 conversions.Add(new ArchiveConversion(source, target, deleted));
@@ -96,6 +88,17 @@ public class ArchiveConversionService : IArchiveConversionService
     /// Escribe primero a un temporal y renombra al final: un corte a mitad de conversión
     /// dejaría si no un CBZ truncado que el escáner indexaría como libro válido.
     /// </summary>
+    // A la papelera, no a File.Delete: esto corre solo dentro del escaneo, sin que nadie
+    // confirme nada, asi que un CBR convertido mal o un CBZ corrupto se llevaria el
+    // original sin vuelta atras.
+    private bool TryRetireSource(string source)
+    {
+        if (_trash.TryMoveToTrash(source, out _) == TrashOutcome.Moved) return true;
+
+        _logger.LogWarning("No se pudo retirar el CBR {Source}; se deja en su sitio", source);
+        return false;
+    }
+
     private async Task<bool> TryConvertAsync(string source, string target, CancellationToken cancellationToken)
     {
         var temporary = target + ".converting";
@@ -117,7 +120,7 @@ public class ArchiveConversionService : IArchiveConversionService
 
                     var zipEntry = zip.CreateEntry(key.Replace('\\', '/'), CompressionLevel.NoCompression);
                     await using var entryStream = await entry.OpenEntryStreamAsync(cancellationToken);
-                    await using var zipStream = zipEntry.Open();
+                    await using var zipStream = await zipEntry.OpenAsync(cancellationToken);
                     await entryStream.CopyToAsync(zipStream, cancellationToken);
                     entriesWritten++;
                 }

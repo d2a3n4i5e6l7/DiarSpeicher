@@ -33,7 +33,7 @@ public class KomgaService : IKomgaService
             .OrderBy(l => l.Name)
             .ToListAsync(ct);
 
-        return libraries.Select(ToLibraryDto).ToList();
+        return libraries.Select(KomgaDtoMapper.ToLibraryDto).ToList();
     }
 
     public async Task<KomgaLibraryDto?> GetLibraryByIdAsync(AuthUser user, string id, CancellationToken ct = default)
@@ -41,7 +41,7 @@ public class KomgaService : IKomgaService
         var lib = await _db.Libraries.ForUser(user)
             .FirstOrDefaultAsync(l => l.Id == id, ct);
 
-        return lib == null ? null : ToLibraryDto(lib);
+        return lib == null ? null : KomgaDtoMapper.ToLibraryDto(lib);
     }
 
     public async Task<KomgaPageResponse<KomgaSeriesDto>> GetSeriesAsync(
@@ -71,7 +71,7 @@ public class KomgaService : IKomgaService
             .Take(size)
             .ToListAsync(ct);
 
-        var seriesDtos = seriesList.Select(ToSeriesDto).ToList();
+        var seriesDtos = seriesList.Select(KomgaDtoMapper.ToSeriesDto).ToList();
         return KomgaPageResponse<KomgaSeriesDto>.Create(seriesDtos, page, size, totalElements);
     }
 
@@ -81,7 +81,7 @@ public class KomgaService : IKomgaService
             .WithDetails()
             .FirstOrDefaultAsync(s => s.Id == id, ct);
 
-        return series == null ? null : ToSeriesDto(series);
+        return series == null ? null : KomgaDtoMapper.ToSeriesDto(series);
     }
 
     public async Task<KomgaPageResponse<KomgaBookDto>> GetBooksAsync(
@@ -96,14 +96,7 @@ public class KomgaService : IKomgaService
             .Include(m => m.Series)
             .AsQueryable();
 
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            query = query.Where(m =>
-                m.Name.Contains(search) ||
-                (m.Metadata != null && m.Metadata.Title != null && m.Metadata.Title.Contains(search)) ||
-                (m.Metadata != null && m.Metadata.Summary != null && m.Metadata.Summary.Contains(search)) ||
-                (m.Metadata != null && m.Metadata.Writers != null && m.Metadata.Writers.Contains(search)));
-        }
+        query = query.MatchingText(search);
 
         var totalElements = await query.CountAsync(ct);
         var books = await query
@@ -114,7 +107,7 @@ public class KomgaService : IKomgaService
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
-        var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id), epubTotals: epubTotals)).ToList();
+        var bookDtos = books.Select(b => KomgaDtoMapper.ToBookDto(b, sessions.GetValueOrDefault(b.Id), epubTotals: epubTotals)).ToList();
 
         return KomgaPageResponse<KomgaBookDto>.Create(bookDtos, page, size, totalElements);
     }
@@ -143,7 +136,7 @@ public class KomgaService : IKomgaService
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
-        var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id), epubTotals: epubTotals)).ToList();
+        var bookDtos = books.Select(b => KomgaDtoMapper.ToBookDto(b, sessions.GetValueOrDefault(b.Id), epubTotals: epubTotals)).ToList();
 
         return KomgaPageResponse<KomgaBookDto>.Create(bookDtos, page, size, totalElements);
     }
@@ -169,7 +162,7 @@ public class KomgaService : IKomgaService
 
         var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
-        var bookDtos = books.Select(b => ToBookDto(b, sessions.GetValueOrDefault(b.Id), epubTotals: epubTotals)).ToList();
+        var bookDtos = books.Select(b => KomgaDtoMapper.ToBookDto(b, sessions.GetValueOrDefault(b.Id), epubTotals: epubTotals)).ToList();
 
         return KomgaPageResponse<KomgaBookDto>.Create(bookDtos, page, size, totalElements);
     }
@@ -189,7 +182,7 @@ public class KomgaService : IKomgaService
 
         var progress = await _progress.ResolveAsync(book, session, ct);
 
-        return ToBookDto(book, session, progress.TotalPages, overrideCurrentPage: progress.Page);
+        return KomgaDtoMapper.ToBookDto(book, session, progress.TotalPages, overrideCurrentPage: progress.Page);
     }
 
     public async Task<List<KomgaBookPageDto>> GetBookPagesAsync(AuthUser user, string id, CancellationToken ct = default)
@@ -315,112 +308,22 @@ public class KomgaService : IKomgaService
         return true;
     }
 
-    private static KomgaLibraryDto ToLibraryDto(Library l) => new()
-    {
-        Id = l.Id,
-        Name = l.Name,
-        Root = l.Path
-    };
 
-    private static KomgaSeriesDto ToSeriesDto(Series s)
-    {
-        var title = s.Metadata?.Title ?? s.Name;
-        var booksCount = s.Media.Count(m => m.DeletedAt == null);
-
-        return new KomgaSeriesDto
-        {
-            Id = s.Id,
-            LibraryId = s.LibraryId ?? string.Empty,
-            Name = s.Name,
-            Url = s.Path,
-            Created = s.CreatedAt.ToString("O"),
-            LastModified = (s.UpdatedAt ?? s.CreatedAt).ToString("O"),
-            FileLastModified = (s.UpdatedAt ?? s.CreatedAt).ToString("O"),
-            BooksCount = booksCount,
-            BooksUnreadCount = booksCount,
-            Metadata = new KomgaSeriesMetadataDto
-            {
-                Title = title,
-                Summary = s.Metadata?.Summary ?? s.Description ?? string.Empty,
-                AgeRating = s.Metadata?.AgeRating
-            }
-        };
-    }
-
-    private static KomgaBookDto ToBookDto(
-        Media m,
-        ReadingSession? s,
-        int? overridePagesCount = null,
-        IReadOnlyDictionary<string, int>? epubTotals = null,
-        int? overrideCurrentPage = null)
-    {
-        var title = m.Metadata?.Title ?? m.Name;
-        var ext = ContentTypeExtensions.FromExtension(m.Extension);
-        var mib = m.Size / (1024.0 * 1024.0);
-
-        List<KomgaAuthorDto> authors = [];
-        if (!string.IsNullOrWhiteSpace(m.Metadata?.Writers))
-        {
-            authors = m.Metadata.Writers
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(w => new KomgaAuthorDto { Name = w, Role = "writer" })
-                .ToList();
-        }
-
-        var progress = IReadingProgress.FromSession(m, s, overridePagesCount ?? epubTotals.TotalFor(m.Id));
-
-        KomgaReadProgressDto? readProgress = null;
-        if (s != null)
-        {
-            readProgress = new KomgaReadProgressDto
-            {
-                Page = overrideCurrentPage ?? progress.Page ?? 1,
-                Completed = s.Status == ReadingStatus.Finished,
-                ReadDate = (s.UpdatedAt ?? s.CreatedAt).ToString("O"),
-                Created = s.CreatedAt.ToString("O"),
-                LastModified = (s.UpdatedAt ?? s.CreatedAt).ToString("O")
-            };
-        }
-
-        return new KomgaBookDto
-        {
-            Id = m.Id,
-            SeriesId = m.SeriesId ?? string.Empty,
-            SeriesTitle = m.Series?.Name ?? string.Empty,
-            LibraryId = m.Series?.LibraryId ?? string.Empty,
-            Name = m.Name,
-            Url = m.Path,
-            Created = m.CreatedAt.ToString("O"),
-            LastModified = (m.UpdatedAt ?? m.CreatedAt).ToString("O"),
-            FileLastModified = (m.UpdatedAt ?? m.CreatedAt).ToString("O"),
-            SizeBytes = m.Size,
-            Size = $"{mib:F1} MB",
-            Media = new KomgaMediaDto
-            {
-                Status = "READY",
-                MediaType = ext.ToMimeType(),
-                PagesCount = overridePagesCount ?? progress.TotalPages
-            },
-            Metadata = new KomgaBookMetadataDto
-            {
-                Title = title,
-                Summary = m.Metadata?.Summary ?? string.Empty,
-                Authors = authors
-            },
-            ReadProgress = readProgress
-        };
-    }
-
-    private async Task<List<KomgaBookPageDto>> GetEpubBookPagesAsync(Media book, CancellationToken ct)
+    private async Task CleanStalePagesAsync(string mediaId, CancellationToken ct)
     {
         var stalePages = await _db.MediaPages
-            .Where(p => p.MediaId == book.Id)
+            .Where(p => p.MediaId == mediaId)
             .ToListAsync(ct);
         if (stalePages.Count > 0)
         {
             _db.MediaPages.RemoveRange(stalePages);
             await _db.SaveChangesAsync(ct);
         }
+    }
+
+    private async Task<List<KomgaBookPageDto>> GetEpubBookPagesAsync(Media book, CancellationToken ct)
+    {
+        await CleanStalePagesAsync(book.Id, ct);
 
         var profile = _epubProfileProvider != null
             ? await _epubProfileProvider.GetCurrentProfileAsync(ct)
@@ -435,34 +338,38 @@ public class KomgaService : IKomgaService
         var pages = new List<KomgaBookPageDto>(map.TotalPages);
         for (var i = 1; i <= map.TotalPages; i++)
         {
-            var target = map.Pages[i - 1];
-            int width = profile.Width;
-            int? height = profile.Height;
-            string mediaType = "image/webp";
-
-            if (target.IsImageOnly && target.ImageWidth.HasValue && target.ImageHeight.HasValue)
-            {
-                width = target.ImageWidth.Value;
-                height = target.ImageHeight.Value;
-                var ext = Path.GetExtension(target.EntryFullName).ToLowerInvariant();
-                mediaType = ext switch
-                {
-                    ".png" => "image/png",
-                    ".webp" => "image/webp",
-                    _ => "image/jpeg"
-                };
-            }
-
-            pages.Add(new KomgaBookPageDto
-            {
-                Number = i,
-                FileName = $"page_{i:D4}.webp",
-                MediaType = mediaType,
-                Width = width,
-                Height = height
-            });
+            pages.Add(BuildBookPageDto(map.Pages[i - 1], i, profile));
         }
         return pages;
     }
 
+    private static KomgaBookPageDto BuildBookPageDto(EpubSubpageTarget target, int pageNumber, EpubDeviceProfile profile)
+    {
+        int width = profile.Width;
+        int? height = profile.Height;
+        string mediaType = "image/webp";
+
+        if (target.IsImageOnly && target.ImageWidth.HasValue && target.ImageHeight.HasValue)
+        {
+            width = target.ImageWidth.Value;
+            height = target.ImageHeight.Value;
+            var ext = Path.GetExtension(target.EntryFullName).ToLowerInvariant();
+            mediaType = ext switch
+            {
+                ".png" => "image/png",
+                ".webp" => "image/webp",
+                _ => "image/jpeg"
+            };
+        }
+
+        return new KomgaBookPageDto
+        {
+            Number = pageNumber,
+            FileName = $"page_{pageNumber:D4}.webp",
+            MediaType = mediaType,
+            Width = width,
+            Height = height
+        };
+    }
 }
+

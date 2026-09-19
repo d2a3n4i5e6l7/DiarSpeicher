@@ -20,6 +20,15 @@ public static class OpdsEndpoints
 
     private static void MapGroup(RouteGroupBuilder group)
     {
+        MapCatalogRoutes(group);
+        MapLibraryFeedRoutes(group);
+        MapSeriesFeedRoutes(group);
+        MapBookFeedRoutes(group);
+        MapBookContentRoutes(group);
+    }
+
+    private static void MapCatalogRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/catalog", async (HttpContext context, IOpdsService opdsService, CancellationToken ct) =>
         {
             var user = RequestIdentity.GetAuthUser(context);
@@ -54,7 +63,10 @@ public static class OpdsEndpoints
             var xml = await opdsService.GetKeepReadingFeedXmlAsync(user, apiKey, ct);
             return Results.Content(xml, AtomContentType);
         });
+    }
 
+    private static void MapLibraryFeedRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/libraries", async (
             string? search,
             HttpContext context,
@@ -86,7 +98,10 @@ public static class OpdsEndpoints
                 return Results.NotFound($"Library {id} not found");
             }
         });
+    }
 
+    private static void MapSeriesFeedRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/series", async (
             string? search,
             int? page,
@@ -131,7 +146,10 @@ public static class OpdsEndpoints
                 return Results.NotFound($"Series {id} not found");
             }
         });
+    }
 
+    private static void MapBookFeedRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/books", async (
             string? search,
             int? page,
@@ -156,7 +174,10 @@ public static class OpdsEndpoints
             var xml = await opdsService.GetLatestBooksFeedAsync(user, Math.Max(0, page ?? 0), apiKey, ct);
             return Results.Content(xml, AtomContentType);
         });
+    }
 
+    private static void MapBookContentRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/books/{id}/thumbnail", async (
             string id,
             HttpContext context,

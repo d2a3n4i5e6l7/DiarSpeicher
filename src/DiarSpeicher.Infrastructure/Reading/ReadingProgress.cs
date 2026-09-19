@@ -26,6 +26,11 @@ public class ReadingProgress : IReadingProgress
             return new ReadingProgressView(session?.EndPage, Math.Max(1, book.Pages), false);
         }
 
+        return ViewFromEpubSession(book, session, currentTotal);
+    }
+
+    private static ReadingProgressView ViewFromEpubSession(Media book, ReadingSession? session, int? currentTotal)
+    {
         var storedTotal = session?.RenderedTotalPages ?? 0;
         var fallbackTotal = storedTotal > 0 ? storedTotal : book.Pages;
         var total = currentTotal is > 0 ? currentTotal.Value : Math.Max(1, fallbackTotal);
@@ -74,6 +79,20 @@ public class ReadingProgress : IReadingProgress
             _db.ReadingSessions.Add(session);
         }
 
+        ApplyProgressUpdate(session, isEpub, page, total, profileKey, update);
+
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    private static void ApplyProgressUpdate(
+        ReadingSession session,
+        bool isEpub,
+        int page,
+        int total,
+        string? profileKey,
+        ReadingProgressUpdate update)
+    {
         if (isEpub)
         {
             session.RenderedPage = page;
@@ -92,9 +111,6 @@ public class ReadingProgress : IReadingProgress
             ? ReadingStatus.Finished
             : ReadingStatus.Reading;
         session.UpdatedAt = DateTimeOffset.UtcNow;
-
-        await _db.SaveChangesAsync(ct);
-        return true;
     }
 
     public async Task<ReadingProgressView> ResolveAsync(

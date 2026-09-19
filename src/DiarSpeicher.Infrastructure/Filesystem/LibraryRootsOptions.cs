@@ -57,13 +57,10 @@ public class LibraryRootsOptions
             return false;
         }
 
-        foreach (var root in ResolveRoots())
+        if (ResolveRoots().Any(root => IsInside(full, root)))
         {
-            if (IsInside(full, root))
-            {
-                resolved = full;
-                return true;
-            }
+            resolved = full;
+            return true;
         }
 
         return false;

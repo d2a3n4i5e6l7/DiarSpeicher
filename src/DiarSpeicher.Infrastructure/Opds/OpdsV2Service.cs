@@ -145,11 +145,7 @@ public class OpdsV2Service : IOpdsV2Service
         var books = await _db.Media.ForUser(user)
             .Include(m => m.Metadata)
             .Include(m => m.Series)
-            .Where(m =>
-                m.Name.Contains(search) ||
-                (m.Metadata != null && m.Metadata.Title != null && m.Metadata.Title.Contains(search)) ||
-                (m.Metadata != null && m.Metadata.Summary != null && m.Metadata.Summary.Contains(search)) ||
-                (m.Metadata != null && m.Metadata.Writers != null && m.Metadata.Writers.Contains(search)))
+            .MatchingText(search)
             .OrderBy(m => m.SortName).ThenBy(m => m.Name)
             .Take(PageSize)
             .ToListAsync(ct);

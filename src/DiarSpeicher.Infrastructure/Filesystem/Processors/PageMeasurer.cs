@@ -35,6 +35,8 @@ public static class PageMeasurer
 
     public static (int? Width, int? Height) Measure(ReadOnlySpan<byte> header)
     {
+        if (ImageHeader.TryRead(header, out var w, out var h)) return (w, h);
+
         try
         {
             using var data = SKData.CreateCopy(header);

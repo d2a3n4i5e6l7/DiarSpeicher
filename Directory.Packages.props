@@ -16,10 +16,10 @@
     <PackageVersion Include="PdfPig" Version="0.1.16" />
     <PackageVersion Include="PDFtoImage" Version="5.4.0" />
     <PackageVersion Include="SharpCompress" Version="0.50.4" />
+    <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.34.0.3385" />
     <PackageVersion Include="SkiaSharp" Version="4.152.1" />
     <PackageVersion Include="SkiaSharp.NativeAssets.Linux" Version="4.152.1" />
     <PackageVersion Include="Ulid" Version="1.4.1" />
-
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageVersion Include="xunit" Version="2.9.3" />

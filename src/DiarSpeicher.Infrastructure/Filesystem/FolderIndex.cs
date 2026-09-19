@@ -129,7 +129,7 @@ public sealed class FolderIndex : IFolderIndex, IDisposable
     /// </summary>
     public bool TryStartRefresh()
     {
-        if (!_refreshLock.Wait(0)) return false;
+        if (!_refreshLock.Wait(0, CancellationToken.None)) return false;
 
         _running = true;
         _refreshTask = Task.Run(() =>
@@ -138,9 +138,9 @@ public sealed class FolderIndex : IFolderIndex, IDisposable
             {
                 Rebuild(_lifetime.Token);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException cancelado)
             {
-                _logger.LogInformation("Repaso del indice de carpetas cancelado");
+                _logger.LogInformation(cancelado, "Repaso del indice de carpetas cancelado");
             }
             catch (Exception e)
             {
@@ -347,7 +347,7 @@ public sealed class FolderIndex : IFolderIndex, IDisposable
     {
         _lifetime.Cancel();
 
-        var finished = _refreshTask?.Wait(TimeSpan.FromSeconds(5)) ?? true;
+        var finished = _refreshTask?.Wait(TimeSpan.FromSeconds(5), CancellationToken.None) ?? true;
 
         _lifetime.Dispose();
 

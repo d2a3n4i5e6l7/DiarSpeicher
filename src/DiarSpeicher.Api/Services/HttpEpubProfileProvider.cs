@@ -39,7 +39,7 @@ public class HttpEpubProfileProvider : IEpubProfileProvider
 
         var defaults = EpubDeviceProfile.GetDefaults();
         EpubDeviceProfile fallback;
-        if (Regex.IsMatch(userAgent, "iPad|Tablet", RegexOptions.IgnoreCase))
+        if (Regex.IsMatch(userAgent, "iPad|Tablet", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(2)))
         {
             fallback = defaults.FirstOrDefault(p => p.Id == "p_tablet") ?? defaults[0];
         }

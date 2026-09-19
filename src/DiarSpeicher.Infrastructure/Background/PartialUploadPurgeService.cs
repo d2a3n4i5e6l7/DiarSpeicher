@@ -130,8 +130,5 @@ public sealed class PartialUploadPurgeService : BackgroundService
         }
     }
 
-    private sealed class UploadMeta
-    {
-        public string? PartPath { get; set; }
-    }
+    private sealed record UploadMeta(string? PartPath);
 }

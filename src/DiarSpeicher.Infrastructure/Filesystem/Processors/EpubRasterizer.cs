@@ -28,9 +28,9 @@ public static class EpubRasterizer
 
     private const int PageMapCacheLimit = 256;
 
-    private static readonly Regex ImgTagRegex = new(@"<img[^>]+src=[""']([^""']+)[""']", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex SvgImageRegex = new(@"<image[^>]+(?:href|xlink:href)=[""']([^""']+)[""']", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex HtmlTagRegex = new(@"<[^>]+>", RegexOptions.Compiled);
+    private static readonly Regex ImgTagRegex = new(@"<img[^>]+src=[""']([^""']+)[""']", RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(2));
+    private static readonly Regex SvgImageRegex = new(@"<image[^>]+(?:href|xlink:href)=[""']([^""']+)[""']", RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(2));
+    private static readonly Regex HtmlTagRegex = new(@"<[^>]+>", RegexOptions.Compiled, TimeSpan.FromSeconds(2));
 
     public record RenderBlock(string Text, bool IsHeading, int HeadingLevel);
 
@@ -247,36 +247,8 @@ public static class EpubRasterizer
 
         if (target.IsImageOnly)
         {
-            string htmlContent;
-            await using (var stream = await entry.OpenAsync(ct))
-            using (var reader = new StreamReader(stream))
-            {
-                htmlContent = await reader.ReadToEndAsync(ct);
-            }
-
-            var imgSrc = FindMainImageSrc(htmlContent);
-            if (!string.IsNullOrEmpty(imgSrc))
-            {
-                var resolvedPath = ResolveZipPath(entryDir, imgSrc);
-                var imgEntry = archive.GetEntry(resolvedPath);
-                if (imgEntry != null)
-                {
-                    await using var imgStream = await imgEntry.OpenAsync(ct);
-                    using var ms = new MemoryStream();
-                    await imgStream.CopyToAsync(ms, ct);
-                    var ctType = ContentTypeExtensions.FromExtension(Path.GetExtension(imgEntry.FullName));
-                    return new ExtractedPage(ctType, ms.ToArray());
-                }
-            }
-
-            var directExt = Path.GetExtension(entry.FullName).ToLowerInvariant();
-            if (directExt is ".jpg" or ".jpeg" or ".png" or ".webp")
-            {
-                await using var imgStream = await entry.OpenAsync(ct);
-                using var ms = new MemoryStream();
-                await imgStream.CopyToAsync(ms, ct);
-                return new ExtractedPage(ContentTypeExtensions.FromExtension(directExt), ms.ToArray());
-            }
+            var imagePage = await RenderImageOnlySubpageAsync(archive, entry, entryDir, ct);
+            if (imagePage != null) return imagePage;
         }
 
         string textHtml;
@@ -289,6 +261,46 @@ public static class EpubRasterizer
         var blocks = ExtractBlocks(textHtml);
         var meta = new PageMeta(globalPageNumber, totalBookPages, bookTitle, target.ChapterSpineIndex, target.SubpageIndex, target.TotalSubpagesInChapter);
         return RenderSubpageToWebp(blocks, meta, profile, target.SubpageIndex, archive);
+    }
+
+    private static async Task<ExtractedPage?> RenderImageOnlySubpageAsync(
+        ZipArchive archive,
+        ZipArchiveEntry entry,
+        string entryDir,
+        CancellationToken ct)
+    {
+        string htmlContent;
+        await using (var stream = await entry.OpenAsync(ct))
+        using (var reader = new StreamReader(stream))
+        {
+            htmlContent = await reader.ReadToEndAsync(ct);
+        }
+
+        var imgSrc = FindMainImageSrc(htmlContent);
+        if (!string.IsNullOrEmpty(imgSrc))
+        {
+            var resolvedPath = ResolveZipPath(entryDir, imgSrc);
+            var imgEntry = archive.GetEntry(resolvedPath);
+            if (imgEntry != null)
+            {
+                await using var imgStream = await imgEntry.OpenAsync(ct);
+                using var ms = new MemoryStream();
+                await imgStream.CopyToAsync(ms, ct);
+                var ctType = ContentTypeExtensions.FromExtension(Path.GetExtension(imgEntry.FullName));
+                return new ExtractedPage(ctType, ms.ToArray());
+            }
+        }
+
+        var directExt = Path.GetExtension(entry.FullName).ToLowerInvariant();
+        if (directExt is ".jpg" or ".jpeg" or ".png" or ".webp")
+        {
+            await using var imgStream = await entry.OpenAsync(ct);
+            using var ms = new MemoryStream();
+            await imgStream.CopyToAsync(ms, ct);
+            return new ExtractedPage(ContentTypeExtensions.FromExtension(directExt), ms.ToArray());
+        }
+
+        return null;
     }
 
     private static string? FindMainImageSrc(string html)
@@ -368,13 +380,13 @@ public static class EpubRasterizer
             .ToList();
     }
 
-    private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
+    private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled, TimeSpan.FromSeconds(2));
 
     private static string CleanHtmlText(string raw)
     {
         var text = HtmlTagRegex.Replace(raw, " ");
         text = System.Net.WebUtility.HtmlDecode(text);
-        return Regex.Replace(text, @"\s+", " ").Trim();
+        return WhitespaceRegex.Replace(text, " ").Trim();
     }
 
     private static ThemeColors GetColors(string theme) => theme.ToLowerInvariant() switch

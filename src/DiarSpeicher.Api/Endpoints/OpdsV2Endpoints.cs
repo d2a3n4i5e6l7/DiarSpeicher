@@ -86,6 +86,14 @@ public static class OpdsV2Endpoints
 
     private static void MapBookEndpoints(RouteGroupBuilder group)
     {
+        MapBookFeedRoutes(group);
+        MapBookDetailRoutes(group);
+        MapBookProgressionRoutes(group);
+        MapBookFileRoutes(group);
+    }
+
+    private static void MapBookFeedRoutes(RouteGroupBuilder group)
+    {
         async Task<IResult> BooksFeed(int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct)
         {
             var user = RequestIdentity.GetAuthUser(context);
@@ -110,7 +118,10 @@ public static class OpdsV2Endpoints
 
         group.MapGet("/books/keep-reading", KeepReadingFeed);
         group.MapGet("/libraries/keep-reading", KeepReadingFeed);
+    }
 
+    private static void MapBookDetailRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/books/{id}", async (string id, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {
             var user = RequestIdentity.GetAuthUser(context);
@@ -155,7 +166,10 @@ public static class OpdsV2Endpoints
 
             return Results.File(extractedPage.Content, extractedPage.ContentType.ToMimeType());
         });
+    }
 
+    private static void MapBookProgressionRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/books/{id}/progression", async (string id, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
         {
             var user = RequestIdentity.GetAuthUser(context);
@@ -174,7 +188,10 @@ public static class OpdsV2Endpoints
             var ok = await opdsV2.UpdateProgressionAsync(user, id, input, ct);
             return ok ? Results.Ok() : Results.BadRequest("Could not update progression");
         });
+    }
 
+    private static void MapBookFileRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/books/{id}/file", async (
             string id,
             HttpContext context,

@@ -64,15 +64,31 @@ public class LibraryScannerService : ILibraryScannerService
     /// </summary>
     private sealed record ScanSettings(BookAnalysisOptions Analysis, bool ConvertRarToZip, bool HardDeleteConversions)
     {
-        public static ScanSettings From(LibraryConfig? config) => new(
-            new BookAnalysisOptions
+        public static ScanSettings From(LibraryConfig? config)
+        {
+            if (config is null)
             {
-                ComputeFileHash = config?.GenerateFileHashes ?? true,
-                ComputeKoreaderHash = config?.GenerateKoreaderHashes ?? true,
-                ReadEmbeddedMetadata = config?.ProcessMetadata ?? true
-            },
-            config?.ConvertRarToZip ?? false,
-            config?.HardDeleteConversions ?? false);
+                return new(
+                    new BookAnalysisOptions
+                    {
+                        ComputeFileHash = true,
+                        ComputeKoreaderHash = true,
+                        ReadEmbeddedMetadata = true
+                    },
+                    ConvertRarToZip: false,
+                    HardDeleteConversions: false);
+            }
+
+            return new(
+                new BookAnalysisOptions
+                {
+                    ComputeFileHash = config.GenerateFileHashes,
+                    ComputeKoreaderHash = config.GenerateKoreaderHashes,
+                    ReadEmbeddedMetadata = config.ProcessMetadata
+                },
+                config.ConvertRarToZip,
+                config.HardDeleteConversions);
+        }
     }
 
     /// <summary>
@@ -147,14 +163,12 @@ public class LibraryScannerService : ILibraryScannerService
         }, cancellationToken);
     }
 
-    public async Task<LibraryScanReport> ScanLibraryAsync(string libraryId, CancellationToken cancellationToken = default)
+    private async Task<Library?> ResolveLibraryAsync(
+        string libraryId,
+        LibraryScanReport report,
+        Stopwatch sw,
+        CancellationToken cancellationToken)
     {
-        var sw = Stopwatch.StartNew();
-        var report = new LibraryScanReport { LibraryId = libraryId };
-
-        _logger.LogInformation("Starting scan for library {LibraryId}", libraryId);
-        await PublishProgressAsync(libraryId, ScanPhase.Started, cancellationToken);
-
         var library = await _dbContext.Libraries
             .Include(l => l.Config)
             .FirstOrDefaultAsync(l => l.Id == libraryId, cancellationToken);
@@ -166,7 +180,7 @@ public class LibraryScannerService : ILibraryScannerService
             report.ErrorMessage = $"Library {libraryId} not found";
             report.Duration = sw.Elapsed;
             await PublishProgressAsync(libraryId, ScanPhase.Failed, cancellationToken, new() { Message = report.ErrorMessage });
-            return report;
+            return null;
         }
 
         var libraryPath = Path.GetFullPath(library.Path);
@@ -180,13 +194,29 @@ public class LibraryScannerService : ILibraryScannerService
             report.ErrorMessage = $"Library directory {libraryPath} does not exist";
             report.Duration = sw.Elapsed;
             await PublishProgressAsync(libraryId, ScanPhase.Failed, cancellationToken, new() { Message = report.ErrorMessage });
-            return report;
+            return null;
         }
 
         if (library.Status.IsRecoveredIfPresent())
         {
             library.Status = FileStatus.Ready;
         }
+
+        return library;
+    }
+
+    public async Task<LibraryScanReport> ScanLibraryAsync(string libraryId, CancellationToken cancellationToken = default)
+    {
+        var sw = Stopwatch.StartNew();
+        var report = new LibraryScanReport { LibraryId = libraryId };
+
+        _logger.LogInformation("Starting scan for library {LibraryId}", libraryId);
+        await PublishProgressAsync(libraryId, ScanPhase.Started, cancellationToken);
+
+        var library = await ResolveLibraryAsync(libraryId, report, sw, cancellationToken);
+        if (library is null) return report;
+
+        var libraryPath = Path.GetFullPath(library.Path);
 
         var isCollectionBased = library.Config?.LibraryPattern == LibraryPattern.CollectionBased;
         var settings = ScanSettings.From(library.Config);
@@ -248,6 +278,18 @@ public class LibraryScannerService : ILibraryScannerService
 
         await UpsertScannedDirMtimesAsync(allObservedDirMtimes, cancellationToken);
 
+        await FinishScanAsync(library, libraryId, report, sw, cancellationToken);
+
+        return report;
+    }
+
+    private async Task FinishScanAsync(
+        Library library,
+        string libraryId,
+        LibraryScanReport report,
+        Stopwatch sw,
+        CancellationToken cancellationToken)
+    {
         // Sin esto la ficha decia "NUNCA ESCANEADA" por muchos escaneos que terminaran bien.
         library.LastScannedAt = DateTimeOffset.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -271,8 +313,6 @@ public class LibraryScannerService : ILibraryScannerService
             report.UpdatedSeries,
             report.UpdatedMedia,
             report.SkippedFiles);
-
-        return report;
     }
 
     private async Task ReconcileMediaOwnershipAsync(
@@ -301,19 +341,7 @@ public class LibraryScannerService : ILibraryScannerService
 
         if (media.Count == 0) return;
 
-        var repointed = 0;
-        foreach (var item in media)
-        {
-            var dir = Path.GetDirectoryName(Path.GetFullPath(item.Path));
-            if (string.IsNullOrEmpty(dir)) continue;
-
-            var owner = FindOwningSeries(owners, dir);
-
-            if (owner is null || string.Equals(owner, item.SeriesId, StringComparison.Ordinal)) continue;
-
-            item.SeriesId = owner;
-            repointed++;
-        }
+        var repointed = RepointMediaToOwners(media, owners);
 
         var removed = await RemoveDuplicateMediaRowsAsync(media, cancellationToken);
 
@@ -386,6 +414,23 @@ public class LibraryScannerService : ILibraryScannerService
         {
             _logger.LogDebug(ex, "No se pudo borrar la miniatura {Path}", path);
         }
+    }
+
+    private static int RepointMediaToOwners(List<Media> media, Dictionary<string, string> owners)
+    {
+        var repointed = 0;
+        foreach (var item in media)
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(item.Path));
+            if (string.IsNullOrEmpty(dir)) continue;
+
+            var owner = FindOwningSeries(owners, dir);
+            if (owner is null || string.Equals(owner, item.SeriesId, StringComparison.Ordinal)) continue;
+
+            item.SeriesId = owner;
+            repointed++;
+        }
+        return repointed;
     }
 
     private static string? FindOwningSeries(Dictionary<string, string> owners, string directory)

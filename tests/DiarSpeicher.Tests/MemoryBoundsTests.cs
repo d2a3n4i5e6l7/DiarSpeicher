@@ -240,8 +240,9 @@ public sealed class MemoryBoundsTests : IDisposable
 
         using var zip = ZipFile.OpenRead(ruta);
 
-        var metodo = typeof(EpubFontProvider)
-            .GetMethod("UniqueIdentifier", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var tipo = typeof(EpubFontProvider).Assembly
+            .GetType("DiarSpeicher.Infrastructure.Filesystem.Processors.EpubFontDeobfuscator")!;
+        var metodo = tipo.GetMethod("UniqueIdentifier", BindingFlags.Public | BindingFlags.Static)!;
 
         for (var i = 0; i < 50; i++)
         {

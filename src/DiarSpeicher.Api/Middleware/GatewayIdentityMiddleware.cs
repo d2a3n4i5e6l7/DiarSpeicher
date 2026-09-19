@@ -18,15 +18,8 @@ public class GatewayIdentityMiddleware
 
     public async Task InvokeAsync(HttpContext context, DiarSpeicherDbContext db)
     {
-        // Last, not first: the gateway clears the header in its proxy_forward snippet and then
-        // injects the validated value in the plugin location. If nginx were to forward both
-        // instead of keeping the last, reading the first would yield the cleared empty value
-        // and turn every request anonymous.
         var sub = context.Request.Headers["X-Auth-Sub"].LastOrDefault();
 
-        // A public route arrives with the header present and empty, and the gateway may also
-        // send the literal "anonymous". Neither is an identity: mirroring either would create a
-        // user row shared by every anonymous visitor.
         if (string.IsNullOrWhiteSpace(sub) || IsAnonymousSubject(sub))
         {
             await _next(context);
@@ -36,12 +29,8 @@ public class GatewayIdentityMiddleware
         var username = context.Request.Headers["X-Auth-User"].LastOrDefault();
         var roleHeader = context.Request.Headers["X-Auth-Role"].LastOrDefault() ?? "";
 
-        // "X-Auth-Age" is the name the gateway injects. Server ownership is deliberately not
-        // taken from a header: the gateway sends none, and nginx only strips the headers it
-        // names one by one, so any header it does not name reaches us straight from the client.
         var ageHeader = context.Request.Headers["X-Auth-Age"].LastOrDefault();
 
-        // Misma regla que el resto: la última aparición es la que el Gateway validó.
         var permsHeader = context.Request.Headers["X-Auth-Perms"].LastOrDefault() ?? "";
 
         var mirrored = await SyncMirrorAsync(
@@ -50,30 +39,7 @@ public class GatewayIdentityMiddleware
             string.IsNullOrWhiteSpace(username) ? sub : username,
             context.RequestAborted);
 
-        var authUser = new AuthUser
-        {
-            Id = mirrored.Id,
-            Username = mirrored.Username,
-            IsServerOwner = mirrored.IsServerOwner,
-            AgeRestriction = mirrored.AgeRestriction?.Age,
-            RestrictOnUnset = mirrored.AgeRestriction?.RestrictOnUnset ?? true,
-            ExcludedLibraryIds = [.. mirrored.ExcludedLibraries.Select(e => e.LibraryId)]
-        };
-
-        foreach (var role in roleHeader.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            authUser.Roles.Add(role);
-        }
-
-        foreach (var permission in permsHeader.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            authUser.Permissions.Add(permission);
-        }
-
-        if (int.TryParse(ageHeader, out var age))
-        {
-            authUser.AgeRestriction = age;
-        }
+        var authUser = BuildAuthUser(mirrored, roleHeader, permsHeader, ageHeader);
 
         context.Items[AuthUserKey] = authUser;
         context.User = BuildPrincipal(authUser);
@@ -165,6 +131,36 @@ public class GatewayIdentityMiddleware
         }
 
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "GatewayTrusted"));
+    }
+
+    private static AuthUser BuildAuthUser(User mirrored, string roleHeader, string permsHeader, string? ageHeader)
+    {
+        var authUser = new AuthUser
+        {
+            Id = mirrored.Id,
+            Username = mirrored.Username,
+            IsServerOwner = mirrored.IsServerOwner,
+            AgeRestriction = mirrored.AgeRestriction?.Age,
+            RestrictOnUnset = mirrored.AgeRestriction?.RestrictOnUnset ?? true,
+            ExcludedLibraryIds = [.. mirrored.ExcludedLibraries.Select(e => e.LibraryId)]
+        };
+
+        foreach (var role in roleHeader.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            authUser.Roles.Add(role);
+        }
+
+        foreach (var permission in permsHeader.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            authUser.Permissions.Add(permission);
+        }
+
+        if (int.TryParse(ageHeader, out var age))
+        {
+            authUser.AgeRestriction = age;
+        }
+
+        return authUser;
     }
 }
 

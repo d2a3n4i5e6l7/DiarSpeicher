@@ -23,6 +23,8 @@ namespace DiarSpeicher.Api.Endpoints;
 public static class DiarSpeicherEndpoints
 {
     private const string AuthUserKey = "AuthUser";
+    private const string CacheControlPublicOneDay = "public, max-age=86400";
+    private const string SeriesThumbnailRoute = "/series/{id}/thumbnail";
 
     private static readonly JsonSerializerOptions ScanJson =
         new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
@@ -111,6 +113,13 @@ public static class DiarSpeicherEndpoints
 
     private static void MapMediaRoutes(RouteGroupBuilder group)
     {
+        MapMediaListRoutes(group);
+        MapMediaContentRoutes(group);
+        MapMediaProgressRoutes(group);
+    }
+
+    private static void MapMediaListRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/media", async (
             HttpContext httpContext,
             [FromServices] IDiarSpeicherService service,
@@ -144,7 +153,10 @@ public static class DiarSpeicherEndpoints
             var result = await service.GetMediaByIdAsync(user, id, ct);
             return result == null ? Results.NotFound() : Results.Ok(result);
         });
+    }
 
+    private static void MapMediaContentRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/media/{id}/page/{page:int}", async (
             string id,
             int page,
@@ -156,7 +168,7 @@ public static class DiarSpeicherEndpoints
             var opened = await service.OpenMediaPageAsync(user, id, page, ct);
             if (opened == null) return Results.NotFound();
 
-            httpContext.Response.Headers.CacheControl = "public, max-age=86400";
+            httpContext.Response.Headers.CacheControl = CacheControlPublicOneDay;
             return Results.File(opened.Content, opened.ContentType.ToMimeType());
         });
 
@@ -170,7 +182,7 @@ public static class DiarSpeicherEndpoints
             var (data, contentType) = await opdsService.GetBookThumbnailAsync(user, id, ct);
             if (data == null) return Results.NotFound();
 
-            httpContext.Response.Headers.CacheControl = "public, max-age=86400";
+            httpContext.Response.Headers.CacheControl = CacheControlPublicOneDay;
             return Results.File(data, contentType);
         });
 
@@ -190,7 +202,10 @@ public static class DiarSpeicherEndpoints
                 fileDownloadName: Path.GetFileName(file.Value.Path),
                 enableRangeProcessing: true);
         });
+    }
 
+    private static void MapMediaProgressRoutes(RouteGroupBuilder group)
+    {
         group.MapPut("/media/{id}/progress", async (
             string id,
             [FromBody] DiarSpeicherUpdateProgressInput input,
@@ -243,7 +258,7 @@ public static class DiarSpeicherEndpoints
         }).RequireManageLibrary();
 
         // La portada la ve cualquiera que ya puede ver la serie; cambiarla es gestion.
-        group.MapGet("/series/{id}/thumbnail", async (
+        group.MapGet(SeriesThumbnailRoute, async (
             string id,
             HttpContext httpContext,
             [FromServices] IDiarSpeicherService service,
@@ -254,11 +269,11 @@ public static class DiarSpeicherEndpoints
             if (cover is null) return Results.NotFound();
 
             // Sin revalidar: la URL lleva un testigo que cambia al cambiar la portada.
-            httpContext.Response.Headers.CacheControl = "public, max-age=86400";
+            httpContext.Response.Headers.CacheControl = CacheControlPublicOneDay;
             return Results.File(cover.Value.Data, cover.Value.ContentType);
         });
 
-        group.MapPut("/series/{id}/thumbnail", async (
+        group.MapPut(SeriesThumbnailRoute, async (
             string id,
             [FromBody] DiarSpeicherSeriesThumbnailInput input,
             HttpContext httpContext,
@@ -270,9 +285,9 @@ public static class DiarSpeicherEndpoints
             return applied ? Results.Ok(new { updated = true }) : Results.NotFound();
         }).RequireManageLibrary();
 
-        group.MapPost("/series/{id}/thumbnail", HandleSeriesCoverUpload).DisableAntiforgery().RequireManageLibrary();
+        group.MapPost(SeriesThumbnailRoute, HandleSeriesCoverUpload).DisableAntiforgery().RequireManageLibrary();
 
-        group.MapDelete("/series/{id}/thumbnail", async (
+        group.MapDelete(SeriesThumbnailRoute, async (
             string id,
             HttpContext httpContext,
             [FromServices] IDiarSpeicherService service,
@@ -329,6 +344,15 @@ public static class DiarSpeicherEndpoints
     }
 
     private static void MapLibraryRoutes(RouteGroupBuilder group)
+    {
+        MapLibraryCrudRoutes(group);
+        MapLibraryMaintenanceRoutes(group);
+        MapScanRoutes(group);
+        MapDeletionRoutes(group);
+        MapLibraryActionRoutes(group);
+    }
+
+    private static void MapLibraryCrudRoutes(RouteGroupBuilder group)
     {
         group.MapGet("/libraries", async (
             HttpContext httpContext,
@@ -389,7 +413,10 @@ public static class DiarSpeicherEndpoints
                 return Results.BadRequest(new { error = e.Message });
             }
         }).RequireManageLibrary();
+    }
 
+    private static void MapLibraryMaintenanceRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/libraries/{id}/missing", async (
             string id,
             HttpContext httpContext,
@@ -410,7 +437,10 @@ public static class DiarSpeicherEndpoints
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
             return Results.Ok(new { removed = await service.PurgeMissingAsync(user, id, ct) });
         }).RequireManageLibrary();
+    }
 
+    private static void MapScanRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/libraries/{id}/scan", (
             string id,
             [FromServices] IScanProgressHub hub) =>
@@ -458,7 +488,10 @@ public static class DiarSpeicherEndpoints
         group.MapGet("/libraries/scans", (
             [FromServices] IScanProgressHub hub) =>
             Results.Ok(hub.GetActive().Select(ToScanDto).ToList()));
+    }
 
+    private static void MapDeletionRoutes(RouteGroupBuilder group)
+    {
         group.MapDelete("/libraries/{id}", async (
             string id,
             [FromQuery] bool deleteFiles,
@@ -518,7 +551,10 @@ public static class DiarSpeicherEndpoints
                 return Results.BadRequest(new { error = e.Message });
             }
         }).RequireManageLibrary();
+    }
 
+    private static void MapLibraryActionRoutes(RouteGroupBuilder group)
+    {
         group.MapPost("/libraries/{id}/upload", HandleLibraryUpload).DisableAntiforgery();
 
         group.MapPost("/libraries/{id}/scan", async (
@@ -538,7 +574,7 @@ public static class DiarSpeicherEndpoints
         });
     }
 
-    private static RouteHandlerBuilder RequireManageLibrary(this RouteHandlerBuilder builder) =>
+    private static void RequireManageLibrary(this RouteHandlerBuilder builder) =>
         builder.AddEndpointFilter(async (ctx, next) =>
         {
             var user = ctx.HttpContext.Items[AuthUserKey] as AuthUser;
@@ -558,50 +594,54 @@ public static class DiarSpeicherEndpoints
         CancellationToken ct)
     {
         var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-        if (!httpContext.Request.HasFormContentType)
-            return Results.BadRequest("Expected multipart/form-data");
+        var (validationError, boundary) = ValidateUploadRequest(httpContext, storageOptions.Value.Upload);
+        if (validationError != null) return validationError;
 
-        var uploadOptions = storageOptions.Value.Upload;
+        var reader = new MultipartReader(boundary, httpContext.Request.Body);
+        var (formSubpath, firstFile) = await ReadUntilFirstFileAsync(reader, ct);
+        var querySubpath = httpContext.Request.Query["subpath"].FirstOrDefault();
+        var subpath = string.IsNullOrEmpty(querySubpath) ? formSubpath : querySubpath;
+
+        var files = ReadMultipartFilesAsync(reader, firstFile, ct);
+        var result = await service.UploadToLibraryAsync(user, id, subpath, files, ct);
+        return MapUploadResult(result);
+    }
+
+    private static (IResult? Error, string Boundary) ValidateUploadRequest(HttpContext httpContext, UploadOptions uploadOptions)
+    {
+        if (!httpContext.Request.HasFormContentType)
+            return (Results.BadRequest("Expected multipart/form-data"), string.Empty);
+
         if (!uploadOptions.EnableUpload)
         {
-            return Results.Json(new { error = "Uploads are disabled on this server." }, statusCode: StatusCodes.Status403Forbidden);
+            return (Results.Json(new { error = "Uploads are disabled on this server." }, statusCode: StatusCodes.Status403Forbidden), string.Empty);
         }
-
-        var maxUploadBytes = uploadOptions.MaxRequestBytes;
 
         var sizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
         if (sizeFeature is not null && !sizeFeature.IsReadOnly)
         {
-            sizeFeature.MaxRequestBodySize = maxUploadBytes;
+            sizeFeature.MaxRequestBodySize = uploadOptions.MaxRequestBytes;
         }
 
         var mediaType = MediaTypeHeaderValue.Parse(httpContext.Request.ContentType);
         var boundary = HeaderUtilities.RemoveQuotes(mediaType.Boundary).Value;
         if (string.IsNullOrEmpty(boundary))
         {
-            return Results.BadRequest("Missing multipart boundary");
+            return (Results.BadRequest("Missing multipart boundary"), string.Empty);
         }
 
-        var reader = new MultipartReader(boundary, httpContext.Request.Body);
+        return (null, boundary);
+    }
 
-        var (formSubpath, firstFile) = await ReadUntilFirstFileAsync(reader, ct);
-        var querySubpath = httpContext.Request.Query["subpath"].FirstOrDefault();
-        var subpath = string.IsNullOrEmpty(querySubpath) ? formSubpath : querySubpath;
-
-        var files = ReadMultipartFilesAsync(reader, firstFile, ct);
-
-        var result = await service.UploadToLibraryAsync(user, id, subpath, files, ct);
-
-        return result.Outcome switch
+    private static IResult MapUploadResult(UploadResult result) =>
+        result.Outcome switch
         {
             UploadOutcome.Success => Results.Ok(result.Response),
-            UploadOutcome.UploadDisabled => Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status403Forbidden),
-            UploadOutcome.PermissionDenied => Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status403Forbidden),
+            UploadOutcome.UploadDisabled or UploadOutcome.PermissionDenied => Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status403Forbidden),
             UploadOutcome.LibraryNotFound => Results.NotFound(new { error = result.Message }),
             UploadOutcome.FileTooLarge => Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status413PayloadTooLarge),
             _ => Results.BadRequest(new { error = result.Message })
         };
-    }
 
     private static async Task<(string? Subpath, DiarSpeicherUploadFileInput? FirstFile)> ReadUntilFirstFileAsync(
         MultipartReader reader,
@@ -619,13 +659,7 @@ public static class DiarSpeicherEndpoints
 
             if (cd.IsFormDisposition())
             {
-                var name = HeaderUtilities.RemoveQuotes(cd.Name).Value;
-                if (string.Equals(name, "subpath", StringComparison.OrdinalIgnoreCase))
-                {
-                    using var streamReader = new StreamReader(section.Body);
-                    var val = await streamReader.ReadToEndAsync(ct);
-                    if (!string.IsNullOrWhiteSpace(val)) subpath = val;
-                }
+                subpath = await ReadSubpathAsync(section, cd, ct) ?? subpath;
                 continue;
             }
 
@@ -636,18 +670,27 @@ public static class DiarSpeicherEndpoints
         return (subpath, null);
     }
 
-    private static DiarSpeicherUploadFileInput? ToFileInput(MultipartSection section, ContentDispositionHeaderValue cd)
+    private static async Task<string?> ReadSubpathAsync(
+        MultipartSection section,
+        ContentDispositionHeaderValue cd,
+        CancellationToken ct)
     {
-        if (!cd.IsFileDisposition()) return null;
+        if (cd.Name.Value != "subpath") return null;
 
-        var rawName = HeaderUtilities.RemoveQuotes(cd.FileNameStar.HasValue ? cd.FileNameStar.Value : cd.FileName.Value).Value;
+        using var reader = new StreamReader(section.Body);
+        var val = await reader.ReadToEndAsync(ct);
+        return string.IsNullOrWhiteSpace(val) ? null : val.Trim();
+    }
+
+    private static DiarSpeicherUploadFileInput? ToFileInput(
+        MultipartSection section,
+        ContentDispositionHeaderValue cd)
+    {
+        var rawName = cd.FileNameStar.HasValue ? cd.FileNameStar.Value : cd.FileName.Value;
         if (string.IsNullOrWhiteSpace(rawName)) return null;
 
-        return new DiarSpeicherUploadFileInput
-        {
-            FileName = rawName,
-            Content = section.Body
-        };
+        var name = Path.GetFileName(rawName);
+        return new DiarSpeicherUploadFileInput { FileName = name, Content = section.Body };
     }
 
     private static async IAsyncEnumerable<DiarSpeicherUploadFileInput> ReadMultipartFilesAsync(
@@ -694,7 +737,7 @@ public static class DiarSpeicherEndpoints
             var res = await service.GetEpubResourceAsync(user, id, resourcePath, ct);
             if (res == null) return Results.NotFound();
 
-            httpContext.Response.Headers.CacheControl = "public, max-age=86400";
+            httpContext.Response.Headers.CacheControl = CacheControlPublicOneDay;
             return Results.File(res.Value.Data, res.Value.ContentType);
         });
     }
@@ -705,11 +748,10 @@ public static class DiarSpeicherEndpoints
         group.MapPut("/users/{id}/epub-profiles", HandlePutEpubProfiles);
     }
 
-    private static async Task<IResult> HandleGetEpubProfiles(
+    private static IResult HandleGetEpubProfiles(
         string id,
         HttpContext httpContext,
-        [FromServices] DiarSpeicherDbContext db,
-        CancellationToken ct)
+        [FromServices] DiarSpeicherDbContext db)
     {
         if (httpContext.Items[AuthUserKey] is not AuthUser user) return Results.Unauthorized();
 
@@ -719,8 +761,8 @@ public static class DiarSpeicherEndpoints
             return Results.Forbid();
         }
 
-        var prefs = await db.UserPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == targetId, ct);
-        if (string.IsNullOrWhiteSpace(prefs?.EpubProfilesJson))
+        var prefs = db.UserPreferences.FirstOrDefault(p => p.UserId == targetId);
+        if (prefs?.EpubProfilesJson == null)
         {
             return Results.Ok(EpubDeviceProfile.GetDefaults());
         }
@@ -751,18 +793,35 @@ public static class DiarSpeicherEndpoints
             return Results.Forbid();
         }
 
-        var newProfile = profiles.FirstOrDefault(p => p.IsDefault) ?? profiles.FirstOrDefault();
-        var affectedBooks = 0;
-        if (newProfile != null)
-        {
-            var profileKey = EpubRasterizer.BuildProfileKey(newProfile);
-            affectedBooks = await db.ReadingSessions
-                .CountAsync(s => s.UserId == targetId
-                    && s.Status == ReadingStatus.Reading
-                    && s.RenderedPage != null
-                    && s.RenderedProfileKey != profileKey, ct);
-        }
+        var affectedBooks = await CountAffectedBooksAsync(db, targetId, profiles, ct);
+        await SaveUserPreferencesAsync(db, targetId, profiles, ct);
 
+        return Results.Ok(new { updated = true, count = profiles.Count, affectedBooks });
+    }
+
+    private static async Task<int> CountAffectedBooksAsync(
+        DiarSpeicherDbContext db,
+        string targetId,
+        List<EpubDeviceProfile> profiles,
+        CancellationToken ct)
+    {
+        var newProfile = profiles.FirstOrDefault(p => p.IsDefault) ?? profiles.FirstOrDefault();
+        if (newProfile == null) return 0;
+
+        var profileKey = EpubRasterizer.BuildProfileKey(newProfile);
+        return await db.ReadingSessions
+            .CountAsync(s => s.UserId == targetId
+                && s.Status == ReadingStatus.Reading
+                && s.RenderedPage != null
+                && s.RenderedProfileKey != profileKey, ct);
+    }
+
+    private static async Task SaveUserPreferencesAsync(
+        DiarSpeicherDbContext db,
+        string targetId,
+        List<EpubDeviceProfile> profiles,
+        CancellationToken ct)
+    {
         var prefs = await db.UserPreferences.FirstOrDefaultAsync(p => p.UserId == targetId, ct);
         if (prefs == null)
         {
@@ -779,6 +838,5 @@ public static class DiarSpeicherEndpoints
         }
 
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { updated = true, count = profiles.Count, affectedBooks });
     }
 }

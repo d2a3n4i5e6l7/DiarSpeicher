@@ -80,9 +80,9 @@ public class DatabaseBackupService : BackgroundService
                 await Task.Delay(interval, stoppingToken);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException cancelled)
         {
-            _logger.LogInformation("DatabaseBackupService was cancelled");
+            _logger.LogInformation(cancelled, "DatabaseBackupService was cancelled");
         }
         catch (Exception ex)
         {

@@ -79,7 +79,7 @@ public class MangaBakaCatalog : IMangaBakaCatalog
     /// El volcado no cambia mientras no se vuelva a ingerir, asi que el recuento se guarda.
     /// La marca es tamaño y fecha del fichero: si entra un volcado nuevo, deja de valer.
     /// </summary>
-    private static (string Stamp, long Total)? _countCache;
+    private (string Stamp, long Total)? _countCache;
 
     private static string ReadStamp(string path)
     {
@@ -110,7 +110,7 @@ public class MangaBakaCatalog : IMangaBakaCatalog
         await using var command = connection.CreateCommand();
         if (useFts)
         {
-            command.CommandText = $"""
+            command.CommandText = """
                 SELECT s.id, s.title, s.native_title, s.romanized_title, s.type, s.year,
                        s.status, s.cover_x250_x1, s.rating,
                        s.description, s.authors, s.genres
@@ -118,24 +118,26 @@ public class MangaBakaCatalog : IMangaBakaCatalog
                 JOIN series s ON s.id = f.rowid
                 WHERE series_fts MATCH $needle
                 ORDER BY bm25(series_fts), s.popularity_global_current
-                LIMIT {limit}
+                LIMIT $limit
                 """;
             command.Parameters.AddWithValue("$needle", ToMatchExpression(trimmed));
+            command.Parameters.AddWithValue("$limit", limit);
         }
         else
         {
             // Sin índice esto es lento a propósito: el camino bueno es el FTS5 y conviene
             // que se note que la ingesta no lo construyó.
             _logger.LogWarning("MangaBaka dump has no series_fts index; falling back to a scan");
-            command.CommandText = $"""
+            command.CommandText = """
                 SELECT id, title, native_title, romanized_title, type, year,
                        status, cover_x250_x1, rating,
                        description, authors, genres
                 FROM series
                 WHERE title LIKE $like OR romanized_title LIKE $like
-                LIMIT {limit}
+                LIMIT $limit
                 """;
             command.Parameters.AddWithValue("$like", $"%{trimmed}%");
+            command.Parameters.AddWithValue("$limit", limit);
         }
 
         var results = new List<MangaBakaCandidateDto>();

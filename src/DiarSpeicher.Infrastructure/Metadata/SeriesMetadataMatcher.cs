@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using DiarSpeicher.Core.Domain.MangaBaka;
 
 namespace DiarSpeicher.Infrastructure.Metadata;
@@ -25,6 +26,21 @@ public interface ISeriesMetadataMatcher
 /// </summary>
 public class SeriesMetadataMatcher : ISeriesMetadataMatcher
 {
+    private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(2);
+
+    private static readonly Regex BracketedRegex =
+        new(@"[\[\(\{][^\]\)\}]*[\]\)\}]", RegexOptions.Compiled, RegexTimeout);
+
+    private static readonly Regex VolumeWordsRegex =
+        new(@"\b(tomos?|vol(umen|ume)?s?|caps?|cap[ií]tulos?)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled, RegexTimeout);
+
+    private static readonly Regex SeparatorsRegex =
+        new(@"[_\.]+", RegexOptions.Compiled, RegexTimeout);
+
+    private static readonly Regex ExtraSpacesRegex =
+        new(@"\s{2,}", RegexOptions.Compiled, RegexTimeout);
+
     /// <summary>Marca de procedencia en <c>SeriesMetadata.MetaType</c>.</summary>
     public const string SourceTag = "mangabaka";
 
@@ -110,11 +126,10 @@ public class SeriesMetadataMatcher : ISeriesMetadataMatcher
     /// </summary>
     internal static string CleanFolderName(string name)
     {
-        var cleaned = System.Text.RegularExpressions.Regex.Replace(name, @"[\[\(\{][^\]\)\}]*[\]\)\}]", " ");
-        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\b(tomos?|vol(umen|ume)?s?|caps?|cap[ií]tulos?)\b", " ",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"[_\.]+", " ");
-        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\s{2,}", " ");
+        var cleaned = BracketedRegex.Replace(name, " ");
+        cleaned = VolumeWordsRegex.Replace(cleaned, " ");
+        cleaned = SeparatorsRegex.Replace(cleaned, " ");
+        cleaned = ExtraSpacesRegex.Replace(cleaned, " ");
         return cleaned.Trim();
     }
 

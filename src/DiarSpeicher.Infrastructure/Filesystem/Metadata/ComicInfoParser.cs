@@ -1,4 +1,4 @@
-﻿using System.Xml.Linq;
+using System.Xml.Linq;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Metadata;
 
@@ -123,28 +123,48 @@ public static class ComicInfoParser
         return null;
     }
 
+    // Los 15 valores de la enumeracion AgeRating de ComicInfo.xml. Es una lista cerrada: lo
+    // que no este aqui se queda sin clasificar, que con RestrictOnUnset es lo que no se ve.
+    private static readonly Dictionary<string, int> AgeRatings = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Early Childhood"] = 0,
+        ["Everyone"] = 0,
+        ["G"] = 0,
+        ["Kids to Adults"] = 0,
+        ["Everyone 10+"] = 10,
+        ["PG"] = 10,
+        ["Teen"] = 13,
+        ["MA15+"] = 15,
+        ["M"] = 17,
+        ["Mature 17+"] = 17,
+        ["Adults Only 18+"] = 18,
+        ["R18+"] = 18,
+        ["X18+"] = 18,
+
+        // Fuera de la enumeracion, pero salen en ficheros reales: MPAA y las etiquetas que
+        // usan las editoriales. Van exactas igual; nunca por contenido.
+        ["All Ages"] = 0,
+        ["PG-13"] = 13,
+        ["T"] = 13,
+        ["Teen Plus"] = 15,
+        ["Teen+"] = 15,
+        ["T+"] = 15,
+        ["Mature"] = 17,
+        ["Adult"] = 18,
+        ["Adults Only"] = 18,
+        ["Explicit"] = 18,
+        ["NC-17"] = 18,
+    };
+
     public static int? ParseAgeRating(string rating)
     {
-        var clean = rating.Trim().ToLowerInvariant();
+        var clean = rating.Trim();
 
         if (int.TryParse(clean, out var numeric))
         {
             return Math.Clamp(numeric, 0, 18);
         }
 
-        if (clean.Contains("18") || clean.Contains("adult") || clean.Contains("explicit"))
-            return 18;
-        if (clean.Contains("17") || clean.Contains("mature"))
-            return 17;
-        if (clean.Contains("15") || clean.Contains("teen plus") || clean.Contains("teen+"))
-            return 15;
-        if (clean.Contains("13") || clean.Contains("teen") || clean.Contains("pg-13"))
-            return 13;
-        if (clean.Contains("10") || clean.Contains("everyone 10+") || clean.Contains("pg"))
-            return 10;
-        if (clean.Contains("everyone") || clean.Contains("all ages") || clean.Contains("g"))
-            return 0;
-
-        return null;
+        return AgeRatings.TryGetValue(clean, out var edad) ? edad : null;
     }
 }

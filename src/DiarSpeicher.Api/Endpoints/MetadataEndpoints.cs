@@ -150,21 +150,30 @@ public static class MetadataEndpoints
 
         while ((section = await reader.ReadNextSectionAsync(ct)) is not null)
         {
-            if (!ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var disposition)) continue;
-            if (!disposition.FileName.HasValue && !disposition.FileNameStar.HasValue) continue;
-
-            var raw = disposition.FileNameStar.HasValue ? disposition.FileNameStar.Value : disposition.FileName.Value;
-            var name = Path.GetFileName(raw ?? string.Empty);
-
-            if (!IsAcceptedDumpExtension(name))
-            {
-                return Results.BadRequest(new { error = "Solo se aceptan volcados .zst, .tar.gz o .tgz." });
-            }
-
-            return ToResult(await ingest.TryImportAsync(section.Body, name, ct), ingest);
+            var result = await ProcessDumpSectionAsync(section, ingest, ct);
+            if (result != null) return result;
         }
 
         return Results.BadRequest(new { error = "No llegó ningún fichero." });
+    }
+
+    private static async Task<IResult?> ProcessDumpSectionAsync(
+        MultipartSection section,
+        IMangaBakaIngestService ingest,
+        CancellationToken ct)
+    {
+        if (!ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var disposition)) return null;
+        if (!disposition.FileName.HasValue && !disposition.FileNameStar.HasValue) return null;
+
+        var raw = disposition.FileNameStar.HasValue ? disposition.FileNameStar.Value : disposition.FileName.Value;
+        var name = Path.GetFileName(raw ?? string.Empty);
+
+        if (!IsAcceptedDumpExtension(name))
+        {
+            return Results.BadRequest(new { error = "Solo se aceptan volcados .zst, .tar.gz o .tgz." });
+        }
+
+        return ToResult(await ingest.TryImportAsync(section.Body, name, ct), ingest);
     }
 
     public sealed record MetadataImportInitRequest(string FileName, long TotalBytes);

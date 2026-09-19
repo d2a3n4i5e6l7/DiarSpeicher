@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DiarSpeicher.Infrastructure.Filesystem.Metadata;
@@ -78,25 +79,10 @@ public class ZipBookProcessor : IBookProcessor
             foreach (var entry in archive.Entries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                var entryName = entry.FullName;
-                if (PathUtils.IsHiddenFile(entryName))
+                var comicInfo = await ClassifyZipEntryAsync(entry, analysis, imageEntries, cancellationToken);
+                if (comicInfo != null)
                 {
-                    continue;
-                }
-
-                var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entryName));
-
-                if (analysis.ReadEmbeddedMetadata && string.Equals(Path.GetFileName(entryName), "ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
-                {
-                    await using var stream = await entry.OpenAsync(cancellationToken);
-                    using var reader = new StreamReader(stream);
-                    var xmlContent = await reader.ReadToEndAsync(cancellationToken);
-                    (metadata, tags) = ComicInfoParser.Parse(xmlContent);
-                }
-                else if (ct.IsImage())
-                {
-                    imageEntries.Add(entry);
+                    (metadata, tags) = comicInfo.Value;
                 }
             }
 
@@ -134,6 +120,33 @@ public class ZipBookProcessor : IBookProcessor
             Cover = cover,
             PageDimensions = dimensions
         };
+    }
+
+    private static async Task<(ExtractedMetadata? Metadata, List<string> Tags)?> ClassifyZipEntryAsync(
+        ZipArchiveEntry entry,
+        BookAnalysisOptions analysis,
+        List<ZipArchiveEntry> imageEntries,
+        CancellationToken cancellationToken)
+    {
+        var entryName = entry.FullName;
+        if (PathUtils.IsHiddenFile(entryName)) return null;
+
+        var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(entryName));
+
+        if (analysis.ReadEmbeddedMetadata && string.Equals(Path.GetFileName(entryName), "ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
+        {
+            await using var stream = await entry.OpenAsync(cancellationToken);
+            using var reader = new StreamReader(stream);
+            var xmlContent = await reader.ReadToEndAsync(cancellationToken);
+            return ComicInfoParser.Parse(xmlContent);
+        }
+
+        if (ct.IsImage())
+        {
+            imageEntries.Add(entry);
+        }
+
+        return null;
     }
 
     public async Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
@@ -410,7 +423,6 @@ public class EpubBookProcessor : IBookProcessor
     {
         var analysis = options ?? BookAnalysisOptions.Default;
         var includeCover = analysis.IncludeCover;
-        var measurePages = analysis.MeasurePages;
         var metadata = new ExtractedMetadata();
         var tags = new List<string>();
         int chapterCount = 0;
@@ -418,29 +430,8 @@ public class EpubBookProcessor : IBookProcessor
 
         await using (var archive = await ZipFile.OpenReadAsync(path, cancellationToken))
         {
-            var opfPath = await FindOpfPathAsync(archive, cancellationToken);
-            if (!string.IsNullOrEmpty(opfPath))
-            {
-                var opfEntry = archive.GetEntry(opfPath);
-                if (opfEntry is not null)
-                {
-                    chapterCount = await ReadOpfDataAsync(opfEntry, metadata, tags, cancellationToken);
-                }
-            }
-
-            if (chapterCount == 0)
-            {
-                chapterCount = CountFallbackHtmlEntries(archive);
-            }
-
-            if (includeCover)
-            {
-                var coverEntry = await FindCoverEntryAsync(archive, cancellationToken);
-                if (coverEntry is not null)
-                {
-                    cover = await ArchiveEntryReader.ReadAsync(ArchiveEntryRef.From(coverEntry), cancellationToken);
-                }
-            }
+            chapterCount = await ReadArchiveMetadataAsync(archive, metadata, tags, cancellationToken);
+            cover = await ReadArchiveCoverAsync(archive, includeCover, cancellationToken);
         }
 
         var fileInfo = new FileInfo(path);
@@ -463,14 +454,46 @@ public class EpubBookProcessor : IBookProcessor
         };
     }
 
+    private static async Task<int> ReadArchiveMetadataAsync(
+        ZipArchive archive,
+        ExtractedMetadata metadata,
+        List<string> tags,
+        CancellationToken cancellationToken)
+    {
+        var opfPath = await EpubOpfReader.FindOpfPathAsync(archive, cancellationToken);
+        var chapterCount = 0;
+        if (!string.IsNullOrEmpty(opfPath))
+        {
+            var opfEntry = archive.GetEntry(opfPath);
+            if (opfEntry is not null)
+            {
+                chapterCount = await EpubOpfReader.ReadOpfDataAsync(opfEntry, metadata, tags, cancellationToken);
+            }
+        }
+
+        return chapterCount == 0 ? CountFallbackHtmlEntries(archive) : chapterCount;
+    }
+
+    private static async Task<ExtractedPage?> ReadArchiveCoverAsync(
+        ZipArchive archive,
+        bool includeCover,
+        CancellationToken cancellationToken)
+    {
+        if (!includeCover) return null;
+        var coverEntry = await EpubOpfReader.FindCoverEntryAsync(archive, cancellationToken);
+        return coverEntry is not null
+            ? await ArchiveEntryReader.ReadAsync(ArchiveEntryRef.From(coverEntry), cancellationToken)
+            : null;
+    }
+
     public async Task<ExtractedPage?> ExtractPageAsync(string path, int pageNumber, CancellationToken cancellationToken = default)
     {
         if (pageNumber < 1) return null;
 
         await using var archive = await ZipFile.OpenReadAsync(path, cancellationToken);
-        var coverEntry = await FindCoverEntryAsync(archive, cancellationToken);
+        var coverEntry = await EpubOpfReader.FindCoverEntryAsync(archive, cancellationToken);
 
-        var spineEntries = await GetSpineEntriesAsync(archive, cancellationToken);
+        var spineEntries = await EpubOpfReader.GetSpineEntriesAsync(archive, cancellationToken);
         if (spineEntries.Count == 0)
         {
             spineEntries = GetFallbackHtmlEntries(archive);
@@ -511,56 +534,11 @@ public class EpubBookProcessor : IBookProcessor
             cancellationToken);
     }
 
-    public static async Task<List<ZipArchiveEntry>> GetSpineEntriesAsync(ZipArchive archive, CancellationToken cancellationToken)
-    {
-        var opfPath = await FindOpfPathAsync(archive, cancellationToken);
-        if (string.IsNullOrEmpty(opfPath)) return [];
+    public static Task<List<ZipArchiveEntry>> GetSpineEntriesAsync(ZipArchive archive, CancellationToken cancellationToken) =>
+        EpubOpfReader.GetSpineEntriesAsync(archive, cancellationToken);
 
-        var opfEntry = archive.GetEntry(opfPath);
-        if (opfEntry == null) return [];
-
-        try
-        {
-            var doc = await LoadXmlAsync(opfEntry, cancellationToken);
-            var opfDir = Path.GetDirectoryName(opfPath)?.Replace('\\', '/') ?? "";
-            return ResolveSpineItems(archive, doc, opfDir);
-        }
-        catch
-        {
-            return [];
-        }
-    }
-
-    private static List<ZipArchiveEntry> ResolveSpineItems(ZipArchive archive, XDocument doc, string opfDir)
-    {
-        var manifest = doc.Descendants()
-            .Where(e => e.Name.LocalName == "item")
-            .Select(e => new { Id = e.Attribute("id")?.Value, Href = e.Attribute("href")?.Value })
-            .Where(x => !string.IsNullOrEmpty(x.Id) && !string.IsNullOrEmpty(x.Href))
-            .ToDictionary(x => x.Id!, x => x.Href!);
-
-        var spine = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "spine");
-        if (spine == null) return [];
-
-        var entries = new List<ZipArchiveEntry>();
-        var itemrefs = spine.Descendants().Where(e => e.Name.LocalName == "itemref");
-
-        foreach (var itemref in itemrefs)
-        {
-            var idref = itemref.Attribute("idref")?.Value;
-            if (string.IsNullOrEmpty(idref) || !manifest.TryGetValue(idref, out var href)) continue;
-
-            var fullHref = string.IsNullOrEmpty(opfDir) ? href : $"{opfDir}/{href}";
-            var entry = archive.GetEntry(fullHref) ??
-                archive.Entries.FirstOrDefault(e => string.Equals(e.FullName.Replace('\\', '/'), fullHref.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase));
-            if (entry != null)
-            {
-                entries.Add(entry);
-            }
-        }
-
-        return entries;
-    }
+    public static Task<ZipArchiveEntry?> FindCoverEntryAsync(ZipArchive archive, CancellationToken cancellationToken) =>
+        EpubOpfReader.FindCoverEntryAsync(archive, cancellationToken);
 
     public static List<ZipArchiveEntry> GetFallbackHtmlEntries(ZipArchive archive)
     {
@@ -574,163 +552,12 @@ public class EpubBookProcessor : IBookProcessor
             .ToList();
     }
 
-    private static async Task<int> ReadOpfDataAsync(
-        ZipArchiveEntry opfEntry, ExtractedMetadata metadata, List<string> tags, CancellationToken cancellationToken)
-    {
-        var doc = await LoadXmlAsync(opfEntry, cancellationToken);
-
-        var titleElem = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "title");
-        if (titleElem is not null) metadata.Title = titleElem.Value.Trim();
-
-        var creatorElem = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "creator");
-        if (creatorElem is not null) metadata.Writers = creatorElem.Value.Trim();
-
-        var descElem = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "description");
-        if (descElem is not null) metadata.Summary = descElem.Value.Trim();
-
-        var pubElem = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "publisher");
-        if (pubElem is not null) metadata.Publisher = pubElem.Value.Trim();
-
-        var dateElem = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "date");
-        if (dateElem is not null && DateTime.TryParse(dateElem.Value, System.Globalization.CultureInfo.InvariantCulture, out var pubDate))
-        {
-            metadata.Year = pubDate.Year;
-            metadata.Month = pubDate.Month;
-            metadata.Day = pubDate.Day;
-        }
-
-        foreach (var subject in doc.Descendants().Where(e => e.Name.LocalName == "subject"))
-        {
-            var val = subject.Value.Trim();
-            if (!string.IsNullOrEmpty(val))
-            {
-                tags.Add(val);
-            }
-        }
-
-        var spineElem = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "spine");
-        var chapterCount = spineElem?.Descendants().Count(e => e.Name.LocalName == "itemref") ?? 0;
-        if (chapterCount == 0)
-        {
-            chapterCount = doc.Descendants().Count(e => e.Name.LocalName == "itemref");
-        }
-
-        return chapterCount;
-    }
-
     private static int CountFallbackHtmlEntries(ZipArchive archive)
     {
         return archive.Entries.Count(e =>
         {
             var ext = Path.GetExtension(e.FullName).ToLowerInvariant();
             return ext is ".html" or ".xhtml";
-        });
-    }
-
-    private static async Task<XDocument> LoadXmlAsync(ZipArchiveEntry entry, CancellationToken cancellationToken)
-    {
-        await using var stream = await entry.OpenAsync(cancellationToken);
-        return await XDocument.LoadAsync(stream, LoadOptions.None, cancellationToken);
-    }
-
-    private static async Task<string?> FindOpfPathAsync(ZipArchive archive, CancellationToken cancellationToken)
-    {
-        var container = archive.GetEntry("META-INF/container.xml");
-        if (container is null)
-        {
-            return FirstOpfEntryName(archive);
-        }
-
-        try
-        {
-            var doc = await LoadXmlAsync(container, cancellationToken);
-            var rootfile = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "rootfile");
-            return rootfile?.Attribute("full-path")?.Value;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return FirstOpfEntryName(archive);
-        }
-    }
-
-    private static string? FirstOpfEntryName(ZipArchive archive) =>
-        archive.Entries.FirstOrDefault(e => e.FullName.EndsWith(".opf", StringComparison.OrdinalIgnoreCase))?.FullName;
-
-    public static async Task<ZipArchiveEntry?> FindCoverEntryAsync(ZipArchive archive, CancellationToken cancellationToken)
-    {
-        var opfPath = await FindOpfPathAsync(archive, cancellationToken);
-        if (!string.IsNullOrEmpty(opfPath))
-        {
-            var opfEntry = archive.GetEntry(opfPath);
-            if (opfEntry is not null)
-            {
-                var entry = await TryFindCoverFromOpfAsync(archive, opfEntry, opfPath, cancellationToken);
-                if (entry is not null) return entry;
-            }
-        }
-
-        return FindFallbackCoverEntry(archive);
-    }
-
-    private static async Task<ZipArchiveEntry?> TryFindCoverFromOpfAsync(
-        ZipArchive archive, ZipArchiveEntry opfEntry, string opfPath, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var doc = await LoadXmlAsync(opfEntry, cancellationToken);
-            var href = ExtractCoverHref(doc);
-
-            if (!string.IsNullOrEmpty(href))
-            {
-                var opfDir = Path.GetDirectoryName(opfPath)?.Replace('\\', '/');
-                var fullHref = string.IsNullOrEmpty(opfDir) ? href : $"{opfDir}/{href}";
-                return archive.GetEntry(fullHref);
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // OPF corrupto o sin portada declarada: devolver null hace que el llamante
-            // busque la portada por nombre de fichero.
-        }
-
-        return null;
-    }
-
-    private static string? ExtractCoverHref(XDocument doc)
-    {
-        var coverItem = doc.Descendants().FirstOrDefault(e =>
-            e.Name.LocalName == "item" &&
-            e.Attribute("properties")?.Value.Contains("cover-image") == true);
-
-        var href = coverItem?.Attribute("href")?.Value;
-        if (!string.IsNullOrEmpty(href))
-        {
-            return href;
-        }
-
-        var coverMeta = doc.Descendants().FirstOrDefault(e =>
-            e.Name.LocalName == "meta" &&
-            e.Attribute("name")?.Value == "cover");
-
-        var coverId = coverMeta?.Attribute("content")?.Value;
-        if (!string.IsNullOrEmpty(coverId))
-        {
-            var item = doc.Descendants().FirstOrDefault(e =>
-                e.Name.LocalName == "item" &&
-                e.Attribute("id")?.Value == coverId);
-            return item?.Attribute("href")?.Value;
-        }
-
-        return null;
-    }
-
-    private static ZipArchiveEntry? FindFallbackCoverEntry(ZipArchive archive)
-    {
-        return archive.Entries.FirstOrDefault(e =>
-        {
-            var name = Path.GetFileNameWithoutExtension(e.FullName).ToLowerInvariant();
-            var ct = ContentTypeExtensions.FromExtension(Path.GetExtension(e.FullName));
-            return ct.IsImage() && (name == "cover" || name == "cover-image" || name.Contains("cover"));
         });
     }
 

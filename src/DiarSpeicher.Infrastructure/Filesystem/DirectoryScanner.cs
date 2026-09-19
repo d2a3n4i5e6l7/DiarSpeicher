@@ -107,15 +107,7 @@ public class DirectoryScanner : IDirectoryScanner
         // corte, un libro suelto en la raiz la convierte en serie y el recorrido se lleva
         // ademas cuanto cuelga de las series hijas: el mismo fichero acaba con dos filas
         // y dos dueños, y los contadores de la biblioteca suman de mas.
-        var boundaries = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var other in otherSeriesPaths ?? [])
-        {
-            var normalizedOther = Path.TrimEndingDirectorySeparator(Path.GetFullPath(other));
-            if (!string.Equals(normalizedOther, normalizedSeriesPath, StringComparison.Ordinal))
-            {
-                boundaries.Add(normalizedOther);
-            }
-        }
+        var boundaries = BuildBoundaries(seriesPath, otherSeriesPaths);
 
         // Custom directory traversal that short-circuits unchanged subdirectories via mtime
         TraverseSeriesDirectories(
@@ -133,25 +125,7 @@ public class DirectoryScanner : IDirectoryScanner
             existingMediaMap[Path.GetFullPath(existing.Path)] = existing;
         }
 
-        var mediaToCreate = new List<string>();
-        var mediaToVisit = new List<string>();
-
-        foreach (var file in validFiles)
-        {
-            var normalizedFile = Path.GetFullPath(file);
-            if (existingMediaMap.TryGetValue(normalizedFile, out var existing))
-            {
-                var diskMtime = new DateTimeOffset(File.GetLastWriteTimeUtc(normalizedFile));
-                if (existing.ModifiedAt is null || diskMtime > existing.ModifiedAt.Value)
-                {
-                    mediaToVisit.Add(normalizedFile);
-                }
-            }
-            else
-            {
-                mediaToCreate.Add(normalizedFile);
-            }
-        }
+        var (mediaToCreate, mediaToVisit) = CategorizeMediaFiles(validFiles, existingMediaMap);
 
         var missingMedia = existingMediaMap.Values
             .Where(m => !File.Exists(m.Path))
@@ -209,6 +183,20 @@ public class DirectoryScanner : IDirectoryScanner
             return;
         }
 
+        CollectFiles(dirInfo, validFiles, ref ignoredFiles);
+
+        TraverseSubdirectories(
+            dirInfo,
+            rootDir,
+            cachedMtimes,
+            observedMtimes,
+            validFiles,
+            boundaries,
+            ref ignoredFiles);
+    }
+
+    private static void CollectFiles(DirectoryInfo dirInfo, List<string> validFiles, ref ulong ignoredFiles)
+    {
         try
         {
             foreach (var fullPath in dirInfo.EnumerateFiles().Select(f => f.FullName))
@@ -228,7 +216,17 @@ public class DirectoryScanner : IDirectoryScanner
             // Una carpeta sin permiso o borrada a mitad del recorrido se queda sin
             // indexar; tumbar el escaneo entero por ella seria peor.
         }
+    }
 
+    private static void TraverseSubdirectories(
+        DirectoryInfo dirInfo,
+        string rootDir,
+        IReadOnlyDictionary<string, long> cachedMtimes,
+        Dictionary<string, long> observedMtimes,
+        List<string> validFiles,
+        IReadOnlySet<string> boundaries,
+        ref ulong ignoredFiles)
+    {
         try
         {
             foreach (var subDirFullName in dirInfo.EnumerateDirectories().Select(d => d.FullName))
@@ -313,4 +311,47 @@ public class DirectoryScanner : IDirectoryScanner
 
         return (validEntries, ignoredEntries);
     }
+
+    private static HashSet<string> BuildBoundaries(string seriesPath, IReadOnlyCollection<string>? otherSeriesPaths)
+    {
+        var normalizedSeriesPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(seriesPath));
+        var boundaries = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var other in otherSeriesPaths ?? [])
+        {
+            var normalizedOther = Path.TrimEndingDirectorySeparator(Path.GetFullPath(other));
+            if (!string.Equals(normalizedOther, normalizedSeriesPath, StringComparison.Ordinal))
+            {
+                boundaries.Add(normalizedOther);
+            }
+        }
+        return boundaries;
+    }
+
+    private static (List<string> ToCreate, List<string> ToVisit) CategorizeMediaFiles(
+        List<string> validFiles,
+        Dictionary<string, ExistingMediaInfo> existingMediaMap)
+    {
+        var mediaToCreate = new List<string>();
+        var mediaToVisit = new List<string>();
+
+        foreach (var file in validFiles)
+        {
+            var normalizedFile = Path.GetFullPath(file);
+            if (existingMediaMap.TryGetValue(normalizedFile, out var existing))
+            {
+                var diskMtime = new DateTimeOffset(File.GetLastWriteTimeUtc(normalizedFile));
+                if (existing.ModifiedAt is null || diskMtime > existing.ModifiedAt.Value)
+                {
+                    mediaToVisit.Add(normalizedFile);
+                }
+            }
+            else
+            {
+                mediaToCreate.Add(normalizedFile);
+            }
+        }
+
+        return (mediaToCreate, mediaToVisit);
+    }
 }
+

@@ -142,29 +142,8 @@ public sealed class KoboService : IKoboService
         return 0;
     }
 
-    private static KoboBookEntitlementContainer ToKoboEntitlementContainer(
-        Media media,
-        string baseUrl,
-        string apiKey,
-        ReadingSession? session)
-    {
-        var cleanBaseUrl = baseUrl.TrimEnd('/');
-        var title = media.Metadata?.Title ?? media.Name;
-        var summary = media.Metadata?.Summary;
-
-        var contributors = new List<string>();
-        if (!string.IsNullOrWhiteSpace(media.Metadata?.Writers))
-        {
-            contributors.AddRange(media.Metadata.Writers.Split(',').Select(w => w.Trim()));
-        }
-
-        var categories = new List<string>();
-        if (!string.IsNullOrWhiteSpace(media.Metadata?.Genres))
-        {
-            categories.AddRange(media.Metadata.Genres.Split(',').Select(g => g.Trim()));
-        }
-
-        var entitlement = new KoboBookEntitlement
+    private static KoboBookEntitlement BuildEntitlement(Media media) =>
+        new()
         {
             Id = media.Id,
             CrossRevisionId = media.Id,
@@ -176,6 +155,17 @@ public sealed class KoboService : IKoboService
             ActivePeriod = new KoboPeriod { From = media.CreatedAt }
         };
 
+    private static List<string> ParseCommaList(string? raw) =>
+        string.IsNullOrWhiteSpace(raw)
+            ? []
+            : [.. raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
+
+    private static KoboBookMetadata BuildMetadata(Media media, string cleanBaseUrl, string apiKey)
+    {
+        var title = media.Metadata?.Title ?? media.Name;
+        var summary = media.Metadata?.Summary;
+        var contributors = ParseCommaList(media.Metadata?.Writers);
+        var categories = ParseCommaList(media.Metadata?.Genres);
         var metadata = new KoboBookMetadata
         {
             EntitlementId = media.Id,
@@ -189,8 +179,8 @@ public sealed class KoboService : IKoboService
             Categories = categories,
             Language = "en",
             Genre = categories.FirstOrDefault() ?? "General",
-            DownloadUrls = new List<KoboDownloadUrl>
-            {
+            DownloadUrls =
+            [
                 new()
                 {
                     DrmType = "None",
@@ -199,49 +189,65 @@ public sealed class KoboService : IKoboService
                     Platform = "Generic",
                     Url = $"{cleanBaseUrl}/kobo/{apiKey}/v1/books/{media.Id}/file/epub"
                 }
-            }
+            ],
+            Series = BuildSeriesInfo(media)
         };
 
-        if (media.Series != null)
-        {
-            metadata.Series = new KoboSeriesInfo
-            {
-                Id = media.Series.Id,
-                Name = media.Series.Name,
-                Number = (media.Metadata?.Number ?? 1m).ToString(),
-                NumberFloat = (float)(media.Metadata?.Number ?? 1m)
-            };
-        }
+        return metadata;
+    }
 
-        KoboReadingState? readingState = null;
-        if (session != null)
+    private static KoboSeriesInfo? BuildSeriesInfo(Media media)
+    {
+        if (media.Series == null) return null;
+        var number = media.Metadata?.Number ?? 1m;
+        return new KoboSeriesInfo
         {
-            var percent = session.EndPercentage.HasValue ? (float?)(session.EndPercentage.Value * 100m) : null;
-            readingState = new KoboReadingState
+            Id = media.Series.Id,
+            Name = media.Series.Name,
+            Number = number.ToString(),
+            NumberFloat = (float)number
+        };
+    }
+
+    private static KoboReadingState? BuildReadingState(string mediaId, ReadingSession? session)
+    {
+        if (session == null) return null;
+
+        var percent = session.EndPercentage.HasValue ? (float?)(session.EndPercentage.Value * 100m) : null;
+
+        return new KoboReadingState
+        {
+            EntitlementId = mediaId,
+            Created = session.CreatedAt,
+            LastModified = session.UpdatedAt ?? session.CreatedAt,
+            CurrentBookmark = new KoboCurrentBookmark
             {
-                EntitlementId = media.Id,
-                Created = session.CreatedAt,
                 LastModified = session.UpdatedAt ?? session.CreatedAt,
-                CurrentBookmark = new KoboCurrentBookmark
-                {
-                    LastModified = session.UpdatedAt ?? session.CreatedAt,
-                    ProgressPercent = percent,
-                    ContentSourceProgressPercent = percent
-                },
-                StatusInfo = new KoboStatusInfo
-                {
-                    LastModified = session.UpdatedAt ?? session.CreatedAt,
-                    Status = session.Status == ReadingStatus.Finished ? "Finished" : "Reading",
-                    TimesStartedReading = 1
-                }
-            };
-        }
+                ProgressPercent = percent,
+                ContentSourceProgressPercent = percent
+            },
+            StatusInfo = new KoboStatusInfo
+            {
+                LastModified = session.UpdatedAt ?? session.CreatedAt,
+                Status = session.Status == ReadingStatus.Finished ? "Finished" : "Reading",
+                TimesStartedReading = 1
+            }
+        };
+    }
+
+    private static KoboBookEntitlementContainer ToKoboEntitlementContainer(
+        Media media,
+        string baseUrl,
+        string apiKey,
+        ReadingSession? session)
+    {
+        var cleanBaseUrl = baseUrl.TrimEnd('/');
 
         return new KoboBookEntitlementContainer
         {
-            BookEntitlement = entitlement,
-            BookMetadata = metadata,
-            ReadingState = readingState
+            BookEntitlement = BuildEntitlement(media),
+            BookMetadata = BuildMetadata(media, cleanBaseUrl, apiKey),
+            ReadingState = BuildReadingState(media.Id, session)
         };
     }
 }

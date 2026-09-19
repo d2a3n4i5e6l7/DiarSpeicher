@@ -198,6 +198,44 @@ public sealed class TrashService : ITrashService
         return entries.OrderByDescending(e => e.DeletedAt).ToList();
     }
 
+    private bool RestoreEntry(string slot, TrashEntry entry)
+    {
+        var payload = Path.Combine(slot, PayloadName);
+
+        // Hueco sin contenido: el proceso murio entre escribir el JSON y mover.
+        // No hay nada que devolver, y el purgado se lo llevara.
+        if (!Directory.Exists(payload) && !File.Exists(payload)) return false;
+
+        // Si mientras tanto alguien creo algo con ese nombre, no se pisa.
+        if (Directory.Exists(entry.OriginalPath) || File.Exists(entry.OriginalPath)) return false;
+
+        try
+        {
+            var parent = Path.GetDirectoryName(entry.OriginalPath);
+            if (parent != null) Directory.CreateDirectory(parent);
+
+            if (entry.IsDirectory)
+            {
+                Directory.Move(payload, entry.OriginalPath);
+            }
+            else
+            {
+                File.Move(payload, entry.OriginalPath);
+            }
+
+            TryRemoveDirectory(slot);
+            _logger.LogInformation("Restaurado {Path}", entry.OriginalPath);
+
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogError(e, "No se pudo restaurar {Path}", entry.OriginalPath);
+
+            return false;
+        }
+    }
+
     public bool Restore(string id)
     {
         lock (_gate)
@@ -207,40 +245,7 @@ public sealed class TrashService : ITrashService
                 var entry = ReadEntry(slot);
                 if (entry == null || entry.Id != id) continue;
 
-                var payload = Path.Combine(slot, PayloadName);
-
-                // Hueco sin contenido: el proceso murio entre escribir el JSON y mover.
-                // No hay nada que devolver, y el purgado se lo llevara.
-                if (!Directory.Exists(payload) && !File.Exists(payload)) return false;
-
-                // Si mientras tanto alguien creo algo con ese nombre, no se pisa.
-                if (Directory.Exists(entry.OriginalPath) || File.Exists(entry.OriginalPath)) return false;
-
-                try
-                {
-                    var parent = Path.GetDirectoryName(entry.OriginalPath);
-                    if (parent != null) Directory.CreateDirectory(parent);
-
-                    if (entry.IsDirectory)
-                    {
-                        Directory.Move(payload, entry.OriginalPath);
-                    }
-                    else
-                    {
-                        File.Move(payload, entry.OriginalPath);
-                    }
-
-                    TryRemoveDirectory(slot);
-                    _logger.LogInformation("Restaurado {Path}", entry.OriginalPath);
-
-                    return true;
-                }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-                {
-                    _logger.LogError(e, "No se pudo restaurar {Path}", entry.OriginalPath);
-
-                    return false;
-                }
+                return RestoreEntry(slot, entry);
             }
         }
 

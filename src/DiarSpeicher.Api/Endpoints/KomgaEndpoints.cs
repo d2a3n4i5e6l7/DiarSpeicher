@@ -45,8 +45,9 @@ public static class KomgaEndpoints
 
             // Declarado como object? y no en linea: un ternario entre un tipo anonimo y null
             // no tiene tipo comun y no compila.
+            var restriction = user.RestrictOnUnset ? "ALLOW_ONLY" : "EXCLUDE";
             object? ageRestriction = user.AgeRestriction.HasValue
-                ? new { age = user.AgeRestriction.Value, restriction = user.RestrictOnUnset ? "ALLOW_ONLY" : "EXCLUDE" }
+                ? new { age = user.AgeRestriction.Value, restriction }
                 : null;
 
             return Results.Ok(new
@@ -149,6 +150,12 @@ public static class KomgaEndpoints
 
     private static void MapBookEndpoints(RouteGroupBuilder group)
     {
+        MapBookListRoutes(group);
+        MapBookContentRoutes(group);
+    }
+
+    private static void MapBookListRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/books", async (
             string? search,
             int? page,
@@ -180,7 +187,10 @@ public static class KomgaEndpoints
             var book = await komga.GetBookByIdAsync(user, id, ct);
             return book == null ? Results.NotFound() : Results.Ok(book);
         });
+    }
 
+    private static void MapBookContentRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/books/{id}/pages", async (string id, HttpContext context, IKomgaService komga, CancellationToken ct) =>
         {
             var user = RequestIdentity.GetAuthUser(context);

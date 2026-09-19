@@ -1,0 +1,16 @@
+root = true
+
+[*.cs]
+dotnet_diagnostic.S3776.severity = warning
+dotnet_diagnostic.S1541.severity = warning
+dotnet_diagnostic.S138.severity = warning
+dotnet_diagnostic.S104.severity = warning
+dotnet_diagnostic.S107.severity = warning
+dotnet_diagnostic.S1200.severity = warning
+dotnet_diagnostic.S1151.severity = warning
+dotnet_diagnostic.S134.severity = warning
+dotnet_diagnostic.S1067.severity = warning
+
+[**/Migrations/*.cs]
+generated_code = true
+dotnet_analyzer_diagnostic.severity = none

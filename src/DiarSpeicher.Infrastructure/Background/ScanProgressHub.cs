@@ -40,7 +40,7 @@ public interface IScanProgressHub
 {
     ScanSnapshot? GetSnapshot(string libraryId);
 
-    /// <summary>Todo lo encolado o en marcha, para pintar de gris lo que espera turno.</summary>
+    /// <summary>Lo encolado y lo que esta en marcha, para pintar de gris lo que espera turno.</summary>
     IReadOnlyCollection<ScanSnapshot> GetActive();
 
     /// <summary>

@@ -15,8 +15,6 @@ public static class EpubFontProvider
     /// <summary>Valor de <c>FontFamily</c> que pide usar las fuentes incrustadas en el EPUB.</summary>
     public const string BookEmbedded = "__book__";
 
-    private const string IdpfObfuscation = "http://www.idpf.org/2008/embedding";
-    private const string AdobeObfuscation = "http://ns.adobe.com/pdf/enc#RC";
 
     private static readonly Dictionary<string, (string Regular, string Bold)> Bundled =
         new(StringComparer.OrdinalIgnoreCase)
@@ -80,8 +78,8 @@ public static class EpubFontProvider
         var reglas = FontFaceRules(archive);
         if (reglas.Count == 0) return null;
 
-        var uid = UniqueIdentifier(archive);
-        var cifrados = ObfuscatedEntries(archive);
+        var uid = EpubFontDeobfuscator.UniqueIdentifier(archive);
+        var cifrados = EpubFontDeobfuscator.ObfuscatedEntries(archive);
 
         var regular = PickFace(archive, reglas, uid, cifrados, bold: false);
         if (regular == null) return null;
@@ -137,7 +135,7 @@ public static class EpubFontProvider
         var bytes = ms.ToArray();
 
         return cifrados.TryGetValue(ruta, out var algoritmo)
-            ? Deobfuscate(bytes, uid, algoritmo)
+            ? EpubFontDeobfuscator.Deobfuscate(bytes, uid, algoritmo)
             : bytes;
     }
 
@@ -151,9 +149,9 @@ public static class EpubFontProvider
     }
 
     private static readonly Regex FontFaceRegex =
-        new(@"@font-face\s*\{(.*?)\}", RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        new(@"@font-face\s*\{(.*?)\}", RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(2));
     private static readonly Regex UrlRegex =
-        new(@"url\(\s*['""]?([^'""\)]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        new(@"url\(\s*['""]?([^'""\)]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(2));
 
     private static List<(string Path, int Weight, bool Italic)> FontFaceRules(ZipArchive archive)
     {
@@ -185,7 +183,7 @@ public static class EpubFontProvider
 
     private static string? Declaration(string bloque, string nombre)
     {
-        var m = Regex.Match(bloque, $@"{nombre}\s*:\s*([^;]+)", RegexOptions.IgnoreCase);
+        var m = Regex.Match(bloque, $@"{nombre}\s*:\s*([^;]+)", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(2));
         return m.Success ? m.Groups[1].Value.Trim() : null;
     }
 
@@ -211,104 +209,4 @@ public static class EpubFontProvider
         return string.Join('/', pila);
     }
 
-    // ------------------------------------------------------------ ofuscado
-
-    private static string UniqueIdentifier(ZipArchive archive)
-    {
-        try
-        {
-            var container = archive.GetEntry("META-INF/container.xml");
-            if (container == null) return "";
-
-            XNamespace cn = "urn:oasis:names:tc:opendocument:xmlns:container";
-            XDocument contenedor;
-            using (var s = container.Open()) contenedor = XDocument.Load(s);
-            var rootfile = contenedor.Descendants(cn + "rootfile").FirstOrDefault();
-            var opfPath = rootfile?.Attribute("full-path")?.Value;
-            if (opfPath == null) return "";
-
-            var opf = archive.GetEntry(opfPath);
-            if (opf == null) return "";
-
-            XNamespace on = "http://www.idpf.org/2007/opf";
-            XNamespace dc = "http://purl.org/dc/elements/1.1/";
-            XDocument doc;
-            using (var s = opf.Open()) doc = XDocument.Load(s);
-            var idref = doc.Root?.Attribute("unique-identifier")?.Value;
-
-            var ids = doc.Descendants(dc + "identifier").ToList();
-            var elegido = ids.FirstOrDefault(i => i.Attribute("id")?.Value == idref) ?? ids.FirstOrDefault();
-            return elegido?.Value.Trim() ?? "";
-        }
-        catch
-        {
-            // Un OPF ilegible solo significa que no se podran desofuscar fuentes; el libro
-            // se sigue sirviendo con las nuestras.
-            return "";
-        }
-    }
-
-    private static IReadOnlyDictionary<string, string> ObfuscatedEntries(ZipArchive archive)
-    {
-        var fuera = new Dictionary<string, string>(StringComparer.Ordinal);
-        var enc = archive.GetEntry("META-INF/encryption.xml");
-        if (enc == null) return fuera;
-
-        try
-        {
-            XNamespace e = "http://www.w3.org/2001/04/xmlenc#";
-            XDocument cifrado;
-            using (var s = enc.Open()) cifrado = XDocument.Load(s);
-
-            foreach (var datos in cifrado.Descendants(e + "EncryptedData"))
-            {
-                var alg = datos.Descendants(e + "EncryptionMethod").FirstOrDefault()?.Attribute("Algorithm")?.Value;
-                var uri = datos.Descendants(e + "CipherReference").FirstOrDefault()?.Attribute("URI")?.Value;
-                if (alg != null && uri != null) fuera[Uri.UnescapeDataString(uri.TrimStart('/'))] = alg;
-            }
-        }
-        catch
-        {
-            return fuera;
-        }
-
-        return fuera;
-    }
-
-    /// <summary>
-    /// Deshace el enmascarado de fuentes. No es DRM: el algoritmo es publico y existe para
-    /// poner freno a quien no ha leido la licencia tipografica, no para cifrar el libro.
-    /// </summary>
-    private static byte[] Deobfuscate(byte[] datos, string uid, string algoritmo)
-    {
-        byte[] clave;
-        int cuantos;
-
-        if (algoritmo == IdpfObfuscation)
-        {
-            // La spec: quitar los espacios XML del identificador, luego SHA-1.
-            var limpio = new string(uid.Where(c => c is not (' ' or '\t' or '\r' or '\n')).ToArray());
-            clave = SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(limpio));
-            cuantos = 1040;
-        }
-        else if (algoritmo == AdobeObfuscation)
-        {
-            var hex = uid.Replace("urn:uuid:", "", StringComparison.OrdinalIgnoreCase).Replace("-", "");
-            try { clave = Convert.FromHexString(hex); }
-            catch { return datos; }
-            cuantos = 1024;
-        }
-        else
-        {
-            // Cifrado de verdad (DRM): no se toca.
-            return [];
-        }
-
-        if (clave.Length == 0) return datos;
-
-        var fuera = (byte[])datos.Clone();
-        var tope = Math.Min(cuantos, fuera.Length);
-        for (var i = 0; i < tope; i++) fuera[i] ^= clave[i % clave.Length];
-        return fuera;
-    }
 }

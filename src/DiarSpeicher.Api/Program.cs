@@ -152,9 +152,10 @@ forwardedHeaders.KnownProxies.Clear();
 app.UseForwardedHeaders(forwardedHeaders);
 
 var gateway = app.Services.GetRequiredService<IOptions<GatewayOptions>>().Value;
-if (!string.IsNullOrWhiteSpace(gateway.PathBase))
+var pathBase = gateway.PathBase?.Trim('/');
+if (!string.IsNullOrWhiteSpace(pathBase))
 {
-    app.UsePathBase("/" + gateway.PathBase.Trim('/'));
+    app.UsePathBase(new PathString('/' + pathBase));
 }
 
 app.UseGatewayIdentity();

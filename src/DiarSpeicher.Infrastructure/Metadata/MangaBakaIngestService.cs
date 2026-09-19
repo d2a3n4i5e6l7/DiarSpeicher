@@ -319,6 +319,30 @@ public class MangaBakaIngestService : IMangaBakaIngestService
         }
     }
 
+    private static async Task ExtractSqliteEntryAsync(
+        Stream archive,
+        string fileName,
+        string temporary,
+        CancellationToken cancellationToken)
+    {
+        await using var reader = await ReaderFactory.OpenAsyncReader(archive, cancellationToken: cancellationToken);
+
+        while (await reader.MoveToNextEntryAsync(cancellationToken))
+        {
+            if (reader.Entry.IsDirectory) continue;
+
+            var key = reader.Entry.Key ?? string.Empty;
+            if (!key.EndsWith(".sqlite", StringComparison.OrdinalIgnoreCase)) continue;
+
+            await using var entryStream = await reader.OpenEntryStreamAsync(cancellationToken);
+            await using var output = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None);
+            await entryStream.CopyToAsync(output, cancellationToken);
+            return;
+        }
+
+        throw new InvalidOperationException($"{fileName} no contiene ningún fichero .sqlite.");
+    }
+
     private async Task DecompressAsync(Stream archive, string fileName, CancellationToken cancellationToken)
     {
         var target = _options.ResolveSqlitePath();
@@ -334,27 +358,7 @@ public class MangaBakaIngestService : IMangaBakaIngestService
             }
             else
             {
-                await using var reader = await ReaderFactory.OpenAsyncReader(archive, cancellationToken: cancellationToken);
-                var extracted = false;
-
-                while (await reader.MoveToNextEntryAsync(cancellationToken))
-                {
-                    if (reader.Entry.IsDirectory) continue;
-
-                    var key = reader.Entry.Key ?? string.Empty;
-                    if (!key.EndsWith(".sqlite", StringComparison.OrdinalIgnoreCase)) continue;
-
-                    await using var entryStream = await reader.OpenEntryStreamAsync(cancellationToken);
-                    await using var output = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None);
-                    await entryStream.CopyToAsync(output, cancellationToken);
-                    extracted = true;
-                    break;
-                }
-
-                if (!extracted)
-                {
-                    throw new InvalidOperationException($"{fileName} no contiene ningún fichero .sqlite.");
-                }
+                await ExtractSqliteEntryAsync(archive, fileName, temporary, cancellationToken);
             }
 
             // El renombrado va al final: un corte a media descompresión dejaría si no un

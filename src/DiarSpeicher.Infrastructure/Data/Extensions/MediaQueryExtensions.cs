@@ -2,6 +2,17 @@ namespace DiarSpeicher.Infrastructure.Data.Extensions;
 
 public static class MediaQueryExtensions
 {
+    public static IQueryable<Media> MatchingText(this IQueryable<Media> query, string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search)) return query;
+
+        return query.Where(m =>
+            m.Name.Contains(search)
+            || m.Metadata!.Title!.Contains(search)
+            || m.Metadata.Summary!.Contains(search)
+            || m.Metadata.Writers!.Contains(search));
+    }
+
     public static IQueryable<Media> ForUser(this IQueryable<Media> query, AuthUser? user)
     {
         var q = query.Where(m => m.DeletedAt == null);
@@ -40,15 +51,7 @@ public static class MediaQueryExtensions
 
         if (user.AgeRestriction.HasValue)
         {
-            var maxAge = user.AgeRestriction.Value;
-            if (user.RestrictOnUnset)
-            {
-                q = q.Where(s => s.Metadata != null && s.Metadata.AgeRating != null && s.Metadata.AgeRating <= maxAge);
-            }
-            else
-            {
-                q = q.Where(s => s.Metadata == null || s.Metadata.AgeRating == null || s.Metadata.AgeRating <= maxAge);
-            }
+            q = ApplySeriesAgeFilter(q, user.AgeRestriction.Value, user.RestrictOnUnset);
         }
 
         return q;
@@ -72,36 +75,27 @@ public static class MediaQueryExtensions
     public static IQueryable<Series> WithDetails(this IQueryable<Series> query) =>
         query.Include(s => s.Metadata).Include(s => s.Media);
 
-    private static IQueryable<Media> ApplyMediaAgeFilter(IQueryable<Media> query, int maxAge, bool restrictOnUnset)
-    {
-        if (restrictOnUnset)
-        {
-            return query.Where(m =>
-                ((m.Metadata == null || m.Metadata.AgeRating == null) &&
-                 m.Series != null &&
-                 m.Series.Metadata != null &&
-                 m.Series.Metadata.AgeRating != null &&
-                 m.Series.Metadata.AgeRating <= maxAge)
-                ||
-                (m.Metadata != null &&
-                 m.Metadata.AgeRating != null &&
-                 m.Metadata.AgeRating <= maxAge)
-            );
-        }
+    private static IQueryable<Series> ApplySeriesAgeFilter(IQueryable<Series> query, int maxAge, bool restrictOnUnset) =>
+        restrictOnUnset
+            ? query.Where(s => s.Metadata != null && s.Metadata.AgeRating != null && s.Metadata.AgeRating <= maxAge)
+            : query.Where(s => s.Metadata == null || s.Metadata.AgeRating == null || s.Metadata.AgeRating <= maxAge);
 
-        return query.Where(m =>
-            ((m.Metadata == null || m.Metadata.AgeRating == null) &&
-             (
-                 (m.Series == null || m.Series.Metadata == null)
-                 ||
-                 (m.Series != null && m.Series.Metadata != null && m.Series.Metadata.AgeRating != null && m.Series.Metadata.AgeRating <= maxAge)
-                 ||
-                 (m.Series != null && m.Series.Metadata != null && m.Series.Metadata.AgeRating == null)
-             ))
-            ||
-            (m.Metadata != null &&
-             m.Metadata.AgeRating != null &&
-             m.Metadata.AgeRating <= maxAge)
-        );
-    }
+    private static IQueryable<Media> ApplyMediaAgeFilter(IQueryable<Media> query, int maxAge, bool restrictOnUnset) =>
+        restrictOnUnset
+            ? ApplyRestrictOnUnsetFilter(query, maxAge)
+            : ApplyPermissiveAgeFilter(query, maxAge);
+
+    private static IQueryable<Media> ApplyRestrictOnUnsetFilter(IQueryable<Media> query, int maxAge) =>
+        query.Where(m =>
+            m.Metadata != null && m.Metadata.AgeRating != null
+                ? m.Metadata.AgeRating <= maxAge
+                : m.Series != null && m.Series.Metadata != null
+                  && m.Series.Metadata.AgeRating != null && m.Series.Metadata.AgeRating <= maxAge);
+
+    private static IQueryable<Media> ApplyPermissiveAgeFilter(IQueryable<Media> query, int maxAge) =>
+        query.Where(m =>
+            m.Metadata != null && m.Metadata.AgeRating != null
+                ? m.Metadata.AgeRating <= maxAge
+                : m.Series == null || m.Series.Metadata == null
+                  || m.Series.Metadata.AgeRating == null || m.Series.Metadata.AgeRating <= maxAge);
 }

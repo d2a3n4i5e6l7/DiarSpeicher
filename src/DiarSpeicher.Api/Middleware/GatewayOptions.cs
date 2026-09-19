@@ -47,15 +47,7 @@ public class GatewayOptions
     /// </summary>
     public bool IsPublicPath(string path)
     {
-        foreach (var pattern in ResolvePublicPaths())
-        {
-            if (MatchesPattern(pattern, path))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return ResolvePublicPaths().Any(pattern => MatchesPattern(pattern, path));
     }
 
     private static bool MatchesPattern(string pattern, string path)

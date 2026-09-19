@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace DiarSpeicher.Core.Domain.Opds;
 
 public static class OpdsNamespaces
@@ -22,19 +24,25 @@ public static class OpdsLinkType
     public const string Epub = "application/epub+zip";
     public const string Search = "application/opensearchdescription+xml";
 
+    private static readonly FrozenDictionary<string, string> ExtensionMap =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["jpeg"] = ImageJpeg,
+            ["jpg"] = ImageJpeg,
+            ["png"] = ImagePng,
+            ["gif"] = ImageGif,
+            ["epub"] = Epub,
+            ["zip"] = Zip,
+            ["cbz"] = Zip,
+            ["rar"] = Zip,
+            ["cbr"] = Zip,
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
     public static string FromExtension(string? extension)
     {
         if (string.IsNullOrWhiteSpace(extension)) return OctetStream;
-        var ext = extension.TrimStart('.').ToLowerInvariant();
-        return ext switch
-        {
-            "jpeg" or "jpg" => ImageJpeg,
-            "png" => ImagePng,
-            "gif" => ImageGif,
-            "epub" => Epub,
-            "zip" or "cbz" or "rar" or "cbr" => Zip,
-            _ => OctetStream
-        };
+        var ext = extension.TrimStart('.');
+        return ExtensionMap.TryGetValue(ext, out var mime) ? mime : OctetStream;
     }
 }
 

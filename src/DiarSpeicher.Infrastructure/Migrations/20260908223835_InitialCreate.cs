@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -139,7 +139,8 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     Locale = table.Column<string>(type: "TEXT", nullable: false),
                     AppTheme = table.Column<string>(type: "TEXT", nullable: false),
                     AppFont = table.Column<string>(type: "TEXT", nullable: false),
-                    EnableCompactDisplay = table.Column<bool>(type: "INTEGER", nullable: false)
+                    EnableCompactDisplay = table.Column<bool>(type: "INTEGER", nullable: false),
+                    EpubProfilesJson = table.Column<string>(type: "TEXT", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -211,6 +212,7 @@ namespace DiarSpeicher.Infrastructure.Migrations
                 {
                     Id = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
                     Name = table.Column<string>(type: "TEXT", maxLength: 255, nullable: false),
+                    SortName = table.Column<string>(type: "TEXT", nullable: true),
                     Size = table.Column<long>(type: "INTEGER", nullable: false),
                     Extension = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
                     Pages = table.Column<int>(type: "INTEGER", nullable: false),
@@ -298,6 +300,27 @@ namespace DiarSpeicher.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "EpubPageMaps",
+                columns: table => new
+                {
+                    MediaId = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
+                    ProfileKey = table.Column<string>(type: "TEXT", maxLength: 512, nullable: false),
+                    TotalPages = table.Column<int>(type: "INTEGER", nullable: false),
+                    FileModifiedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    BuiltAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_EpubPageMaps", x => new { x.MediaId, x.ProfileKey });
+                    table.ForeignKey(
+                        name: "FK_EpubPageMaps_Media_MediaId",
+                        column: x => x.MediaId,
+                        principalTable: "Media",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "MediaMetadata",
                 columns: table => new
                 {
@@ -352,6 +375,29 @@ namespace DiarSpeicher.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "MediaPages",
+                columns: table => new
+                {
+                    MediaId = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
+                    Number = table.Column<int>(type: "INTEGER", nullable: false),
+                    FileName = table.Column<string>(type: "TEXT", maxLength: 255, nullable: false),
+                    MediaType = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
+                    Width = table.Column<int>(type: "INTEGER", nullable: true),
+                    Height = table.Column<int>(type: "INTEGER", nullable: true),
+                    SizeBytes = table.Column<long>(type: "INTEGER", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_MediaPages", x => new { x.MediaId, x.Number });
+                    table.ForeignKey(
+                        name: "FK_MediaPages_Media_MediaId",
+                        column: x => x.MediaId,
+                        principalTable: "Media",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "MediaTags",
                 columns: table => new
                 {
@@ -388,6 +434,9 @@ namespace DiarSpeicher.Infrastructure.Migrations
                     EndPercentage = table.Column<decimal>(type: "TEXT", nullable: true),
                     KoreaderProgress = table.Column<string>(type: "TEXT", nullable: true),
                     ElapsedSeconds = table.Column<long>(type: "INTEGER", nullable: true),
+                    RenderedPage = table.Column<int>(type: "INTEGER", nullable: true),
+                    RenderedTotalPages = table.Column<int>(type: "INTEGER", nullable: true),
+                    RenderedProfileKey = table.Column<string>(type: "TEXT", nullable: true),
                     ReadthroughNumber = table.Column<int>(type: "INTEGER", nullable: false),
                     Status = table.Column<string>(type: "TEXT", nullable: false),
                     Notes = table.Column<string>(type: "TEXT", nullable: true),
@@ -466,6 +515,11 @@ namespace DiarSpeicher.Infrastructure.Migrations
                 column: "SeriesId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_Media_SeriesId_SortName",
+                table: "Media",
+                columns: new[] { "SeriesId", "SortName" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_MediaMetadata_MediaId",
                 table: "MediaMetadata",
                 column: "MediaId",
@@ -527,10 +581,16 @@ namespace DiarSpeicher.Infrastructure.Migrations
                 name: "AgeRestrictions");
 
             migrationBuilder.DropTable(
+                name: "EpubPageMaps");
+
+            migrationBuilder.DropTable(
                 name: "LibraryExclusions");
 
             migrationBuilder.DropTable(
                 name: "MediaMetadata");
+
+            migrationBuilder.DropTable(
+                name: "MediaPages");
 
             migrationBuilder.DropTable(
                 name: "MediaTags");

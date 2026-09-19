@@ -8,29 +8,10 @@ using Microsoft.Extensions.Options;
 
 namespace DiarSpeicher.Api.Endpoints;
 
-/// <summary>
-/// Explorador de carpetas para elegir la ruta de una biblioteca sin escribirla a ciegas.
-/// <para>
-/// Lista en vivo, sin cache. Leer los hijos de un directorio es una llamada al sistema y
-/// siempre es la verdad; una copia en base de datos solo anadiria el problema de quedarse
-/// vieja. El indice hace falta para <em>buscar por nombre</em> en el arbol entero, que es
-/// otra cosa y no se resuelve aqui.
-/// </para>
-/// <para>
-/// Cuanto sale de aqui esta encerrado en <see cref="LibraryRootsOptions"/>. Sin esa
-/// jaula esto seria un lector del sistema de ficheros del contenedor para cualquiera con
-/// <c>ManageLibrary</c>.
-/// </para>
-/// </summary>
 public static class FilesystemEndpoints
 {
     private const string AuthUserKey = "AuthUser";
 
-    /// <summary>
-    /// Tope de entradas por respuesta. Una carpeta con decenas de miles de subcarpetas
-    /// existe (descargas planas), y devolverlas todas bloquea el navegador sin ayudar a
-    /// nadie a elegir.
-    /// </summary>
     private const int MaxEntries = 1000;
 
     private const string OutsideRoots = "Esa ruta esta fuera de las carpetas permitidas.";
@@ -42,6 +23,16 @@ public static class FilesystemEndpoints
     {
         var group = app.MapGroup("/api/v2/filesystem");
 
+        MapRootRoutes(group);
+        MapIndexRoutes(group);
+        MapTrashRoutes(group);
+        MapBrowseRoutes(group);
+
+        return group;
+    }
+
+    private static void MapRootRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/roots", (
             HttpContext httpContext,
             [FromServices] IOptions<LibraryRootsOptions> options) =>
@@ -59,7 +50,10 @@ public static class FilesystemEndpoints
 
             return Results.Ok(roots);
         });
+    }
 
+    private static void MapIndexRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/index", (
             HttpContext httpContext,
             [FromServices] IFolderIndex index) =>
@@ -90,55 +84,85 @@ public static class FilesystemEndpoints
 
             return Results.Ok(index.Search(q ?? string.Empty, limit ?? 60));
         });
+    }
 
-        // Contar antes de destruir: lo que se enseña en el aviso sale de aqui, no de una
-        // estimacion del cliente.
-        group.MapGet("/deletion", (
-            [FromQuery] string? path,
-            HttpContext httpContext,
-            [FromServices] ITrashService trash,
-            [FromServices] IOptions<LibraryRootsOptions> options) =>
+    private static void MapTrashRoutes(RouteGroupBuilder group)
+    {
+        group.MapGet("/deletion", HandleDeletionInspect);
+        group.MapDelete("/entry", HandleDeleteEntry);
+    }
+
+    private static IResult HandleDeletionInspect(
+        [FromQuery] string? path,
+        HttpContext httpContext,
+        [FromServices] ITrashService trash,
+        [FromServices] IOptions<LibraryRootsOptions> options)
+    {
+        if (!IsAllowed(httpContext)) return Forbidden();
+
+        var scope = trash.Inspect(path ?? string.Empty);
+        if (scope != null) return Results.Ok(ToDeletionDto(scope));
+
+        return options.Value.TryResolve(path, out var resolved) && !Directory.Exists(resolved) && !File.Exists(resolved)
+            ? Results.NotFound(new { error = "Eso ya no esta en el disco. Se puede quitar del indice sin borrar nada." })
+            : Results.Json(new { error = NotDeletable }, statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    private static async Task<IResult> HandleDeleteEntry(
+        [FromQuery] string? path,
+        HttpContext httpContext,
+        [FromServices] ITrashService trash,
+        [FromServices] IDiarSpeicherService catalog,
+        CancellationToken ct)
+    {
+        if (!IsAllowed(httpContext)) return Forbidden();
+
+        var outcome = trash.TryMoveToTrash(path ?? string.Empty, out var entry);
+        if (outcome != TrashOutcome.Moved)
         {
-            if (!IsAllowed(httpContext)) return Forbidden();
-
-            var scope = trash.Inspect(path ?? string.Empty);
-            if (scope != null) return Results.Ok(ToDeletionDto(scope));
-
-            // Que la ruta no exista no es lo mismo que no estar permitida, y el usuario
-            // necesita saber cual de las dos es.
-            return options.Value.TryResolve(path, out var resolved) && !Directory.Exists(resolved) && !File.Exists(resolved)
-                ? Results.NotFound(new { error = "Eso ya no esta en el disco. Se puede quitar del indice sin borrar nada." })
-                : Results.Json(new { error = NotDeletable }, statusCode: StatusCodes.Status403Forbidden);
-        });
-
-        group.MapDelete("/entry", async (
-            [FromQuery] string? path,
-            HttpContext httpContext,
-            [FromServices] ITrashService trash,
-            [FromServices] IDiarSpeicherService catalog,
-            CancellationToken ct) =>
-        {
-            if (!IsAllowed(httpContext)) return Forbidden();
-
-            var outcome = trash.TryMoveToTrash(path ?? string.Empty, out var entry);
-            if (outcome != TrashOutcome.Moved)
+            return outcome switch
             {
-                return outcome switch
-                {
-                    TrashOutcome.NotFound => Results.NotFound(new { error = "Eso ya no esta en el disco." }),
-                    TrashOutcome.NotAllowed => Results.Json(new { error = NotDeletable }, statusCode: StatusCodes.Status403Forbidden),
-                    _ => Results.Json(new { error = "No se pudo mover a la papelera." }, statusCode: StatusCodes.Status500InternalServerError)
-                };
-            }
+                TrashOutcome.NotFound => Results.NotFound(new { error = "Eso ya no esta en el disco." }),
+                TrashOutcome.NotAllowed => Results.Json(new { error = NotDeletable }, statusCode: StatusCodes.Status403Forbidden),
+                _ => Results.Json(new { error = "No se pudo mover a la papelera." }, statusCode: StatusCodes.Status500InternalServerError)
+            };
+        }
 
-            // Sin esto las filas se quedan apuntando a una ruta muerta: el tomo sigue
-            // saliendo en "anadido reciente" y su miniatura se sigue sirviendo.
-            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            await catalog.PurgeIndexUnderPathAsync(user, entry!.OriginalPath, ct);
+        var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+        await catalog.PurgeIndexUnderPathAsync(user, entry!.OriginalPath, ct);
 
-            return Results.Ok(ToTrashDto(entry, trashOptions: null));
-        });
+        return Results.Ok(ToTrashDto(entry, trashOptions: null));
+    }
 
+    private static DeletionPreviewDto ToDeletionDto(DeletionScope scope) => new()
+    {
+        Path = scope.Path,
+        Name = scope.Name,
+        FileCount = scope.FileCount,
+        Bytes = scope.Bytes,
+        Folders = scope.Children.Select(ToDeletionDto).ToList()
+    };
+
+    internal static TrashEntryDto ToTrashDto(TrashEntry entry, TrashOptions? trashOptions)
+    {
+        var retention = trashOptions?.Retention ?? TimeSpan.FromHours(1);
+        var left = entry.DeletedAt + retention - DateTimeOffset.UtcNow;
+
+        return new TrashEntryDto
+        {
+            Id = entry.Id,
+            OriginalPath = entry.OriginalPath,
+            Name = entry.Name,
+            IsDirectory = entry.IsDirectory,
+            FileCount = entry.FileCount,
+            Bytes = entry.Bytes,
+            DeletedAt = entry.DeletedAt,
+            ExpiresInSeconds = left > TimeSpan.Zero ? (int)left.TotalSeconds : 0
+        };
+    }
+
+    private static void MapBrowseRoutes(RouteGroupBuilder group)
+    {
         group.MapGet("/preview", (
             [FromQuery] string? path,
             [FromQuery] string? pattern,
@@ -182,8 +206,6 @@ public static class FilesystemEndpoints
 
             return Browse(path, options.Value);
         });
-
-        return group;
     }
 
     private static IResult Browse(string? path, LibraryRootsOptions options)
@@ -295,32 +317,6 @@ public static class FilesystemEndpoints
         return Results.Ok(preview);
     }
 
-    private static DeletionPreviewDto ToDeletionDto(DeletionScope scope) => new()
-    {
-        Path = scope.Path,
-        Name = scope.Name,
-        FileCount = scope.FileCount,
-        Bytes = scope.Bytes,
-        Folders = scope.Children.Select(ToDeletionDto).ToList()
-    };
-
-    internal static TrashEntryDto ToTrashDto(TrashEntry entry, TrashOptions? trashOptions)
-    {
-        var retention = trashOptions?.Retention ?? TimeSpan.FromHours(1);
-        var left = entry.DeletedAt + retention - DateTimeOffset.UtcNow;
-
-        return new TrashEntryDto
-        {
-            Id = entry.Id,
-            OriginalPath = entry.OriginalPath,
-            Name = entry.Name,
-            IsDirectory = entry.IsDirectory,
-            FileCount = entry.FileCount,
-            Bytes = entry.Bytes,
-            DeletedAt = entry.DeletedAt,
-            ExpiresInSeconds = left > TimeSpan.Zero ? (int)left.TotalSeconds : 0
-        };
-    }
 
     private static DiskUsageDto ReadDisk(string path)
     {
@@ -351,7 +347,7 @@ public static class FilesystemEndpoints
         // Solo un nombre, nunca una ruta: con un separador o un ".." el Combine saldria
         // del padre que el cliente dice estar usando.
         if (name.Length == 0
-            || name == "." || name == ".."
+            || name is "." or ".."
             || name.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) >= 0
             || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
