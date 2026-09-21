@@ -121,3 +121,30 @@ export function filterAndSortMedia(
 		}
 	});
 }
+
+/**
+ * Misma clave que SortKey.From del servidor: cada tramo de digitos se rellena a diez, asi
+ * "Vol 2" queda antes de "Vol 10". Se replica aqui para colocar los huecos del escaneo —que
+ * no existen en la base y por tanto no traen SortName— entre los tomos ya indexados.
+ */
+export function sortKeyFrom(name: string): string {
+	let out = "";
+	let i = 0;
+	while (i < name.length) {
+		const code = name.charCodeAt(i);
+		if (code < 48 || code > 57) {
+			out += name[i].toLowerCase();
+			i += 1;
+			continue;
+		}
+		const start = i;
+		while (i < name.length) {
+			const digit = name.charCodeAt(i);
+			if (digit < 48 || digit > 57) break;
+			i += 1;
+		}
+		const digits = name.slice(start, i).replace(/^0+/, "");
+		out += digits.length > 10 ? name.slice(start, i) : digits.padStart(10, "0");
+	}
+	return out;
+}

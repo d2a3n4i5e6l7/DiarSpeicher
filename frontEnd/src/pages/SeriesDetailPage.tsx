@@ -27,7 +27,7 @@ import LinkOffIcon from "@mui/icons-material/LinkOff";
 import EditIcon from "@mui/icons-material/Edit";
 import ImageIcon from "@mui/icons-material/Image";
 import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useScanProgress } from "../catalog/useScanProgress";
 import { Link as RouterLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import HudFrame from "../components/HudFrame";
@@ -118,7 +118,15 @@ export default function SeriesDetailPage() {
 	// El resultado se guarda con el id que lo pidió: navegar de una serie a otra
 	// descarta solo la respuesta anterior, sin reiniciar estado en un efecto.
 	const [result, setResult] = useState<Result | null>(null);
+
 	const requestKey = `${id}#${String(reloadToken)}`;
+
+	// El escaneo entra en la clave para releer la ficha cuando termina: los tomos que llegaron
+	// por el evento solo viven mientras el flujo esta abierto, y sin esta relectura la ficha se
+	// queda con lo que hubiera al entrar, que en una serie recien creada es nada.
+	const scanEvent = useScanProgress(result?.series?.libraryId ?? "");
+	const scanKey = scanEvent !== null && !scanEvent.finished ? "live" : "idle";
+	const loadKey = `${requestKey}#${scanKey}`;
 
 	useEffect(() => {
 		let mounted = true;
@@ -130,7 +138,7 @@ export default function SeriesDetailPage() {
 		])
 			.then(([detail, media]) => {
 				if (mounted && !controller.signal.aborted) {
-					setResult({ key: requestKey, series: detail, volumes: media.data });
+					setResult({ key: loadKey, series: detail, volumes: media.data });
 				}
 			})
 			.catch((err: unknown) => {
@@ -138,7 +146,7 @@ export default function SeriesDetailPage() {
 					return;
 				}
 				if (mounted && !controller.signal.aborted) {
-					setResult({ key: requestKey, error: errorMessage(err, "No se pudo cargar la serie.") });
+					setResult({ key: loadKey, error: errorMessage(err, "No se pudo cargar la serie.") });
 				}
 			});
 
@@ -146,15 +154,32 @@ export default function SeriesDetailPage() {
 			mounted = false;
 			controller.abort();
 		};
-	}, [id, requestKey]);
+	}, [id, loadKey]);
 
 	// Lo anterior se queda en pantalla mientras llega la recarga: vaciarla en cada lote del
 	// escaneo dejaba la rejilla parpadeando. El giro solo en la primera carga.
 	const fresh = result;
 	const loading = result === null;
 	const series = fresh?.series ?? null;
-	const volumes = fresh?.volumes ?? EMPTY_VOLUMES;
+
+	// El identificador lo manda el propio evento: por nombre no valdria, dos bibliotecas
+	// pueden tener series que se llaman igual.
+	const indexing =
+		scanEvent !== null && !scanEvent.finished && scanEvent.currentSeriesId === fresh?.series?.id
+			? scanEvent
+			: null;
 	const error = fresh?.error ?? null;
+
+	// El hook entrega lo creado ya acumulado; aqui solo se filtra lo de esta serie.
+	const mine = (scanEvent?.createdMedia ?? EMPTY_VOLUMES).filter((m) => m.seriesId === id);
+
+	const volumes = useMemo(() => {
+		const base = fresh?.volumes ?? EMPTY_VOLUMES;
+		if (mine.length === 0) return base;
+		const known = new Set(base.map((v) => v.id));
+		const added = mine.filter((m) => !known.has(m.id));
+		return added.length === 0 ? base : [...base, ...added];
+	}, [fresh?.volumes, mine]);
 
 	const stats = useMemo(() => {
 		const totalPages = volumes.reduce((sum, v) => sum + v.pages, 0);
@@ -165,35 +190,6 @@ export default function SeriesDetailPage() {
 		const nextVolume = volumes.find((v) => !v.isCompleted) ?? volumes[0];
 		return { totalPages, totalSize, readCount, percent, nextVolume };
 	}, [volumes]);
-
-	// Mientras el escáner está en esta serie, la pestaña de tomos pinta un hueco por cada
-	// volumen que viene. El identificador lo manda el propio evento: por nombre no valdría,
-	// dos bibliotecas pueden tener series que se llaman igual.
-	const scan = useScanProgress(series?.libraryId ?? "");
-	const indexing =
-		scan !== null && !scan.finished && scan.totalMedia > 0 && scan.currentSeriesId === series?.id
-			? scan
-			: null;
-
-	// Cada lote deja tomos ya escritos en la base, así que se relee cuando el contador avanza:
-	// sin esto el hueco se queda diciendo LISTO y nunca llega a enseñar su portada. Se apoya
-	// en que la recarga ya no vacía la pantalla, o esto sería un parpadeo por lote.
-	const completedMedia = indexing?.completedMedia ?? null;
-	const wasIndexing = useRef(false);
-	useEffect(() => {
-		if (completedMedia !== null) {
-			wasIndexing.current = true;
-			const timer = setTimeout(() => {
-				setReloadToken((token) => token + 1);
-			}, 500);
-			return () => clearTimeout(timer);
-		}
-
-		if (wasIndexing.current) {
-			wasIndexing.current = false;
-			setReloadToken((token) => token + 1);
-		}
-	}, [completedMedia]);
 
 	if (loading) {
 		return (
@@ -252,6 +248,11 @@ export default function SeriesDetailPage() {
 				}
 			: null;
 
+	let seriesCoverUrl = seriesApi.thumbnailUrl(series.id, series.coverUpdatedAt ?? String(volumes.length));
+	if (!series.coverUpdatedAt && volumes[0]) {
+		seriesCoverUrl = mediaApi.thumbnailUrl(volumes[0].id);
+	}
+
 	return (
 		<Box>
 			<Button
@@ -282,7 +283,7 @@ export default function SeriesDetailPage() {
 					<MediaCard
 						to={stats.nextVolume ? `/read/${stats.nextVolume.id}` : `/series/${series.id}`}
 						title=""
-						coverUrl={seriesApi.thumbnailUrl(series.id, series.coverUpdatedAt)}
+						coverUrl={seriesCoverUrl}
 						progress={stats.percent}
 						width="100%"
 					/>
@@ -628,63 +629,71 @@ function SeriesVolumesTab({
 	seriesName: string;
 	indexing: ScanStatus | null;
 }>) {
+	// Una celda por fichero del disco, con su ruta como clave. La celda nace hueca y pasa a
+	// portada cuando su tomo entra en el catalogo, sin cambiar de sitio. La clave es la ruta y
+	// no el nombre porque el nombre se repite entre carpetas: dos series con un "Volumen 1"
+	// cada una acabarian compartiendo celda.
+	const fileKey = (p: string) => p.split(/[/\\]/).pop() ?? p;
+	const byKey = new Map(volumes.map((v) => [fileKey(v.path), v]));
+	const slots = [...volumes.map((v) => v.path)];
+	for (const path of indexing?.pendingMedia ?? []) {
+		if (!byKey.has(fileKey(path))) slots.push(path);
+	}
+
 	return (
 		<Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: COVER_GRID }}>
-			{volumes.map((volume) => (
-				<MediaCard
-					key={volume.id}
-					to={`/media/${volume.id}`}
-					state={{ from: `/series/${seriesId}`, label: seriesName.toUpperCase() }}
-					title={mediaTitle(volume)}
-					subtitle={mediaSubtitle(volume)}
-					coverUrl={mediaApi.thumbnailUrl(volume.id)}
-					progress={readProgress(volume)}
-					badge={volume.metadata?.number !== undefined ? `#${String(volume.metadata.number)}` : undefined}
-					width="100%"
-				/>
-			))}
+			{slots.map((path) => {
+				const volume = byKey.get(fileKey(path));
 
-			{indexing !== null &&
-				Array.from({ length: indexing.totalMedia }, (_, slot) => {
-					const done = slot < indexing.completedMedia;
-					const active = slot === indexing.completedMedia;
-					let label = String(slot + 1).padStart(2, "0");
-					if (done) {
-						label = "LISTO";
-					} else if (active) {
-						label = "INDEXANDO";
-					}
-
+				if (volume) {
 					return (
-						<Box
-							key={`hueco-${String(slot)}`}
+						<MediaCard
+							key={volume.id}
+							to={`/media/${volume.id}`}
+							state={{ from: `/series/${seriesId}`, label: seriesName.toUpperCase() }}
+							title={mediaTitle(volume)}
+							subtitle={mediaSubtitle(volume)}
+							coverUrl={mediaApi.thumbnailUrl(volume.id)}
+							progress={readProgress(volume)}
+							badge={volume.metadata?.number !== undefined ? `#${String(volume.metadata.number)}` : undefined}
+							width="100%"
+						/>
+					);
+				}
+
+				const active = indexing?.readingFiles.some((rf) => fileKey(rf) === fileKey(path)) ?? false;
+				const fileName = fileKey(path);
+
+				return (
+					<Box
+						key={path}
+						sx={{
+							position: "relative",
+							overflow: "hidden",
+							aspectRatio: "2 / 3",
+							display: "flex",
+							alignItems: "center",
+							justifyContent: "center",
+							backgroundColor: DS.bgSunken,
+							border: `1px solid ${active ? DS.red : DS.borderSoft}`,
+							opacity: active ? 1 : 0.6,
+							transition: "opacity 0.3s ease, border-color 0.3s ease",
+						}}
+					>
+						<Typography
 							sx={{
-								position: "relative",
-								overflow: "hidden",
-								aspectRatio: "2 / 3",
-								display: "flex",
-								alignItems: "center",
-								justifyContent: "center",
-								backgroundColor: DS.bgSunken,
-								border: `1px solid ${done ? DS.red : DS.borderSoft}`,
-								opacity: done ? 1 : 0.6,
-								transition: "opacity 0.3s ease, border-color 0.3s ease",
+								fontFamily: "'Rajdhani', sans-serif",
+								fontSize: "12px",
+								letterSpacing: "1px",
+								color: active ? DS.redGlow : DS.muted,
 							}}
 						>
-							<Typography
-								sx={{
-									fontFamily: "'Rajdhani', sans-serif",
-									fontSize: "12px",
-									letterSpacing: "1px",
-									color: active ? DS.redGlow : DS.muted,
-								}}
-							>
-								{label}
-							</Typography>
-							{active && <Box className="ds-scanline" />}
-						</Box>
-					);
-				})}
+							{active ? "INDEXANDO" : fileName}
+						</Typography>
+						{active && <Box className="ds-scanline" />}
+					</Box>
+				);
+			})}
 		</Box>
 	);
 }

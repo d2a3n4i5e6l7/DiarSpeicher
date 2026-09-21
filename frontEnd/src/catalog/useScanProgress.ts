@@ -1,6 +1,16 @@
 import { useEffect, useState } from "react";
 import { librariesApi, type ScanStatus } from "../api/endpoints";
 
+/** Une por id conservando el orden de llegada: el escaner manda cada tomo una sola vez. */
+function mergeById<T extends { id: string }>(carried: T[] | undefined, incoming: T[] | undefined): T[] {
+    const base = carried ?? [];
+    const fresh = incoming ?? [];
+    if (fresh.length === 0) return base;
+    const seen = new Set(base.map((item) => item.id));
+    const added = fresh.filter((item) => !seen.has(item.id));
+    return added.length === 0 ? base : [...base, ...added];
+}
+
 export function useScanProgress(libraryId: string, trigger = 0): ScanStatus | null {
     const [status, setStatus] = useState<{ key: string; value: ScanStatus | null } | null>(null);
 
@@ -44,7 +54,20 @@ export function useScanProgress(libraryId: string, trigger = 0): ScanStatus | nu
             const parsed = JSON.parse(event.data as string) as ScanStatus;
             if (cancelled) return;
 
-            setStatus({ key: libraryId, value: parsed });
+            // Lo creado se acumula aqui, en el manejador del propio flujo. Acumularlo en el
+            // render de la pagina lo perdia: el evento siguiente reemplaza este estado y el
+            // render a medias que iba a guardar el lote anterior se descarta con el.
+            setStatus((previous) => {
+                const carried = previous?.key === libraryId ? previous.value : null;
+                return {
+                    key: libraryId,
+                    value: {
+                        ...parsed,
+                        createdMedia: mergeById(carried?.createdMedia, parsed.createdMedia),
+                        createdSeries: mergeById(carried?.createdSeries, parsed.createdSeries),
+                    },
+                };
+            });
 
             // El servidor corta el flujo al terminar, y EventSource lee ese cierre como caida
             // y reconecta cada 3 s. Cerrarlo aqui es lo que rompe ese ciclo.

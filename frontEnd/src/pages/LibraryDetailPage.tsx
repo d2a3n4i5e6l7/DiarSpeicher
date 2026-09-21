@@ -52,6 +52,23 @@ interface Loaded {
 const EMPTY_SERIES: SeriesItem[] = [];
 const EMPTY_VOLUMES: MediaItem[] = [];
 
+/** Id vacio: es lo que distingue un hueco del escaneo de un tomo ya indexado. */
+function placeholderVolume(path: string, libraryId: string): MediaItem {
+	const fileName = path.split("/").pop() ?? path;
+	return {
+		id: "",
+		name: fileName,
+		size: 0,
+		extension: fileName.split(".").pop() ?? "",
+		pages: 0,
+		status: "Pending",
+		path,
+		seriesId: libraryId,
+		createdAt: "",
+		isCompleted: false,
+	};
+}
+
 
 
 export default function LibraryDetailPage() {
@@ -70,14 +87,14 @@ export default function LibraryDetailPage() {
 	// si hay algo en marcha, se abra el flujo.
 	const progress = useScanProgress(id, reloadToken);
 
-	// La clave lleva el numero de series ya hechas. El progreso baja por SSE, pero las
-	// series y los tomos se leen de la base de datos, asi que la recarga se engancha a que
-	// haya algo nuevo que enseñar en vez de a un reloj. El estado final cuenta aparte:
-	// el ultimo lote de tomos entra despues del evento de la ultima serie.
+	// La recarga ya no se engancha al avance del escaneo: cada serie completada disparaba
+	// una lectura entera del catalogo —una peticion por serie— para acabar enseñando lo que
+	// el propio evento ya traia. Ahora el SSE entrega las entidades creadas y se insertan
+	// donde estan; solo quedan la carga inicial y el cierre del escaneo, que recoge lo que
+	// cambio fuera de los eventos (tomos actualizados, series desaparecidas).
 	const requestKey = [
 		id,
 		String(reloadToken),
-		String(progress?.completedSeries ?? 0),
 		progress?.finished ? "done" : "live",
 	].join("#");
 
@@ -134,8 +151,28 @@ export default function LibraryDetailPage() {
 	const shown = loaded;
 	const loading = loaded === null;
 	const library = shown?.library ?? null;
-	const series = shown?.series ?? EMPTY_SERIES;
-	const volumes = shown?.volumes ?? EMPTY_VOLUMES;
+
+	// El hook ya entrega lo creado acumulado, asi que aqui solo se junta con lo que trajo la
+	// carga: los duplicados se caen por id y la recarga manda sobre el evento.
+	const knownSeries = progress?.createdSeries ?? EMPTY_SERIES;
+	const knownVolumes = progress?.createdMedia ?? EMPTY_VOLUMES;
+
+	const series = useMemo(() => {
+		const base = shown?.series ?? EMPTY_SERIES;
+		if (knownSeries.length === 0) return base;
+		const ids = new Set(base.map((x) => x.id));
+		const added = knownSeries.filter((x) => !ids.has(x.id));
+		return added.length === 0 ? base : [...base, ...added];
+	}, [shown?.series, knownSeries]);
+
+	const volumes = useMemo(() => {
+		const base = shown?.volumes ?? EMPTY_VOLUMES;
+		if (knownVolumes.length === 0) return base;
+		const ids = new Set(base.map((v) => v.id));
+		const added = knownVolumes.filter((v) => !ids.has(v.id));
+		return added.length === 0 ? base : [...base, ...added];
+	}, [shown?.volumes, knownVolumes]);
+
 	// El estado de escaneo vive en memoria, no en la base de datos: si el proceso muere,
 	// la verdad es que ya no escanea nada, y una fila persistida mentiria para siempre.
 	const scanning = progress !== null && !progress.finished;
@@ -168,7 +205,24 @@ export default function LibraryDetailPage() {
 	const [mediaPage, setMediaPage] = useState(1);
 
 	const visibleSeries = useMemo(() => filterAndSortSeries(series, query, seriesSort, seriesDir), [series, query, seriesSort, seriesDir]);
-	const visibleVolumes = useMemo(() => filterAndSortMedia(volumes, query, mediaSort, mediaDir), [volumes, query, mediaSort, mediaDir]);
+	// Los huecos del escaneo entran en la misma lista que los tomos, como MediaItem sin id: asi
+	// pasan por el filtro, el orden y la paginacion igual que el resto y cada uno cae donde le
+	// toca por su numero. En dos listas separadas la rejilla se reordenaba al terminar cada
+	// tomo, porque los nuevos se añadian al final.
+	const withPending = useMemo(() => {
+		if (!scanning || progress === null) return volumes;
+		const loaded = new Set(volumes.map((v) => v.path));
+		const holes = progress.pendingMedia
+			.filter((path) => !loaded.has(path))
+			.map((path) => placeholderVolume(path, id));
+		return holes.length === 0 ? volumes : [...volumes, ...holes];
+	}, [volumes, scanning, progress, id]);
+
+	const visibleVolumes = useMemo(() => filterAndSortMedia(withPending, query, mediaSort, mediaDir), [withPending, query, mediaSort, mediaDir]);
+
+	// Los contadores cuentan tomos, no huecos: un hueco es un fichero que todavia no esta en el
+	// catalogo, y sumarlo diria que hay mas tomos de los que se pueden abrir.
+	const indexedCount = useMemo(() => visibleVolumes.filter((v) => v.id !== "").length, [visibleVolumes]);
 
 	const totalPagesCount = useMemo(() => volumes.reduce((sum, v) => sum + v.pages, 0), [volumes]);
 	const totalSize = useMemo(() => volumes.reduce((sum, v) => sum + v.size, 0), [volumes]);
@@ -185,11 +239,7 @@ export default function LibraryDetailPage() {
 		return visibleVolumes.slice(start, start + 24);
 	}, [visibleVolumes, mediaPage]);
 
-	const indexingMedia = scanning ? progress?.currentMedia : undefined;
-	const pendingVolumes =
-		scanning && progress !== null && progress.totalMedia > 0
-			? Math.max(0, progress.totalMedia - visibleVolumes.length)
-			: 0;
+	const readingFiles = scanning ? progress?.readingFiles ?? [] : [];
 
 	if (loading) {
 		return (
@@ -268,11 +318,18 @@ export default function LibraryDetailPage() {
 					onDirectionChange={setMediaDir}
 					options={MEDIA_SORTS}
 					placeholder="Buscar tomo por nombre..."
-					shown={visibleVolumes.length}
+					shown={indexedCount}
 					total={volumes.length}
 				/>
 				<Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: COVER_GRID }}>
 					{paginatedVolumes.map((item) => (
+						item.id === "" ? (
+							<PendingVolume
+								key={`tomo-pendiente-${item.path}`}
+								label={item.name}
+								active={readingFiles.includes(item.path)}
+							/>
+						) : (
 						<MediaCard
 							key={item.id}
 							to={`/media/${item.id}`}
@@ -282,16 +339,9 @@ export default function LibraryDetailPage() {
 							coverUrl={mediaApi.thumbnailUrl(item.id)}
 							progress={readProgress(item)}
 							width="100%"
-							scanning={item.name === indexingMedia}
+							scanning={readingFiles.includes(item.path)}
 						/>
-					))}
-
-					{Array.from({ length: pendingVolumes }, (_, slot) => (
-						<PendingVolume
-							key={`tomo-pendiente-${String(slot)}`}
-							label={`TOMO ${String(visibleVolumes.length + slot + 1).padStart(2, "0")}`}
-							active={slot === 0}
-						/>
+						)
 					))}
 				</Box>
 				{totalMediaPages > 1 && (
@@ -493,7 +543,7 @@ export default function LibraryDetailPage() {
 				sx={{ mb: 2, borderBottom: `1px solid ${DS.border}` }}
 			>
 				<Tab label={`SERIES (${String(visibleSeries.length)})`} />
-				<Tab label={`TOMOS (${String(visibleVolumes.length)})`} />
+				<Tab label={`TOMOS (${String(indexedCount)})`} />
 			</Tabs>
 
 			{missingOpen && missing && (

@@ -1,3 +1,4 @@
+using DiarSpeicher.Infrastructure.Catalog;
 using System.Diagnostics;
 using System.IO;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
@@ -32,6 +33,13 @@ public class LibraryScannerService : ILibraryScannerService
     /// across cores. The database phase stays single-threaded: DbContext is not thread-safe.
     /// </summary>
     private static readonly int AnalysisParallelism = Math.Max(1, Environment.ProcessorCount - 1);
+
+    /// <summary>
+    /// Tomos por vuelta al crear. Fija el techo de libros descomprimidos a la vez, que es
+    /// donde esta el pico de memoria del escaneo, y tambien el grano con el que los tomos
+    /// nuevos llegan a la ficha.
+    /// </summary>
+    private const int MediaBatchSize = 2;
 
     private sealed record PreparedMedia(string MediaId, string Path, ProcessedBook Analysis, string? ThumbnailPath);
 
@@ -136,6 +144,11 @@ public class LibraryScannerService : ILibraryScannerService
         public int CompletedMedia { get; init; }
         public int TotalMedia { get; init; }
         public string? CurrentMedia { get; init; }
+        public IReadOnlyList<string> PendingMedia { get; init; } = [];
+        public string? CurrentFile { get; init; }
+        public IReadOnlyList<string> ReadingFiles { get; init; } = [];
+        public IReadOnlyList<DiarSpeicherMediaDto> CreatedMedia { get; init; } = [];
+        public IReadOnlyList<DiarSpeicherSeriesDto> CreatedSeries { get; init; } = [];
         public string? CurrentSeriesId { get; init; }
     }
 
@@ -158,6 +171,11 @@ public class LibraryScannerService : ILibraryScannerService
             CompletedMedia = d.CompletedMedia,
             TotalMedia = d.TotalMedia,
             CurrentMedia = d.CurrentMedia,
+            PendingMedia = d.PendingMedia,
+            CurrentFile = d.CurrentFile,
+            ReadingFiles = d.ReadingFiles,
+            CreatedMedia = d.CreatedMedia,
+            CreatedSeries = d.CreatedSeries,
             CurrentSeriesId = d.CurrentSeriesId,
             Message = d.Message
         }, cancellationToken);
@@ -529,6 +547,13 @@ public class LibraryScannerService : ILibraryScannerService
         if (newlyCreated.Count > 0)
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
+
+            await PublishProgressAsync(libraryId, ScanPhase.WalkingLibrary, cancellationToken, new()
+            {
+                TotalSeries = seriesToCreate.Count,
+                CreatedSeries = newlyCreated.Select(CatalogDtoMapper.ToSeriesDto).ToList(),
+                Message = $"{newlyCreated.Count} series nuevas en el indice"
+            });
         }
 
         return newlyCreated;
@@ -603,10 +628,17 @@ public class LibraryScannerService : ILibraryScannerService
 
         var mediaToCreate = walkedSeries.MediaToCreate.Where(path => !HasConvertedSibling(path)).ToList();
 
-        await MarkMissingMediaAsync(series.Id, walkedSeries.MissingMedia, report, cancellationToken);
-        await MarkRecoveredMediaAsync(walkedSeries.RecoveredMedia, report, cancellationToken);
-        await CreateNewMediaAsync(series.Id, mediaToCreate, thumbnailsDir, settings, report, progress, cancellationToken);
-        await UpdateVisitedMediaAsync(series.Id, walkedSeries.MediaToVisit, thumbnailsDir, settings, report, cancellationToken);
+        if (existingMedia.Count == 0)
+        {
+            await CreateNewMediaAsync(series.Id, mediaToCreate, thumbnailsDir, settings, report, progress, cancellationToken);
+        }
+        else
+        {
+            await MarkMissingMediaAsync(series.Id, walkedSeries.MissingMedia, report, cancellationToken);
+            await MarkRecoveredMediaAsync(walkedSeries.RecoveredMedia, report, cancellationToken);
+            await CreateNewMediaAsync(series.Id, mediaToCreate, thumbnailsDir, settings, report, progress, cancellationToken);
+            await UpdateVisitedMediaAsync(series.Id, walkedSeries.MediaToVisit, thumbnailsDir, settings, report, cancellationToken);
+        }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -718,12 +750,16 @@ public class LibraryScannerService : ILibraryScannerService
     }
 
     /// <summary>
-    /// Crea los tomos nuevos de una serie por lotes.
+    /// Crea los tomos nuevos de una serie, uno a uno.
     /// <para>
     /// Antes se analizaban los treinta y dos de golpe y se escribia una sola vez al final:
     /// las medidas de pagina de los treinta y dos —miles de filas— se quedaban en el
     /// rastreador de cambios hasta la ultima, y la ficha no tenia nada que enseñar mientras
-    /// tanto. Un lote por vuelta acota esa memoria y deja avance visible tomo a tomo.
+    /// tanto. Agrupar de <c>AnalysisParallelism</c> en <c>AnalysisParallelism</c> lo acoto,
+    /// pero el pico seguia siendo el analisis: descomprimir varios libros a la vez mantiene
+    /// en memoria tantas portadas y tantos juegos de medidas como hilos haya. De dos en dos
+    /// hay como mucho dos libros abiertos, y la ficha recibe los tomos de dos en dos en vez
+    /// de ver aparecer de golpe todo un grupo del tamaño de la maquina.
     /// </para>
     /// </summary>
     private async Task CreateNewMediaAsync(
@@ -739,12 +775,20 @@ public class LibraryScannerService : ILibraryScannerService
 
         // Se anuncia el total antes de tocar el disco: el cliente puede dibujar los huecos
         // de los tomos que vienen en cuanto empieza, no cuando ya estan hechos.
-        await PublishProgressAsync(progress.LibraryId, ScanPhase.ProcessingMedia, cancellationToken, new() { CompletedSeries = progress.CompletedSeries, TotalSeries = progress.TotalSeries, CurrentSeries = progress.SeriesName, TotalMedia = mediaToCreate.Count, CurrentSeriesId = progress.SeriesId });
+        var pendingNames = mediaToCreate.ToList();
+
+        await PublishProgressAsync(progress.LibraryId, ScanPhase.ProcessingMedia, cancellationToken, new() { CompletedSeries = progress.CompletedSeries, TotalSeries = progress.TotalSeries, CurrentSeries = progress.SeriesName, TotalMedia = mediaToCreate.Count, PendingMedia = pendingNames, CurrentSeriesId = progress.SeriesId });
 
         var done = 0;
 
-        foreach (var chunk in mediaToCreate.Chunk(AnalysisParallelism))
+        var announced = new List<DiarSpeicherMediaDto>();
+
+        foreach (var chunk in mediaToCreate.Chunk(MediaBatchSize))
         {
+            // El aviso va antes de analizar, no despues: el analisis es lo que tarda, y sin
+            // esto el hueco del tomo se enciende justo cuando ya ha dejado de leerse.
+            await PublishProgressAsync(progress.LibraryId, ScanPhase.ProcessingMedia, cancellationToken, new() { CompletedSeries = progress.CompletedSeries, TotalSeries = progress.TotalSeries, CurrentSeries = progress.SeriesName, CompletedMedia = done, TotalMedia = mediaToCreate.Count, PendingMedia = pendingNames, ReadingFiles = chunk.ToList(), CreatedMedia = announced.ToList(), CurrentSeriesId = progress.SeriesId });
+
             var prepared = await PrepareMediaAsync(
                 chunk.Select(path => (Ulid.NewUlid().ToString(), path)).ToList(),
                 thumbnailsDir,
@@ -752,6 +796,8 @@ public class LibraryScannerService : ILibraryScannerService
                 cancellationToken);
 
             string? lastName = null;
+            string? lastFile = null;
+            var batchCreated = new List<Media>();
 
             // Sequential phase: the change tracker must only ever be touched by one thread.
             foreach (var (newMediaId, mediaPath, analyzed, thumbPath) in prepared)
@@ -788,7 +834,9 @@ public class LibraryScannerService : ILibraryScannerService
                 AddPageDimensions(newMediaId, analyzed);
                 report.CreatedMedia++;
 
+                batchCreated.Add(newMedia);
                 lastName = newMedia.Name;
+                lastFile = mediaPath;
                 done++;
             }
 
@@ -796,7 +844,14 @@ public class LibraryScannerService : ILibraryScannerService
             // sigue sujetando cada fila de pagina del lote entero.
             await _dbContext.SaveChangesAsync(cancellationToken);
 
-            await PublishProgressAsync(progress.LibraryId, ScanPhase.ProcessingMedia, cancellationToken, new() { CompletedSeries = progress.CompletedSeries, TotalSeries = progress.TotalSeries, CurrentSeries = progress.SeriesName, CompletedMedia = done, TotalMedia = mediaToCreate.Count, CurrentMedia = lastName, CurrentSeriesId = progress.SeriesId });
+            // Los tomos se mapean despues de guardar: hasta ese momento no tienen todavia lo que
+            // la base de datos les pone, y el cliente recibiria una tarjeta a medio hacer.
+            announced.AddRange(batchCreated.Select(m => CatalogDtoMapper.ToMediaDto(m, null)));
+
+            var processed = new HashSet<string>(chunk, StringComparer.Ordinal);
+            pendingNames.RemoveAll(processed.Contains);
+
+            await PublishProgressAsync(progress.LibraryId, ScanPhase.ProcessingMedia, cancellationToken, new() { CompletedSeries = progress.CompletedSeries, TotalSeries = progress.TotalSeries, CurrentSeries = progress.SeriesName, CompletedMedia = done, TotalMedia = mediaToCreate.Count, PendingMedia = pendingNames.ToList(), CurrentFile = lastFile, CreatedMedia = announced.ToList(), CurrentMedia = lastName, CurrentSeriesId = progress.SeriesId });
         }
     }
 

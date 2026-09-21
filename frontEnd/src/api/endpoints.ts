@@ -538,6 +538,16 @@ export interface ScanStatus {
   /** Avance dentro de la serie en curso: un hueco por tomo mientras se indexa. */
   completedMedia: number;
   totalMedia: number;
+  /** Nombres reales de los tomos que la serie en curso va a crear, en orden de proceso. */
+  pendingMedia: string[];
+  /** Nombre de fichero del tomo en curso, comparable con pendingMedia. */
+  currentFile?: string;
+  /** Ficheros que el escaner esta leyendo ahora mismo, por nombre. */
+  readingFiles: string[];
+  /** Tomos que acaban de entrar en el catalogo, listos para pintar su tarjeta. */
+  createdMedia: MediaItem[];
+  /** Series que acaban de entrar en el catalogo. */
+  createdSeries: SeriesItem[];
   currentMedia?: string;
   currentSeriesId?: string;
   message?: string;

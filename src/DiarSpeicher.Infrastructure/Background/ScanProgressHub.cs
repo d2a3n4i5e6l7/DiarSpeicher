@@ -123,10 +123,8 @@ public sealed class ScanProgressHub : IScanProgressHub, IScanProgressPublisher
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var id = Guid.NewGuid();
-        // DropOldest: con un progreso lo unico que importa es el ultimo valor.
-        var channel = Channel.CreateBounded<ScanSnapshot>(new BoundedChannelOptions(8)
+        var channel = Channel.CreateUnbounded<ScanSnapshot>(new UnboundedChannelOptions
         {
-            FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
             SingleWriter = false
         });

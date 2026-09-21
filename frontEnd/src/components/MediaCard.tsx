@@ -37,6 +37,11 @@ function MediaCard({
 	state,
 }: Readonly<Props>) {
 	const [failed, setFailed] = useState(false);
+	const [prevCoverUrl, setPrevCoverUrl] = useState(coverUrl);
+	if (prevCoverUrl !== coverUrl) {
+		setPrevCoverUrl(coverUrl);
+		setFailed(false);
+	}
 	const pct = Math.max(0, Math.min(100, progress ?? 0));
 
 	return (

@@ -511,6 +511,26 @@ public sealed class DiarSpeicherScanStatusDto
     [JsonPropertyName("totalMedia")]
     public int TotalMedia { get; set; }
 
+    /// <summary>Nombres de los tomos que la serie en curso va a crear, en orden de proceso.</summary>
+    [JsonPropertyName("pendingMedia")]
+    public IReadOnlyList<string> PendingMedia { get; set; } = [];
+
+    /// <summary>Nombre de fichero del tomo en curso, comparable con <see cref="PendingMedia"/>.</summary>
+    [JsonPropertyName("currentFile")]
+    public string? CurrentFile { get; set; }
+
+    /// <summary>Ficheros que se estan leyendo ahora mismo, por nombre.</summary>
+    [JsonPropertyName("readingFiles")]
+    public IReadOnlyList<string> ReadingFiles { get; set; } = [];
+
+    /// <summary>Tomos que acaban de entrar en el catalogo, listos para pintar su tarjeta.</summary>
+    [JsonPropertyName("createdMedia")]
+    public IReadOnlyList<DiarSpeicherMediaDto> CreatedMedia { get; set; } = [];
+
+    /// <summary>Series que acaban de entrar en el catalogo.</summary>
+    [JsonPropertyName("createdSeries")]
+    public IReadOnlyList<DiarSpeicherSeriesDto> CreatedSeries { get; set; } = [];
+
     [JsonPropertyName("currentMedia")]
     public string? CurrentMedia { get; set; }
 
