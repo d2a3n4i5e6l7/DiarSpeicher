@@ -1,38 +1,28 @@
 using System.IO.Compression;
+using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Sync;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
 public sealed class KoboSyncTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
     private readonly string _tempEpubPath;
     private string _kidEpubId = null!;
     private string _adultEpubId = null!;
 
     public KoboSyncTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
+        _db = new TestSqliteDatabase();
 
         _tempEpubPath = Path.Combine(Path.GetTempPath(), $"kobo_test_{Guid.NewGuid():N}.epub");
         CreateDummyEpub(_tempEpubPath);
 
-        SeedTestData(context);
+        SeedTestData();
     }
 
     private static void CreateDummyEpub(string filePath)
@@ -43,85 +33,54 @@ public sealed class KoboSyncTests : IDisposable
         writer.Write("application/epub+zip");
     }
 
-    private void SeedTestData(DiarSpeicherDbContext context)
+    private void SeedTestData()
     {
-        var cfg = new LibraryConfig();
-        context.LibraryConfigs.Add(cfg);
-        context.SaveChanges();
+        var conn = _db.Connection;
 
-        var lib = new Library
+        conn.Execute("""INSERT INTO "LibraryConfigs" ("Id") VALUES (1);""");
+
+        var libId = Guid.NewGuid().ToString();
+        conn.Execute("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Books', '/media/books', 'Ready', 1, @Now);
+            """, new { Id = libId, Now = DateTimeOffset.UtcNow });
+
+        var seriesId = Guid.NewGuid().ToString();
+        conn.Execute("""
+            INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+            VALUES (@Id, 'Fantasy', '/media/books/fantasy', @LibraryId, 'Ready', @Now);
+            """, new { Id = seriesId, LibraryId = libId, Now = DateTimeOffset.UtcNow });
+
+        var kidBookId = Guid.NewGuid().ToString();
+        var adultBookId = Guid.NewGuid().ToString();
+        var comicBookId = Guid.NewGuid().ToString();
+        _kidEpubId = kidBookId;
+        _adultEpubId = adultBookId;
+
+        conn.Execute("""
+            INSERT INTO "Media" ("Id", "Name", "Path", "Extension", "Pages", "Size", "SeriesId", "Status", "CreatedAt")
+            VALUES (@Id, @Name, @Path, @Extension, 0, @Size, @SeriesId, 'Ready', @Now);
+            """, new[]
         {
-            Name = "Books",
-            Path = "/media/books",
-            ConfigId = cfg.Id
-        };
-        context.Libraries.Add(lib);
-        context.SaveChanges();
+            new { Id = kidBookId, Name = "The Hobbit", Path = _tempEpubPath, Extension = "epub", Size = 1024L, SeriesId = seriesId, Now = DateTimeOffset.UtcNow },
+            new { Id = adultBookId, Name = "A Game of Thrones", Path = _tempEpubPath, Extension = "epub", Size = 2048L, SeriesId = seriesId, Now = DateTimeOffset.UtcNow },
+            new { Id = comicBookId, Name = "Spider-Man", Path = "/media/books/fantasy/spiderman.cbz", Extension = "cbz", Size = 5000L, SeriesId = seriesId, Now = DateTimeOffset.UtcNow }
+        });
 
-        var series = new Series
+        conn.Execute("""
+            INSERT INTO "MediaMetadata" ("MediaId", "Title", "Writers", "Genres", "AgeRating", "Number")
+            VALUES (@MediaId, @Title, @Writers, @Genres, @AgeRating, @Number);
+            """, new[]
         {
-            Name = "Fantasy",
-            Path = "/media/books/fantasy",
-            LibraryId = lib.Id
-        };
-        context.Series.Add(series);
-        context.SaveChanges();
-
-        var kidBook = new Media
-        {
-            Name = "The Hobbit",
-            Path = _tempEpubPath,
-            Extension = "epub",
-            Size = 1024,
-            SeriesId = series.Id,
-            Metadata = new MediaMetadata
-            {
-                Title = "The Hobbit: An Unexpected Journey",
-                Writers = "J.R.R. Tolkien",
-                Genres = "Fantasy, Adventure",
-                AgeRating = 8,
-                Number = 1m
-            }
-        };
-
-        var adultBook = new Media
-        {
-            Name = "A Game of Thrones",
-            Path = _tempEpubPath,
-            Extension = "epub",
-            Size = 2048,
-            SeriesId = series.Id,
-            Metadata = new MediaMetadata
-            {
-                Title = "A Song of Ice and Fire",
-                Writers = "George R.R. Martin",
-                Genres = "Dark Fantasy",
-                AgeRating = 18,
-                Number = 1m
-            }
-        };
-
-        var comicBook = new Media
-        {
-            Name = "Spider-Man",
-            Path = "/media/books/fantasy/spiderman.cbz",
-            Extension = "cbz",
-            Size = 5000,
-            SeriesId = series.Id
-        };
-
-        context.Media.AddRange(kidBook, adultBook, comicBook);
-        context.SaveChanges();
-
-        _kidEpubId = kidBook.Id;
-        _adultEpubId = adultBook.Id;
+            new { MediaId = kidBookId, Title = "The Hobbit: An Unexpected Journey", Writers = "J.R.R. Tolkien", Genres = "Fantasy, Adventure", AgeRating = (int?)8, Number = (decimal?)1m },
+            new { MediaId = adultBookId, Title = "A Song of Ice and Fire", Writers = "George R.R. Martin", Genres = "Dark Fantasy", AgeRating = (int?)18, Number = (decimal?)1m }
+        });
     }
 
     [Fact]
     public async Task GetInitializationAsync_ReturnsFormattedResourcesDictionary()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new KoboService(context, NullLogger<KoboService>.Instance);
+        var service = new KoboService(_db.Factory, NullLogger<KoboService>.Instance);
 
         var resources = await service.GetInitializationAsync("http://localhost:5000", "my-api-key");
 
@@ -133,8 +92,7 @@ public sealed class KoboSyncTests : IDisposable
     [Fact]
     public async Task SyncLibraryAsync_SyncsOnlyEpubs_AndRespectsParentalAgeRating()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new KoboService(context, NullLogger<KoboService>.Instance);
+        var service = new KoboService(_db.Factory, NullLogger<KoboService>.Instance);
 
         var childUser = new AuthUser
         {
@@ -157,8 +115,7 @@ public sealed class KoboSyncTests : IDisposable
     [Fact]
     public async Task SyncLibraryAsync_OwnerSeesAllEpubs_ExcludesCbz()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new KoboService(context, NullLogger<KoboService>.Instance);
+        var service = new KoboService(_db.Factory, NullLogger<KoboService>.Instance);
 
         var owner = new AuthUser
         {
@@ -178,8 +135,7 @@ public sealed class KoboSyncTests : IDisposable
     [Fact]
     public async Task GetBookMetadataAsync_And_GetBookFileAsync_WorkCorrectly()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new KoboService(context, NullLogger<KoboService>.Instance);
+        var service = new KoboService(_db.Factory, NullLogger<KoboService>.Instance);
 
         var owner = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
 
@@ -196,7 +152,7 @@ public sealed class KoboSyncTests : IDisposable
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
         if (File.Exists(_tempEpubPath))
         {
             File.Delete(_tempEpubPath);

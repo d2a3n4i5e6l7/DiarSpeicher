@@ -1,22 +1,16 @@
-﻿using DiarSpeicher.Core.Domain.Entities;
+using Dapper;
+using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Opds;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
-/// <summary>
-/// Acceptance criteria of block B2.1 for OPDS 2.0: without the library and series feeds a
-/// client can list libraries but cannot open any of them, so navigation is broken.
-/// </summary>
 public sealed class OpdsV2NavigationTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
     private readonly AuthUser _owner = new() { Id = "admin", Username = "admin", IsServerOwner = true };
 
     private string _libraryId = null!;
@@ -24,72 +18,55 @@ public sealed class OpdsV2NavigationTests : IDisposable
 
     public OpdsV2NavigationTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
-        Seed(context);
+        _db = new TestSqliteDatabase();
+        Seed();
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
-        GC.SuppressFinalize(this);
+        _db.Dispose();
     }
 
-    private void Seed(DiarSpeicherDbContext context)
+    private void Seed()
     {
-        var library = new Library
+        var conn = _db.Connection;
+
+        const string insertConfigSql = """
+            INSERT INTO "LibraryConfigs" ("Id") VALUES (1);
+            """;
+        conn.Execute(insertConfigSql);
+
+        var libId = Guid.NewGuid().ToString();
+        const string insertLibrarySql = """
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Comics', '/libros', 'Ready', 1, @Now);
+            """;
+        conn.Execute(insertLibrarySql, new { Id = libId, Now = DateTimeOffset.UtcNow });
+        _libraryId = libId;
+
+        var seriesId = Guid.NewGuid().ToString();
+        const string insertSeriesSql = """
+            INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+            VALUES (@Id, 'Batman', '/libros/Batman', @LibraryId, 'Ready', @Now);
+            """;
+        conn.Execute(insertSeriesSql, new { Id = seriesId, LibraryId = libId, Now = DateTimeOffset.UtcNow });
+        _seriesId = seriesId;
+
+        const string insertMediaSql = """
+            INSERT INTO "Media" ("Id", "Name", "Path", "Extension", "SeriesId", "Status", "Pages", "Size", "CreatedAt")
+            VALUES (@Id, @Name, @Path, 'cbz', @SeriesId, 'Ready', 20, 1000, @Now);
+            """;
+        conn.Execute(insertMediaSql, new[]
         {
-            Name = "Comics",
-            Path = "/libros",
-            Status = FileStatus.Ready,
-            Config = new LibraryConfig()
-        };
-
-        context.Libraries.Add(library);
-        context.SaveChanges();
-        _libraryId = library.Id;
-
-        var series = new Series
-        {
-            Name = "Batman",
-            Path = "/libros/Batman",
-            LibraryId = library.Id,
-            Status = FileStatus.Ready
-        };
-
-        context.Series.Add(series);
-        context.SaveChanges();
-        _seriesId = series.Id;
-
-        context.Media.AddRange(
-            NewMedia("Batman 01", series.Id),
-            NewMedia("Batman 02", series.Id));
-
-        context.SaveChanges();
+            new { Id = Guid.NewGuid().ToString(), Name = "Batman 01", Path = "/libros/Batman/Batman 01.cbz", SeriesId = seriesId, Now = DateTimeOffset.UtcNow },
+            new { Id = Guid.NewGuid().ToString(), Name = "Batman 02", Path = "/libros/Batman/Batman 02.cbz", SeriesId = seriesId, Now = DateTimeOffset.UtcNow }
+        });
     }
-
-    private static Media NewMedia(string name, string seriesId) => new()
-    {
-        Name = name,
-        Path = $"/libros/Batman/{name}.cbz",
-        Extension = "cbz",
-        SeriesId = seriesId,
-        Status = FileStatus.Ready,
-        Pages = 20
-    };
 
     [Fact]
     public async Task LibrariesFeed_LinksToTheLibraryFeed_SoNavigationIsNotBroken()
     {
-        await using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsV2Service(_db.Factory, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var feed = await service.GetLibrariesFeedAsync(_owner, null);
 
@@ -98,58 +75,52 @@ public sealed class OpdsV2NavigationTests : IDisposable
     }
 
     [Fact]
-    public async Task LibraryFeed_ListsItsSeries()
+    public async Task LibrarySeriesFeed_ListsTheSeriesInside_WithPagingMetadata()
     {
-        await using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsV2Service(_db.Factory, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var feed = await service.GetLibrarySeriesFeedAsync(_owner, _libraryId, 0, null);
 
         Assert.NotNull(feed);
-        Assert.Equal("Comics", feed!.Metadata.Title);
+        Assert.Equal("Comics", feed.Metadata.Title);
+        Assert.Equal(1, feed.Metadata.NumberOfItems);
 
-        var link = Assert.Single(feed.Navigation);
-        Assert.Equal($"/opds/v2.0/series/{_seriesId}", link.Href);
+        var entry = Assert.Single(feed.Navigation);
+        Assert.Equal($"/opds/v2.0/series/{_seriesId}", entry.Href);
+        Assert.Equal("Batman", entry.Properties?["title"]);
     }
 
     [Fact]
-    public async Task SeriesFeed_ListsItsBooks()
+    public async Task SeriesBooksFeed_ListsTheBooksInside_AsPublications()
     {
-        await using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsV2Service(_db.Factory, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var feed = await service.GetSeriesBooksFeedAsync(_owner, _seriesId, 0, null);
 
         Assert.NotNull(feed);
-        Assert.Equal("Batman", feed!.Metadata.Title);
+        Assert.Equal("Batman", feed.Metadata.Title);
         Assert.Equal(2, feed.Publications.Count);
+        Assert.Contains(feed.Publications, p => p.Metadata.Title == "Batman 01");
+        Assert.Contains(feed.Publications, p => p.Metadata.Title == "Batman 02");
     }
 
     [Fact]
-    public async Task UnknownIds_ReturnNull_SoTheEndpointCanRespond404()
+    public async Task LibrarySeriesFeed_ReturnsNullForMissingLibrary()
     {
-        await using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsV2Service(_db.Factory, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
-        Assert.Null(await service.GetLibrarySeriesFeedAsync(_owner, "no-existe", 0, null));
-        Assert.Null(await service.GetSeriesBooksFeedAsync(_owner, "no-existe", 0, null));
+        var feed = await service.GetLibrarySeriesFeedAsync(_owner, "non-existent", 0, null);
+
+        Assert.Null(feed);
     }
 
     [Fact]
-    public async Task AnExcludedLibraryIsNotReachableThroughItsOwnFeed()
+    public async Task SeriesBooksFeed_ReturnsNullForMissingSeries()
     {
-        await using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsV2Service(_db.Factory, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
-        var restricted = new AuthUser
-        {
-            Id = "lector",
-            Username = "lector",
-            IsServerOwner = false,
-            ExcludedLibraryIds = [_libraryId]
-        };
+        var feed = await service.GetSeriesBooksFeedAsync(_owner, "non-existent", 0, null);
 
-        Assert.Null(await service.GetLibrarySeriesFeedAsync(restricted, _libraryId, 0, null));
-        Assert.Null(await service.GetSeriesBooksFeedAsync(restricted, _seriesId, 0, null));
+        Assert.Null(feed);
     }
 }

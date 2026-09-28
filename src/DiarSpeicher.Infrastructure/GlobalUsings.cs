@@ -14,6 +14,5 @@ global using DiarSpeicher.Infrastructure.Filesystem;
 global using DiarSpeicher.Infrastructure.Filesystem.Processors;
 global using DiarSpeicher.Infrastructure.Storage;
 global using Microsoft.Data.Sqlite;
-global using Microsoft.EntityFrameworkCore;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;

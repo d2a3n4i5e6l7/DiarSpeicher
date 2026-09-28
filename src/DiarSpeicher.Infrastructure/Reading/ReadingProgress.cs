@@ -1,19 +1,26 @@
+using System.Data;
+using Dapper;
+using DiarSpeicher.Core.Domain.Entities;
+using DiarSpeicher.Core.Domain.Enums;
+using DiarSpeicher.Infrastructure.Data;
+using Microsoft.Extensions.Logging;
+
 namespace DiarSpeicher.Infrastructure.Reading;
 
 public class ReadingProgress : IReadingProgress
 {
-    private readonly DiarSpeicherDbContext _db;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly IEpubPageMapStore _pageMaps;
     private readonly IEpubProfileProvider _profiles;
     private readonly ILogger<ReadingProgress> _logger;
 
     public ReadingProgress(
-        DiarSpeicherDbContext db,
+        ISqliteConnectionFactory connectionFactory,
         IEpubPageMapStore pageMaps,
         IEpubProfileProvider profiles,
         ILogger<ReadingProgress> logger)
     {
-        _db = db;
+        _connectionFactory = connectionFactory;
         _pageMaps = pageMaps;
         _profiles = profiles;
         _logger = logger;
@@ -56,19 +63,33 @@ public class ReadingProgress : IReadingProgress
     {
         if (string.IsNullOrWhiteSpace(user.Id)) return false;
 
-        if (!await _db.Users.AnyAsync(u => u.Id == user.Id, ct)) return false;
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+
+        const string checkUserSql = @"SELECT 1 FROM ""Users"" WHERE ""Id"" = @UserId LIMIT 1;";
+        var userExists = await conn.ExecuteScalarAsync<int?>(new CommandDefinition(checkUserSql, new { UserId = user.Id }, cancellationToken: ct));
+        if (userExists is null) return false;
 
         var isEpub = EpubPageMapStore.IsEpub(book);
         var profileKey = isEpub ? await CurrentProfileKeyAsync(ct) : null;
         var total = await ResolveTotalAsync(book, ct);
         var page = Math.Clamp(update.Page, 1, Math.Max(1, total));
 
-        var session = await _db.ReadingSessions
-            .Where(s => s.UserId == user.Id && s.MediaId == book.Id)
-            .OrderByDescending(s => s.Id)
-            .FirstOrDefaultAsync(ct);
+        const string selectSessionSql = """
+            SELECT "Id", "CreatedAt", "ElapsedSeconds", "EndPage", "EndPercentage",
+                   "KoreaderProgress", "MediaId", "Notes", "ReadthroughNumber", "SessionDate",
+                   "StartPage", "StartPercentage", "Status", "UpdatedAt", "UserId",
+                   "RenderedPage", "RenderedTotalPages", "RenderedProfileKey"
+            FROM "ReadingSessions"
+            WHERE "UserId" = @UserId AND "MediaId" = @MediaId
+            ORDER BY "Id" DESC
+            LIMIT 1;
+            """;
 
-        if (session == null)
+        var session = await conn.QueryFirstOrDefaultAsync<ReadingSession>(
+            new CommandDefinition(selectSessionSql, new { UserId = user.Id, MediaId = book.Id }, cancellationToken: ct));
+
+        var isNew = session == null;
+        if (isNew)
         {
             session = new ReadingSession
             {
@@ -76,14 +97,61 @@ public class ReadingProgress : IReadingProgress
                 MediaId = book.Id,
                 CreatedAt = DateTimeOffset.UtcNow
             };
-            _db.ReadingSessions.Add(session);
         }
 
-        ApplyProgressUpdate(session, isEpub, page, total, profileKey, update);
+        ApplyProgressUpdate(session!, isEpub, page, total, profileKey, update);
 
-        await _db.SaveChangesAsync(ct);
+        if (isNew)
+        {
+            const string insertSessionSql = """
+                INSERT INTO "ReadingSessions" (
+                    "UserId", "MediaId", "SessionDate", "StartPage", "EndPage", "EndPercentage", "StartPercentage",
+                    "Status", "RenderedPage", "RenderedTotalPages", "RenderedProfileKey", "CreatedAt", "UpdatedAt"
+                ) VALUES (
+                    @UserId, @MediaId, @SessionDate, @StartPage, @EndPage, @EndPercentage, @StartPercentage,
+                    @Status, @RenderedPage, @RenderedTotalPages, @RenderedProfileKey, @CreatedAt, @UpdatedAt
+                );
+                """;
+            await conn.ExecuteAsync(new CommandDefinition(insertSessionSql, ToSessionRow(session!), cancellationToken: ct));
+        }
+        else
+        {
+            const string updateSessionSql = """
+                UPDATE "ReadingSessions"
+                SET "StartPage" = @StartPage,
+                    "EndPage" = @EndPage,
+                    "EndPercentage" = @EndPercentage,
+                    "StartPercentage" = @StartPercentage,
+                    "Status" = @Status,
+                    "RenderedPage" = @RenderedPage,
+                    "RenderedTotalPages" = @RenderedTotalPages,
+                    "RenderedProfileKey" = @RenderedProfileKey,
+                    "UpdatedAt" = @UpdatedAt
+                WHERE "Id" = @Id;
+                """;
+            await conn.ExecuteAsync(new CommandDefinition(updateSessionSql, ToSessionRow(session!), cancellationToken: ct));
+        }
+
         return true;
     }
+
+    private static object ToSessionRow(ReadingSession session) => new
+    {
+        session.Id,
+        session.UserId,
+        session.MediaId,
+        session.SessionDate,
+        session.StartPage,
+        session.EndPage,
+        session.EndPercentage,
+        session.StartPercentage,
+        Status = session.Status.ToString(),
+        session.RenderedPage,
+        session.RenderedTotalPages,
+        session.RenderedProfileKey,
+        session.CreatedAt,
+        session.UpdatedAt
+    };
 
     private static void ApplyProgressUpdate(
         ReadingSession session,
@@ -142,14 +210,19 @@ public class ReadingProgress : IReadingProgress
 
         var converted = Rescale(storedPage, storedTotal, total);
 
-        await _db.ReadingSessions
-            .Where(s => s.Id == session.Id)
-            .ExecuteUpdateAsync(
-                s => s
-                    .SetProperty(x => x.RenderedPage, converted)
-                    .SetProperty(x => x.RenderedTotalPages, total)
-                    .SetProperty(x => x.RenderedProfileKey, profileKey),
-                ct);
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        const string updateSql = """
+            UPDATE "ReadingSessions"
+            SET "RenderedPage" = @Converted,
+                "RenderedTotalPages" = @Total,
+                "RenderedProfileKey" = @ProfileKey
+            WHERE "Id" = @Id;
+            """;
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            updateSql,
+            new { Converted = converted, Total = total, ProfileKey = profileKey, Id = session.Id },
+            cancellationToken: ct));
 
         session.RenderedPage = converted;
         session.RenderedTotalPages = total;
@@ -170,10 +243,17 @@ public class ReadingProgress : IReadingProgress
 
         var profileKey = await CurrentProfileKeyAsync(ct);
 
-        return await _db.EpubPageMaps
-            .AsNoTracking()
-            .Where(e => mediaIds.Contains(e.MediaId) && e.ProfileKey == profileKey && e.TotalPages > 0)
-            .ToDictionaryAsync(e => e.MediaId, e => e.TotalPages, ct);
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        const string sql = """
+            SELECT "MediaId", "TotalPages"
+            FROM "EpubPageMaps"
+            WHERE "MediaId" IN @MediaIds AND "ProfileKey" = @ProfileKey AND "TotalPages" > 0;
+            """;
+
+        var rows = await conn.QueryAsync<(string MediaId, int TotalPages)>(
+            new CommandDefinition(sql, new { MediaIds = mediaIds, ProfileKey = profileKey }, cancellationToken: ct));
+
+        return rows.ToDictionary(r => r.MediaId, r => r.TotalPages, StringComparer.Ordinal);
     }
 
     private async Task<int> ResolveTotalAsync(Media book, CancellationToken ct)

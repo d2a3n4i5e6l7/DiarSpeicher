@@ -1,17 +1,15 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
+using Dapper;
+using DiarSpeicher.Core.Domain.Catalog;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Core.Domain.Catalog;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Background;
-using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Catalog;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
-using DiarSpeicher.Infrastructure.Catalog;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -19,21 +17,19 @@ namespace DiarSpeicher.Tests;
 
 public sealed class UploadAndPageExtractionTests : IDisposable
 {
+    private readonly TestSqliteDatabase _db;
     private readonly string _tempDir;
-    private readonly SqliteConnection _connection;
 
     public UploadAndPageExtractionTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), "DiarSpeicherUploadTests_" + Guid.NewGuid().ToString("N"));
+        _db = new TestSqliteDatabase();
+        _tempDir = Path.Combine(Path.GetTempPath(), $"diar_upload_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
-
-        _connection = new SqliteConnection("DataSource=:memory:");
-        _connection.Open();
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
         if (Directory.Exists(_tempDir))
         {
             try
@@ -47,17 +43,6 @@ public sealed class UploadAndPageExtractionTests : IDisposable
         }
 
         GC.SuppressFinalize(this);
-    }
-
-    private DiarSpeicherDbContext CreateInMemoryDbContext()
-    {
-        var options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        var context = new DiarSpeicherDbContext(options);
-        context.Database.EnsureCreated();
-        return context;
     }
 
     private static byte[] CreateSampleCbz(string title, int pageCount)
@@ -86,12 +71,11 @@ public sealed class UploadAndPageExtractionTests : IDisposable
     [Fact]
     public async Task CreateLibraryAsync_CreatesDirectoryAndDatabaseRow()
     {
-        using var db = CreateInMemoryDbContext();
         var processor = new CompositeBookProcessor(new IBookProcessor[] { new ZipBookProcessor() });
         var queue = new ScannerQueue();
         var service = new DiarSpeicherService(
-            db, processor, queue, NullLogger<DiarSpeicherService>.Instance,
-            TestStorageOptions.Default(), TestReadingProgress.For(db), TestLibraryRoots.Allowing(_tempDir));
+            _db.Factory, processor, queue, NullLogger<DiarSpeicherService>.Instance,
+            TestStorageOptions.Default(), TestReadingProgress.For(_db.Factory), TestLibraryRoots.Allowing(_tempDir));
 
         var owner = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var libPath = Path.Combine(_tempDir, "NewLib");
@@ -107,7 +91,8 @@ public sealed class UploadAndPageExtractionTests : IDisposable
         Assert.True(Directory.Exists(libPath));
         Assert.Equal("Manga", result.Name);
 
-        var dbLib = await db.Libraries.FirstOrDefaultAsync(l => l.Id == result.Id);
+        var dbLib = await _db.Connection.QueryFirstOrDefaultAsync<Library>(
+            """SELECT * FROM "Libraries" WHERE "Id" = @Id""", new { result.Id });
         Assert.NotNull(dbLib);
         Assert.Equal("Manga collection", dbLib.Description);
     }
@@ -115,25 +100,21 @@ public sealed class UploadAndPageExtractionTests : IDisposable
     [Fact]
     public async Task UploadToLibraryAsync_PreventsPathTraversalAttacks()
     {
-        using var db = CreateInMemoryDbContext();
         var processor = new CompositeBookProcessor(new IBookProcessor[] { new ZipBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(db, processor, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(db));
+        var service = new DiarSpeicherService(_db.Factory, processor, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(_db.Factory));
 
         var owner = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var libDir = Path.Combine(_tempDir, "SafeLib");
         Directory.CreateDirectory(libDir);
 
-        var library = new Library
-        {
-            Id = Guid.NewGuid().ToString(),
-            Name = "SafeLib",
-            Path = libDir,
-            Status = FileStatus.Ready,
-            Config = new LibraryConfig()
-        };
-        db.Libraries.Add(library);
-        await db.SaveChangesAsync();
+        var configId = await _db.Connection.QuerySingleAsync<long>("""INSERT INTO "LibraryConfigs" DEFAULT VALUES RETURNING "Id";""");
+
+        var libraryId = Guid.NewGuid().ToString();
+        await _db.Connection.ExecuteAsync("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'SafeLib', @Path, 'Ready', @ConfigId, @Now);
+            """, new { Id = libraryId, Path = libDir, ConfigId = configId, Now = DateTimeOffset.UtcNow });
 
         var cbzBytes = CreateSampleCbz("Malicious", 1);
         using var cbzStream = new MemoryStream(cbzBytes);
@@ -143,7 +124,7 @@ public sealed class UploadAndPageExtractionTests : IDisposable
             new DiarSpeicherUploadFileInput { FileName = "hack.cbz", Content = cbzStream }
         };
 
-        var result = await service.UploadToLibraryAsync(owner, library.Id, "../../../evil", uploadInput);
+        var result = await service.UploadToLibraryAsync(owner, libraryId, "../../../evil", uploadInput);
         Assert.Equal(UploadOutcome.LibraryNotFound, result.Outcome);
         Assert.Null(result.Response);
     }
@@ -152,21 +133,18 @@ public sealed class UploadAndPageExtractionTests : IDisposable
     public async Task Upload_EndToEnd_UploadsCbz_ScansLibrary_And_FetchesFirstPage()
     {
         // 1. Arrange: In-memory DB, library directory and services
-        using var db = CreateInMemoryDbContext();
         var libDir = Path.Combine(_tempDir, "MyComics");
         Directory.CreateDirectory(libDir);
 
+        var configId = await _db.Connection.QuerySingleAsync<long>("""
+            INSERT INTO "LibraryConfigs" ("LibraryPattern") VALUES ('SeriesBased') RETURNING "Id";
+            """);
+
         var libraryId = Guid.NewGuid().ToString();
-        var library = new Library
-        {
-            Id = libraryId,
-            Name = "MyComics",
-            Path = libDir,
-            Status = FileStatus.Ready,
-            Config = new LibraryConfig { LibraryPattern = LibraryPattern.SeriesBased }
-        };
-        db.Libraries.Add(library);
-        await db.SaveChangesAsync();
+        await _db.Connection.ExecuteAsync("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'MyComics', @Path, 'Ready', @ConfigId, @Now);
+            """, new { Id = libraryId, Path = libDir, ConfigId = configId, Now = DateTimeOffset.UtcNow });
 
         var compositeProcessor = new CompositeBookProcessor(new IBookProcessor[]
         {
@@ -175,10 +153,10 @@ public sealed class UploadAndPageExtractionTests : IDisposable
             new EpubBookProcessor()
         });
         var queue = new ScannerQueue();
-        var v2Service = new DiarSpeicherService(db, compositeProcessor, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(db));
+        var v2Service = new DiarSpeicherService(_db.Factory, compositeProcessor, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(_db.Factory));
 
         var scannerService = new LibraryScannerService(
-            db,
+            _db.Factory,
             new DirectoryScanner(),
             compositeProcessor,
             new ThumbnailService(compositeProcessor, NullLogger<ThumbnailService>.Instance),
@@ -215,7 +193,8 @@ public sealed class UploadAndPageExtractionTests : IDisposable
         Assert.Equal(1UL, scanReport.CreatedMedia);
 
         // 4. Verify Media was persisted with correct pages and metadata
-        var media = await db.Media.Include(m => m.Metadata).FirstOrDefaultAsync(m => m.Name == "Batman Year One");
+        var media = await _db.Connection.QueryFirstOrDefaultAsync<Media>(
+            """SELECT * FROM "Media" WHERE "Name" = 'Batman Year One'""");
         Assert.NotNull(media);
         Assert.Equal(3, media.Pages);
         Assert.Equal("cbz", media.Extension);

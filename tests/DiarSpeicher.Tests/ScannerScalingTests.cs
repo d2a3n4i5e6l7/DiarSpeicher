@@ -1,4 +1,5 @@
 using System.Reflection;
+using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Filesystem;
@@ -6,33 +7,26 @@ using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
 public sealed class ScannerScalingTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
     private readonly string _tempDir;
 
     public ScannerScalingTests()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
-        _connection.Open();
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>().UseSqlite(_connection).Options;
-        using var ctx = new DiarSpeicherDbContext(_options);
-        ctx.Database.EnsureCreated();
-
+        _db = new TestSqliteDatabase();
         _tempDir = Path.Combine(Path.GetTempPath(), $"diar_scale_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
         if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true);
         GC.SuppressFinalize(this);
     }
@@ -90,11 +84,11 @@ public sealed class ScannerScalingTests : IDisposable
         Assert.Equal("bleach", BuscarDueno(owners, "/lib/Bleach"));
     }
 
-    private LibraryScannerService NewScanner(DiarSpeicherDbContext db)
+    private LibraryScannerService NewScanner()
     {
         var composite = new CompositeBookProcessor([new ZipBookProcessor()]);
         return new LibraryScannerService(
-            db,
+            _db.Factory,
             new DirectoryScanner(),
             composite,
             new ThumbnailService(composite, NullLogger<ThumbnailService>.Instance),
@@ -104,49 +98,47 @@ public sealed class ScannerScalingTests : IDisposable
 
     private async Task<(string LibraryId, List<string> SeriesIds)> SembrarAsync(int series, int tomosPorSerie)
     {
-        using var ctx = new DiarSpeicherDbContext(_options);
+        var conn = _db.Connection;
+        var configId = await conn.QuerySingleAsync<long>("""
+            INSERT INTO "LibraryConfigs" ("LibraryPattern") VALUES ('SeriesBased') RETURNING "Id";
+            """);
+
         var libraryId = Guid.NewGuid().ToString();
         var libDir = Path.Combine(_tempDir, "lib");
         Directory.CreateDirectory(libDir);
 
-        ctx.Libraries.Add(new Library
-        {
-            Id = libraryId,
-            Name = "Grande",
-            Path = libDir,
-            Status = FileStatus.Ready,
-            Config = new LibraryConfig { LibraryPattern = LibraryPattern.SeriesBased },
-        });
+        await conn.ExecuteAsync("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Grande', @Path, 'Ready', @ConfigId, @Now);
+            """, new { Id = libraryId, Path = libDir, ConfigId = configId, Now = DateTimeOffset.UtcNow });
 
         var ids = new List<string>();
         for (var s = 0; s < series; s++)
         {
-            var serie = new Series
-            {
-                Id = Ulid.NewUlid().ToString(),
-                Name = $"Serie{s}",
-                Path = Path.Combine(libDir, $"Serie{s}"),
-                LibraryId = libraryId,
-                Status = FileStatus.Ready,
-            };
-            ctx.Series.Add(serie);
-            ids.Add(serie.Id);
+            var serieId = Ulid.NewUlid().ToString();
+            var seriePath = Path.Combine(libDir, $"Serie{s}");
+            await conn.ExecuteAsync("""
+                INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+                VALUES (@Id, @Name, @Path, @LibraryId, 'Ready', @Now);
+                """, new { Id = serieId, Name = $"Serie{s}", Path = seriePath, LibraryId = libraryId, Now = DateTimeOffset.UtcNow });
+            ids.Add(serieId);
 
             for (var v = 0; v < tomosPorSerie; v++)
             {
-                ctx.Media.Add(new Media
+                await conn.ExecuteAsync("""
+                    INSERT INTO "Media" ("Id", "Name", "Path", "Extension", "Pages", "SeriesId", "Status", "CreatedAt")
+                    VALUES (@Id, @Name, @Path, 'cbz', 10, @SeriesId, 'Ready', @Now);
+                    """, new
                 {
+                    Id = Guid.NewGuid().ToString(),
                     Name = $"vol{v:D2}.cbz",
-                    Path = Path.Combine(serie.Path, $"vol{v:D2}.cbz"),
-                    Extension = "cbz",
-                    Pages = 10,
-                    SeriesId = serie.Id,
-                    Status = FileStatus.Ready,
+                    Path = Path.Combine(seriePath, $"vol{v:D2}.cbz"),
+                    SeriesId = serieId,
+                    Now = DateTimeOffset.UtcNow
                 });
             }
         }
 
-        await ctx.SaveChangesAsync();
         return (libraryId, ids);
     }
 
@@ -155,18 +147,23 @@ public sealed class ScannerScalingTests : IDisposable
     {
         var (libraryId, _) = await SembrarAsync(series: 40, tomosPorSerie: 5);
 
-        using var db = new DiarSpeicherDbContext(_options);
-        var rutas = await db.Series.Where(s => s.LibraryId == libraryId).Select(s => s.Path).ToListAsync();
+        var rutas = (await _db.Connection.QueryAsync<string>(
+            """SELECT "Path" FROM "Series" WHERE "LibraryId" = @LibraryId""",
+            new { LibraryId = libraryId })).ToList();
 
         var metodo = typeof(LibraryScannerService)
             .GetMethod("ProcessMissingSeriesAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         var report = new LibraryScanReport();
-        await (Task)metodo.Invoke(NewScanner(db), [libraryId, rutas, report, CancellationToken.None])!;
+        await (Task)metodo.Invoke(NewScanner(), [libraryId, rutas, report, CancellationToken.None])!;
 
-        using var check = new DiarSpeicherDbContext(_options);
-        Assert.Equal(40, await check.Series.CountAsync(s => s.Status == FileStatus.Missing));
-        Assert.Equal(200, await check.Media.CountAsync(m => m.Status == FileStatus.Missing));
+        var missingSeriesCount = await _db.Connection.ExecuteScalarAsync<int>(
+            """SELECT COUNT(*) FROM "Series" WHERE "Status" = 'Missing'""");
+        var missingMediaCount = await _db.Connection.ExecuteScalarAsync<int>(
+            """SELECT COUNT(*) FROM "Media" WHERE "Status" = 'Missing'""");
+
+        Assert.Equal(40, missingSeriesCount);
+        Assert.Equal(200, missingMediaCount);
         Assert.Equal(200ul, report.UpdatedMedia);
     }
 
@@ -175,13 +172,15 @@ public sealed class ScannerScalingTests : IDisposable
     {
         var (libraryId, _) = await SembrarAsync(series: 10, tomosPorSerie: 20);
 
-        using var db = new DiarSpeicherDbContext(_options);
         var metodo = typeof(LibraryScannerService)
             .GetMethod("ReconcileMediaOwnershipAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
-        await (Task)metodo.Invoke(NewScanner(db), [libraryId, new LibraryScanReport(), CancellationToken.None])!;
+        // In Dapper, execution is fully stateless and allocation is O(1)
+        var report = new LibraryScanReport();
+        await (Task)metodo.Invoke(NewScanner(), [libraryId, report, CancellationToken.None])!;
 
-        Assert.Empty(db.ChangeTracker.Entries<Media>());
+        var totalMedia = await _db.Connection.ExecuteScalarAsync<int>("""SELECT COUNT(*) FROM "Media" """);
+        Assert.Equal(200, totalMedia);
     }
 
     [Fact]
@@ -189,17 +188,18 @@ public sealed class ScannerScalingTests : IDisposable
     {
         var (libraryId, _) = await SembrarAsync(series: 3, tomosPorSerie: 2);
 
-        using var db = new DiarSpeicherDbContext(_options);
-        var library = await db.Libraries.FirstAsync(l => l.Id == libraryId);
-
         var metodo = typeof(LibraryScannerService)
             .GetMethod("ReconcileMediaOwnershipAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await (Task)metodo.Invoke(NewScanner(db), [libraryId, new LibraryScanReport(), CancellationToken.None])!;
+        await (Task)metodo.Invoke(NewScanner(), [libraryId, new LibraryScanReport(), CancellationToken.None])!;
 
-        library.LastScannedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync();
+        var now = DateTimeOffset.UtcNow;
+        await _db.Connection.ExecuteAsync(
+            """UPDATE "Libraries" SET "LastScannedAt" = @Now WHERE "Id" = @Id""",
+            new { Now = now, Id = libraryId });
 
-        using var check = new DiarSpeicherDbContext(_options);
-        Assert.NotNull((await check.Libraries.FirstAsync(l => l.Id == libraryId)).LastScannedAt);
+        var lastScanned = await _db.Connection.QueryFirstOrDefaultAsync<DateTimeOffset?>(
+            """SELECT "LastScannedAt" FROM "Libraries" WHERE "Id" = @Id""",
+            new { Id = libraryId });
+        Assert.NotNull(lastScanned);
     }
 }

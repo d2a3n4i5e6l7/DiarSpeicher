@@ -1,4 +1,5 @@
 ﻿using DiarSpeicher.Core.Filesystem;
+using DiarSpeicher.Infrastructure.Filesystem.Imaging;
 using SkiaSharp;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
@@ -89,61 +90,33 @@ public class ThumbnailService : IThumbnailService
         string outputDirectory,
         CancellationToken cancellationToken)
     {
-        var encoded = await EncodeAsync(page, cancellationToken);
-        var targetFilePath = Path.Combine(outputDirectory, $"{mediaId}.{encoded.Extension}");
+        Directory.CreateDirectory(outputDirectory);
 
-        await File.WriteAllBytesAsync(targetFilePath, encoded.Data, cancellationToken);
+        var format = _options.PreferJpeg ? SKEncodedImageFormat.Jpeg : SKEncodedImageFormat.Webp;
+
+        using var encoded = SkiaImages.Encode(page.Data, format, _options.Quality, _options.MaxWidth);
+        if (encoded is null)
+        {
+            return await WriteUnchangedAsync(mediaId, page, outputDirectory, cancellationToken);
+        }
+
+        var extension = _options.PreferJpeg ? "jpg" : "webp";
+        var targetFilePath = Path.Combine(outputDirectory, $"{mediaId}.{extension}");
+        await SkiaImages.WriteAsync(encoded, targetFilePath, cancellationToken);
         _logger.LogTrace("Saved thumbnail for {MediaId} at {Path}", mediaId, targetFilePath);
 
         return targetFilePath;
     }
 
-    private Task<EncodedThumbnail> EncodeAsync(ExtractedPage page, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        try
-        {
-            using var original = SKBitmap.Decode(page.Data);
-            if (original is null)
-            {
-                return Task.FromResult(Fallback(page, reason: null));
-            }
-
-            using var resized = Downscale(original);
-            using var image = SKImage.FromBitmap(resized ?? original);
-
-            var format = _options.PreferJpeg ? SKEncodedImageFormat.Jpeg : SKEncodedImageFormat.Webp;
-            using var encoded = image.Encode(format, _options.Quality);
-            if (encoded is null)
-            {
-                return Task.FromResult(Fallback(page, reason: null));
-            }
-
-            return Task.FromResult(new EncodedThumbnail(
-                encoded.ToArray(),
-                _options.PreferJpeg ? "jpg" : "webp"));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return Task.FromResult(Fallback(page, ex));
-        }
-    }
-
-    private SKBitmap? Downscale(SKBitmap original)
-    {
-        if (original.Width <= _options.MaxWidth)
-        {
-            return null;
-        }
-
-        var height = (int)Math.Round(original.Height * (_options.MaxWidth / (double)original.Width));
-        var info = new SKImageInfo(_options.MaxWidth, Math.Max(1, height));
-
-        return original.Resize(info, new SKSamplingOptions(SKCubicResampler.Mitchell));
-    }
-
-    private EncodedThumbnail Fallback(ExtractedPage page, Exception? reason)
+    /// <summary>
+    /// La portada tal cual venia, cuando Skia no supo leerla. Vale mas guardar algo que el
+    /// cliente quiza sepa mostrar que dejar al tomo sin portada.
+    /// </summary>
+    private async Task<string> WriteUnchangedAsync(
+        string mediaId,
+        ExtractedPage page,
+        string outputDirectory,
+        CancellationToken cancellationToken)
     {
         var extension = page.ContentType.DefaultExtension();
         if (string.IsNullOrEmpty(extension))
@@ -151,10 +124,11 @@ public class ThumbnailService : IThumbnailService
             extension = "jpg";
         }
 
-        _logger.LogDebug(reason, "Could not re-encode the cover; storing it unchanged as .{Extension}", extension);
+        _logger.LogDebug("Could not re-encode the cover; storing it unchanged as .{Extension}", extension);
 
-        return new EncodedThumbnail(page.Data, extension);
+        var targetFilePath = Path.Combine(outputDirectory, $"{mediaId}.{extension}");
+        await File.WriteAllBytesAsync(targetFilePath, page.Data, cancellationToken);
+
+        return targetFilePath;
     }
-
-    private readonly record struct EncodedThumbnail(byte[] Data, string Extension);
 }

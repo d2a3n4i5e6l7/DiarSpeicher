@@ -1,4 +1,5 @@
 using System.Buffers;
+using DiarSpeicher.Infrastructure.Filesystem.Imaging;
 using SkiaSharp;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Processors;
@@ -39,14 +40,10 @@ public static class PageMeasurer
 
         try
         {
-            using var data = SKData.CreateCopy(header);
-            using var codec = SKCodec.Create(data);
-            if (codec is null) return (null, null);
+            if (SkiaImages.ReadDimensions(header) is not (int width, int height)) return (null, null);
+            if (width <= 0 || height <= 0) return (null, null);
 
-            var info = codec.Info;
-            if (info.Width <= 0 || info.Height <= 0) return (null, null);
-
-            return (info.Width, info.Height);
+            return (width, height);
         }
         catch (Exception)
         {

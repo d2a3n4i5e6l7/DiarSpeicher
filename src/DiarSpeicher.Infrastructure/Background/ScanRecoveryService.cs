@@ -1,5 +1,8 @@
-using Microsoft.Extensions.DependencyInjection;
+using Dapper;
+using DiarSpeicher.Infrastructure.Data;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace DiarSpeicher.Infrastructure.Background;
 
@@ -18,18 +21,18 @@ public sealed class ScanRecoveryService : BackgroundService
     /// </summary>
     private static readonly TimeSpan ThumbnailGrace = TimeSpan.FromMinutes(30);
 
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly IScannerQueue _queue;
     private readonly StorageOptions _storage;
     private readonly ILogger<ScanRecoveryService> _logger;
 
     public ScanRecoveryService(
-        IServiceScopeFactory scopeFactory,
+        ISqliteConnectionFactory connectionFactory,
         IScannerQueue queue,
         ILogger<ScanRecoveryService> logger,
         IOptions<StorageOptions>? storageOptions = null)
     {
-        _scopeFactory = scopeFactory;
+        _connectionFactory = connectionFactory;
         _queue = queue;
         _storage = storageOptions?.Value ?? new StorageOptions();
         _logger = logger;
@@ -41,17 +44,16 @@ public sealed class ScanRecoveryService : BackgroundService
         {
             await Task.Delay(Delay, stoppingToken);
 
-            using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<DiarSpeicherDbContext>();
+            await using var conn = await _connectionFactory.CreateConnectionAsync(stoppingToken);
 
-            await PurgeOrphanMediaAsync(db, stoppingToken);
-            await PurgeOrphanLibraryConfigsAsync(db, stoppingToken);
-            await PurgeUnclaimedScannedDirectoriesAsync(db, stoppingToken);
-            await PurgeUnreferencedThumbnailsAsync(db, stoppingToken);
+            await PurgeOrphanMediaAsync(conn, stoppingToken);
+            await PurgeOrphanLibraryConfigsAsync(conn, stoppingToken);
+            await PurgeUnclaimedScannedDirectoriesAsync(conn, stoppingToken);
+            await PurgeUnreferencedThumbnailsAsync(conn, stoppingToken);
 
-            var libraries = await db.Libraries
-                .Select(l => new { l.Id, l.Name })
-                .ToListAsync(stoppingToken);
+            const string libSql = """SELECT "Id", "Name" FROM "Libraries";""";
+            var libraries = (await conn.QueryAsync<(string Id, string Name)>(
+                new CommandDefinition(libSql, cancellationToken: stoppingToken))).ToList();
 
             foreach (var library in libraries)
             {
@@ -76,9 +78,12 @@ public sealed class ScanRecoveryService : BackgroundService
     /// dejo el tomo colgando. Son inalcanzables desde su biblioteca pero salen en "anadido
     /// reciente", asi que se limpian al arrancar.
     /// </summary>
-    private async Task PurgeOrphanMediaAsync(DiarSpeicherDbContext db, CancellationToken ct)
+    private async Task PurgeOrphanMediaAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
     {
-        var orphans = await db.Media.Where(m => m.SeriesId == null).ToListAsync(ct);
+        const string selectSql = """SELECT "Id", "ThumbnailPath" FROM "Media" WHERE "SeriesId" IS NULL;""";
+        var orphans = (await conn.QueryAsync<(string Id, string? ThumbnailPath)>(
+            new CommandDefinition(selectSql, cancellationToken: ct))).ToList();
+
         if (orphans.Count == 0) return;
 
         foreach (var thumb in orphans.Select(m => m.ThumbnailPath))
@@ -95,8 +100,8 @@ public sealed class ScanRecoveryService : BackgroundService
             }
         }
 
-        db.Media.RemoveRange(orphans);
-        await db.SaveChangesAsync(ct);
+        const string deleteSql = """DELETE FROM "Media" WHERE "SeriesId" IS NULL;""";
+        await conn.ExecuteAsync(new CommandDefinition(deleteSql, cancellationToken: ct));
 
         _logger.LogWarning("Limpiados {Count} tomos sin serie", orphans.Count);
     }
@@ -106,45 +111,49 @@ public sealed class ScanRecoveryService : BackgroundService
     /// LibraryConfigs, asi que la cascada nunca actua en este sentido y cada biblioteca
     /// borrada antes de que esto existiera dejo la suya atras.
     /// </summary>
-    private async Task PurgeOrphanLibraryConfigsAsync(DiarSpeicherDbContext db, CancellationToken ct)
+    private async Task PurgeOrphanLibraryConfigsAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
     {
-        var usedConfigIds = await db.Libraries.Select(l => l.ConfigId).Distinct().ToListAsync(ct);
-        var orphans = await db.LibraryConfigs
-            .Where(c => !usedConfigIds.Contains(c.Id))
-            .ToListAsync(ct);
+        const string sql = """
+            DELETE FROM "LibraryConfigs"
+            WHERE "Id" NOT IN (
+                SELECT DISTINCT "ConfigId" FROM "Libraries" WHERE "ConfigId" IS NOT NULL
+            );
+            """;
 
-        if (orphans.Count == 0) return;
-
-        db.LibraryConfigs.RemoveRange(orphans);
-        await db.SaveChangesAsync(ct);
-
-        _logger.LogWarning("Limpiadas {Count} configuraciones sin biblioteca", orphans.Count);
+        var count = await conn.ExecuteAsync(new CommandDefinition(sql, cancellationToken: ct));
+        if (count > 0)
+        {
+            _logger.LogWarning("Limpiadas {Count} configuraciones sin biblioteca", count);
+        }
     }
 
     /// <summary>
     /// Filas de la cache de mtimes que no caen bajo ninguna biblioteca viva. Un escaneo solo
     /// repasa las de su propia ruta, asi que las de una biblioteca borrada no las visita nadie.
     /// </summary>
-    private async Task PurgeUnclaimedScannedDirectoriesAsync(DiarSpeicherDbContext db, CancellationToken ct)
+    private async Task PurgeUnclaimedScannedDirectoriesAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
     {
-        var libraryPaths = await db.Libraries.Select(l => l.Path).ToListAsync(ct);
+        const string libSql = """SELECT "Path" FROM "Libraries";""";
+        var libraryPaths = await conn.QueryAsync<string>(new CommandDefinition(libSql, cancellationToken: ct));
         var roots = libraryPaths
             .Select(p => Path.TrimEndingDirectorySeparator(Path.GetFullPath(p)))
             .ToList();
 
-        var cached = await db.ScannedDirectories.ToListAsync(ct);
-        var unclaimed = cached
-            .Where(entry => !roots.Any(root =>
-                string.Equals(entry.Path, root, StringComparison.Ordinal)
-                || entry.Path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
+        const string dirSql = """SELECT "Path" FROM "ScannedDirectories";""";
+        var cached = (await conn.QueryAsync<string>(new CommandDefinition(dirSql, cancellationToken: ct))).ToList();
+
+        var unclaimedPaths = cached
+            .Where(path => !roots.Any(root =>
+                string.Equals(path, root, StringComparison.Ordinal)
+                || path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
             .ToList();
 
-        if (unclaimed.Count == 0) return;
+        if (unclaimedPaths.Count == 0) return;
 
-        db.ScannedDirectories.RemoveRange(unclaimed);
-        await db.SaveChangesAsync(ct);
+        const string deleteSql = """DELETE FROM "ScannedDirectories" WHERE "Path" IN @Paths;""";
+        await conn.ExecuteAsync(new CommandDefinition(deleteSql, new { Paths = unclaimedPaths }, cancellationToken: ct));
 
-        _logger.LogWarning("Limpiadas {Count} carpetas cacheadas sin biblioteca", unclaimed.Count);
+        _logger.LogWarning("Limpiadas {Count} carpetas cacheadas sin biblioteca", unclaimedPaths.Count);
     }
 
     /// <summary>
@@ -152,23 +161,27 @@ public sealed class ScanRecoveryService : BackgroundService
     /// que uno se olvide para que el fichero sobreviva al tomo: el disco es la unica fuente
     /// fiable de lo que hay, y la base la de lo que se usa.
     /// </summary>
-    private async Task PurgeUnreferencedThumbnailsAsync(DiarSpeicherDbContext db, CancellationToken ct)
+    private async Task PurgeUnreferencedThumbnailsAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
     {
         var directory = _storage.ResolveThumbnailsPath();
         if (!Directory.Exists(directory)) return;
 
         var referenced = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var path in await db.Media.Where(m => m.ThumbnailPath != null).Select(m => m.ThumbnailPath!).ToListAsync(ct))
+
+        const string mediaSql = """SELECT "ThumbnailPath" FROM "Media" WHERE "ThumbnailPath" IS NOT NULL;""";
+        foreach (var path in await conn.QueryAsync<string>(new CommandDefinition(mediaSql, cancellationToken: ct)))
         {
             referenced.Add(Path.GetFullPath(path));
         }
 
-        foreach (var path in await db.Series.Where(s => s.ThumbnailPath != null).Select(s => s.ThumbnailPath!).ToListAsync(ct))
+        const string seriesSql = """SELECT "ThumbnailPath" FROM "Series" WHERE "ThumbnailPath" IS NOT NULL;""";
+        foreach (var path in await conn.QueryAsync<string>(new CommandDefinition(seriesSql, cancellationToken: ct)))
         {
             referenced.Add(Path.GetFullPath(path));
         }
 
-        foreach (var path in await db.Libraries.Where(l => l.ThumbnailPath != null).Select(l => l.ThumbnailPath!).ToListAsync(ct))
+        const string libSql = """SELECT "ThumbnailPath" FROM "Libraries" WHERE "ThumbnailPath" IS NOT NULL;""";
+        foreach (var path in await conn.QueryAsync<string>(new CommandDefinition(libSql, cancellationToken: ct)))
         {
             referenced.Add(Path.GetFullPath(path));
         }

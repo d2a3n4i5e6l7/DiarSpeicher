@@ -1,4 +1,13 @@
 using System.Collections.Concurrent;
+using System.Data;
+using System.IO;
+using System.IO.Compression;
+using Dapper;
+using DiarSpeicher.Core.Domain.Entities;
+using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Filesystem.Processors;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 
 namespace DiarSpeicher.Infrastructure.Reading;
 
@@ -12,12 +21,12 @@ public class EpubPageMapStore : IEpubPageMapStore
     private static SemaphoreSlim BuilderFor(string key) =>
         Builders[(uint)StringComparer.Ordinal.GetHashCode(key) % BuilderStripes];
 
-    private readonly DiarSpeicherDbContext _db;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly ILogger<EpubPageMapStore> _logger;
 
-    public EpubPageMapStore(DiarSpeicherDbContext db, ILogger<EpubPageMapStore> logger)
+    public EpubPageMapStore(ISqliteConnectionFactory connectionFactory, ILogger<EpubPageMapStore> logger)
     {
-        _db = db;
+        _connectionFactory = connectionFactory;
         _logger = logger;
     }
 
@@ -46,7 +55,7 @@ public class EpubPageMapStore : IEpubPageMapStore
                 return stored?.TotalPages > 0 ? stored.TotalPages : Math.Max(1, book.Pages);
             }
 
-            return await SaveAsync(book, profileKey, measured, fileModifiedAt, stored, profile.Name, ct);
+            return await SaveAsync(book, profileKey, measured, fileModifiedAt, profile.Name, ct);
         }
         finally
         {
@@ -54,8 +63,18 @@ public class EpubPageMapStore : IEpubPageMapStore
         }
     }
 
-    private Task<EpubPageMap?> FindAsync(string mediaId, string profileKey, CancellationToken ct) =>
-        _db.EpubPageMaps.FirstOrDefaultAsync(e => e.MediaId == mediaId && e.ProfileKey == profileKey, ct);
+    private async Task<EpubPageMap?> FindAsync(string mediaId, string profileKey, CancellationToken ct)
+    {
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        const string sql = """
+            SELECT "MediaId", "ProfileKey", "TotalPages", "FileModifiedAt", "BuiltAt"
+            FROM "EpubPageMaps"
+            WHERE "MediaId" = @MediaId AND "ProfileKey" = @ProfileKey
+            LIMIT 1;
+            """;
+        return await conn.QueryFirstOrDefaultAsync<EpubPageMap>(
+            new CommandDefinition(sql, new { MediaId = mediaId, ProfileKey = profileKey }, cancellationToken: ct));
+    }
 
     private static bool IsUsable(EpubPageMap? stored, DateTimeOffset fileModifiedAt) =>
         stored != null && stored.TotalPages > 0 && SameFile(stored.FileModifiedAt, fileModifiedAt);
@@ -65,43 +84,24 @@ public class EpubPageMapStore : IEpubPageMapStore
         string profileKey,
         int measured,
         DateTimeOffset fileModifiedAt,
-        EpubPageMap? stored,
         string profileName,
         CancellationToken ct)
     {
-        if (stored == null)
-        {
-            _db.EpubPageMaps.Add(new EpubPageMap
-            {
-                MediaId = book.Id,
-                ProfileKey = profileKey,
-                TotalPages = measured,
-                FileModifiedAt = fileModifiedAt,
-                BuiltAt = DateTimeOffset.UtcNow
-            });
-        }
-        else
-        {
-            stored.TotalPages = measured;
-            stored.FileModifiedAt = fileModifiedAt;
-            stored.BuiltAt = DateTimeOffset.UtcNow;
-        }
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        const string upsertSql = """
+            INSERT INTO "EpubPageMaps" ("MediaId", "ProfileKey", "TotalPages", "FileModifiedAt", "BuiltAt")
+            VALUES (@MediaId, @ProfileKey, @TotalPages, @FileModifiedAt, @BuiltAt)
+            ON CONFLICT("MediaId", "ProfileKey") DO UPDATE SET
+                "TotalPages" = excluded."TotalPages",
+                "FileModifiedAt" = excluded."FileModifiedAt",
+                "BuiltAt" = excluded."BuiltAt";
+            """;
 
-        try
-        {
-            await _db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException ex)
-        {
-            // Otra peticion escribio la fila primero. Su total vale igual que el nuestro:
-            // mismo libro y misma maquetacion dan el mismo numero.
-            _db.ChangeTracker.Clear();
-            var winner = await FindAsync(book.Id, profileKey, ct);
-            if (winner?.TotalPages > 0) return winner.TotalPages;
-
-            _logger.LogWarning(ex, "No se pudo guardar el mapa de paginas de {Name}", book.Name);
-            return measured;
-        }
+        var now = DateTimeOffset.UtcNow;
+        await conn.ExecuteAsync(new CommandDefinition(
+            upsertSql,
+            new { MediaId = book.Id, ProfileKey = profileKey, TotalPages = measured, FileModifiedAt = fileModifiedAt, BuiltAt = now },
+            cancellationToken: ct));
 
         _logger.LogInformation(
             "[EPUB] {Total} paginas para {Name} con el perfil {Profile}",

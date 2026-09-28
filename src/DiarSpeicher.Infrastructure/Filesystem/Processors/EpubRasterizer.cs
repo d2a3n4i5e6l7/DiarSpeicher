@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using AngleSharp.Html.Parser;
 using System.Text.RegularExpressions;
+using DiarSpeicher.Infrastructure.Filesystem.Imaging;
 using SkiaSharp;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Processors;
@@ -466,8 +467,7 @@ public static class EpubRasterizer
 
         DrawTacticalFooter(canvas, width, finalHeight, marginX, meta, colors, typeface);
 
-        using var image = SKImage.FromBitmap(bitmap);
-        using var webpData = image.Encode(SKEncodedImageFormat.Webp, 85);
+        using var webpData = SkiaImages.Encode(bitmap, SKEncodedImageFormat.Webp, 85);
         return webpData != null ? new ExtractedPage(ContentType.Webp, webpData.ToArray()) : null;
     }
 

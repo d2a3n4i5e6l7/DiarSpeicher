@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Filesystem;
@@ -6,9 +7,8 @@ using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
@@ -18,26 +18,17 @@ namespace DiarSpeicher.Tests;
 /// </summary>
 public sealed class ScanProgressTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
     private readonly string _libraryDir = Directory.CreateTempSubdirectory("diar-progress-tests-").FullName;
 
     public ScanProgressTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
+        _db = new TestSqliteDatabase();
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
         if (Directory.Exists(_libraryDir)) Directory.Delete(_libraryDir, recursive: true);
         GC.SuppressFinalize(this);
     }
@@ -106,7 +97,7 @@ public sealed class ScanProgressTests : IDisposable
         var composite = new CompositeBookProcessor(new IBookProcessor[] { new ZipBookProcessor() });
 
         return new LibraryScannerService(
-            new DiarSpeicherDbContext(_options),
+            _db.Factory,
             new DirectoryScanner(),
             composite,
             new ThumbnailService(composite, NullLogger<ThumbnailService>.Instance),
@@ -124,19 +115,21 @@ public sealed class ScanProgressTests : IDisposable
             await File.WriteAllBytesAsync(Path.Combine(seriesDir, "vol1.cbz"), SampleCbz());
         }
 
-        await using var db = new DiarSpeicherDbContext(_options);
-        var library = new Library
+        var configId = await _db.Connection.QuerySingleAsync<long>("""INSERT INTO "LibraryConfigs" DEFAULT VALUES RETURNING "Id";""");
+
+        var libraryId = Guid.NewGuid().ToString();
+        await _db.Connection.ExecuteAsync("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Comics', @Path, 'Ready', @ConfigId, @Now);
+            """, new
         {
-            Name = "Comics",
+            Id = libraryId,
             Path = _libraryDir,
-            Status = FileStatus.Ready,
-            Config = new LibraryConfig()
-        };
+            ConfigId = configId,
+            Now = DateTimeOffset.UtcNow
+        });
 
-        db.Libraries.Add(library);
-        await db.SaveChangesAsync();
-
-        return library.Id;
+        return libraryId;
     }
 
     private static byte[] SampleCbz()

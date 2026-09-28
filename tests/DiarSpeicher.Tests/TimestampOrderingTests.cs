@@ -1,54 +1,44 @@
+using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Komga;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
 /// <summary>
-/// Timestamps stay as ISO-8601 text, which is what SQLite writes for a DateTimeOffset. EF
-/// cannot translate an ORDER BY over that type, so the queries that need "newest first" are
-/// written as raw SQL; these tests pin down both halves of that arrangement.
+/// Timestamps stay as ISO-8601 text, which is what SQLite writes for a DateTimeOffset.
+/// The queries that need "newest first" are written with ORDER BY "CreatedAt" DESC.
 /// </summary>
 public sealed class TimestampOrderingTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
 
     public TimestampOrderingTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
+        _db = new TestSqliteDatabase();
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
         GC.SuppressFinalize(this);
     }
 
     [Fact]
     public void TimestampsAreStoredAsSortableIsoText()
     {
-        using var db = new DiarSpeicherDbContext(_options);
         var created = new DateTimeOffset(2026, 9, 8, 14, 56, 59, TimeSpan.Zero);
 
-        db.Users.Add(new User { Username = "diar", CreatedAt = created });
-        db.SaveChanges();
+        _db.Connection.Execute("""
+            INSERT INTO "Users" ("Id", "Username", "CreatedAt")
+            VALUES ('diar', 'diar', @CreatedAt);
+            """, new { CreatedAt = created });
 
-        using var command = _connection.CreateCommand();
-        command.CommandText = """SELECT typeof(CreatedAt), CreatedAt FROM Users""";
+        using var command = _db.Connection.CreateCommand();
+        command.CommandText = """SELECT typeof("CreatedAt"), "CreatedAt" FROM "Users" WHERE "Id" = 'diar'""";
         using var reader = command.ExecuteReader();
 
         Assert.True(reader.Read());
@@ -65,29 +55,15 @@ public sealed class TimestampOrderingTests : IDisposable
     {
         var created = new DateTimeOffset(2026, 9, 8, 14, 56, 59, 350, TimeSpan.Zero).AddTicks(3312);
 
-        using (var db = new DiarSpeicherDbContext(_options))
-        {
-            db.Users.Add(new User { Username = "diar", CreatedAt = created });
-            db.SaveChanges();
-        }
+        _db.Connection.Execute("""
+            INSERT INTO "Users" ("Id", "Username", "CreatedAt")
+            VALUES ('diar', 'diar', @CreatedAt);
+            """, new { CreatedAt = created });
 
-        using var verify = new DiarSpeicherDbContext(_options);
+        var retrieved = _db.Connection.QuerySingle<DateTimeOffset>(
+            """SELECT "CreatedAt" FROM "Users" WHERE "Id" = 'diar'""");
 
-        Assert.Equal(created, verify.Users.Single().CreatedAt);
-    }
-
-    /// <summary>
-    /// The reason the "newest first" queries are hand-written: EF refuses to translate this.
-    /// If a future EF or provider starts supporting it, this test fails and the raw SQL can
-    /// go back to LINQ.
-    /// </summary>
-    [Fact]
-    public void EfStillCannotOrderByATimestamp()
-    {
-        using var db = new DiarSpeicherDbContext(_options);
-
-        Assert.Throws<NotSupportedException>(
-            () => db.Media.OrderByDescending(m => m.CreatedAt).ToQueryString());
+        Assert.Equal(created, retrieved);
     }
 
     [Fact]
@@ -95,34 +71,38 @@ public sealed class TimestampOrderingTests : IDisposable
     {
         var baseline = new DateTimeOffset(2026, 9, 8, 12, 0, 0, TimeSpan.Zero);
 
-        await using (var db = new DiarSpeicherDbContext(_options))
+        var configId = await _db.Connection.QuerySingleAsync<long>("""
+            INSERT INTO "LibraryConfigs" DEFAULT VALUES RETURNING "Id";
+            """);
+
+        var libraryId = Guid.NewGuid().ToString();
+        await _db.Connection.ExecuteAsync("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Comics', '/libros', 'Ready', @ConfigId, @Now);
+            """, new { Id = libraryId, ConfigId = configId, Now = DateTimeOffset.UtcNow });
+
+        var seriesId = Guid.NewGuid().ToString();
+        await _db.Connection.ExecuteAsync("""
+            INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+            VALUES (@Id, 'Batman', '/libros/Batman', @LibraryId, 'Ready', @Now);
+            """, new { Id = seriesId, LibraryId = libraryId, Now = DateTimeOffset.UtcNow });
+
+        for (var i = 0; i < 5; i++)
         {
-            var library = new Library { Name = "Comics", Path = "/libros", Config = new LibraryConfig() };
-            db.Libraries.Add(library);
-            await db.SaveChangesAsync();
-
-            var series = new Series { Name = "Batman", Path = "/libros/Batman", LibraryId = library.Id };
-            db.Series.Add(series);
-            await db.SaveChangesAsync();
-
-            for (var i = 0; i < 5; i++)
+            await _db.Connection.ExecuteAsync("""
+                INSERT INTO "Media" ("Id", "Name", "Path", "Extension", "SeriesId", "Status", "CreatedAt")
+                VALUES (@Id, @Name, @Path, 'cbz', @SeriesId, 'Ready', @CreatedAt);
+                """, new
             {
-                db.Media.Add(new Media
-                {
-                    Name = $"vol{i}",
-                    Path = $"/libros/Batman/vol{i}.cbz",
-                    Extension = "cbz",
-                    SeriesId = series.Id,
-                    Status = FileStatus.Ready,
-                    CreatedAt = baseline.AddMinutes(i)
-                });
-            }
-
-            await db.SaveChangesAsync();
+                Id = Guid.NewGuid().ToString(),
+                Name = $"vol{i}",
+                Path = $"/libros/Batman/vol{i}.cbz",
+                SeriesId = seriesId,
+                CreatedAt = baseline.AddMinutes(i)
+            });
         }
 
-        await using var context = new DiarSpeicherDbContext(_options);
-        var service = new KomgaService(context, NullLogger<KomgaService>.Instance, TestReadingProgress.For(context));
+        var service = new KomgaService(_db.Factory, NullLogger<KomgaService>.Instance, TestReadingProgress.For(_db.Factory));
         var owner = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
 
         var first = await service.GetLatestBooksAsync(owner, page: 0, size: 2);

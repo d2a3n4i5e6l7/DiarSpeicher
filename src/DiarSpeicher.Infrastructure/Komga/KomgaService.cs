@@ -1,10 +1,18 @@
+using System.IO.Compression;
+using Dapper;
 using DiarSpeicher.Core.Domain.Komga;
+using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Data.Extensions;
+using DiarSpeicher.Infrastructure.Filesystem.Metadata;
+using DiarSpeicher.Infrastructure.Filesystem.Processors;
+using DiarSpeicher.Infrastructure.Reading;
+using Microsoft.Extensions.Logging;
 
 namespace DiarSpeicher.Infrastructure.Komga;
 
 public class KomgaService : IKomgaService
 {
-    private readonly DiarSpeicherDbContext _db;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly ILogger<KomgaService> _logger;
 
     private readonly ICompositeBookProcessor? _pageProcessor;
@@ -13,13 +21,13 @@ public class KomgaService : IKomgaService
     private readonly IReadingProgress _progress;
 
     public KomgaService(
-        DiarSpeicherDbContext db,
+        ISqliteConnectionFactory connectionFactory,
         ILogger<KomgaService> logger,
         IReadingProgress progress,
         ICompositeBookProcessor? pageProcessor = null,
         IEpubProfileProvider? epubProfileProvider = null)
     {
-        _db = db;
+        _connectionFactory = connectionFactory;
         _logger = logger;
         _pageProcessor = pageProcessor;
         _epubProfileProvider = epubProfileProvider;
@@ -29,18 +37,33 @@ public class KomgaService : IKomgaService
     public async Task<List<KomgaLibraryDto>> GetLibrariesAsync(AuthUser user, CancellationToken ct = default)
     {
         _logger.LogTrace("Fetching Komga libraries for user {UserId}", user.Id);
-        var libraries = await _db.Libraries.ForUser(user)
-            .OrderBy(l => l.Name)
-            .ToListAsync(ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
+        var sql = $"""
+            SELECT l."Id", l."CreatedAt", l."Name", l."Path", l."Status", l."UpdatedAt"
+            FROM "Libraries" l
+            WHERE {where}
+            ORDER BY l."Name" ASC;
+            """;
 
+        var libraries = await conn.QueryAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: ct));
         return libraries.Select(KomgaDtoMapper.ToLibraryDto).ToList();
     }
 
     public async Task<KomgaLibraryDto?> GetLibraryByIdAsync(AuthUser user, string id, CancellationToken ct = default)
     {
-        var lib = await _db.Libraries.ForUser(user)
-            .FirstOrDefaultAsync(l => l.Id == id, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
+        parameters.Add("Id", id);
 
+        var sql = $"""
+            SELECT l."Id", l."CreatedAt", l."Name", l."Path", l."Status", l."UpdatedAt"
+            FROM "Libraries" l
+            WHERE l."Id" = @Id AND {where}
+            LIMIT 1;
+            """;
+
+        var lib = await conn.QueryFirstOrDefaultAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: ct));
         return lib == null ? null : KomgaDtoMapper.ToLibraryDto(lib);
     }
 
@@ -52,36 +75,89 @@ public class KomgaService : IKomgaService
         int size,
         CancellationToken ct = default)
     {
-        var query = _db.Series.ForUser(user).WithDetails().AsQueryable();
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
 
+        var extraWhere = new List<string> { where };
         if (!string.IsNullOrWhiteSpace(libraryId))
         {
-            query = query.Where(s => s.LibraryId == libraryId);
+            extraWhere.Add("s.\"LibraryId\" = @LibraryId");
+            parameters.Add("LibraryId", libraryId);
         }
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            query = query.Where(s => s.Name.Contains(search) || (s.Metadata != null && s.Metadata.Title != null && s.Metadata.Title.Contains(search)));
+            extraWhere.Add("(s.\"Name\" LIKE @SearchPattern OR sm.\"Title\" LIKE @SearchPattern)");
+            parameters.Add("SearchPattern", $"%{search}%");
         }
 
-        var totalElements = await query.CountAsync(ct);
-        var seriesList = await query
-            .OrderBy(s => s.Name)
-            .Skip(page * size)
-            .Take(size)
-            .ToListAsync(ct);
+        var fullWhere = string.Join(" AND ", extraWhere);
 
-        var seriesDtos = seriesList.Select(KomgaDtoMapper.ToSeriesDto).ToList();
+        var countSql = $"""
+            SELECT COUNT(*)
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {fullWhere};
+            """;
+
+        var totalElements = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+
+        var pagedSql = $"""
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
+                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year",
+                   (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "BooksCount"
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {fullWhere}
+            ORDER BY s."Name" ASC
+            LIMIT @Take OFFSET @Skip;
+            """;
+
+        parameters.Add("Take", size);
+        parameters.Add("Skip", page * size);
+
+        var seriesRows = await conn.QueryAsync<Series, SeriesMetadata, long, (Series Series, int BooksCount)>(
+            pagedSql,
+            (s, sm, count) =>
+            {
+                s.Metadata = sm;
+                return (s, (int)count);
+            },
+            parameters,
+            splitOn: "SeriesId,BooksCount");
+
+        var seriesDtos = seriesRows.Select(row => KomgaDtoMapper.ToSeriesDto(row.Series, row.BooksCount)).ToList();
         return KomgaPageResponse<KomgaSeriesDto>.Create(seriesDtos, page, size, totalElements);
     }
 
     public async Task<KomgaSeriesDto?> GetSeriesByIdAsync(AuthUser user, string id, CancellationToken ct = default)
     {
-        var series = await _db.Series.ForUser(user)
-            .WithDetails()
-            .FirstOrDefaultAsync(s => s.Id == id, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
+        parameters.Add("Id", id);
 
-        return series == null ? null : KomgaDtoMapper.ToSeriesDto(series);
+        var sql = $"""
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
+                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year",
+                   (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "BooksCount"
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE s."Id" = @Id AND {where}
+            LIMIT 1;
+            """;
+
+        var rows = await conn.QueryAsync<Series, SeriesMetadata, int, (Series Series, int BooksCount)>(
+            sql,
+            (s, sm, count) =>
+            {
+                s.Metadata = sm;
+                return (s, count);
+            },
+            parameters,
+            splitOn: "SeriesId,BooksCount");
+
+        var first = rows.FirstOrDefault();
+        return first.Series == null ? null : KomgaDtoMapper.ToSeriesDto(first.Series, first.BooksCount);
     }
 
     public async Task<KomgaPageResponse<KomgaBookDto>> GetBooksAsync(
@@ -91,21 +167,54 @@ public class KomgaService : IKomgaService
         int size,
         CancellationToken ct = default)
     {
-        var query = _db.Media.ForUser(user)
-            .Include(m => m.Metadata)
-            .Include(m => m.Series)
-            .AsQueryable();
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
 
-        query = query.MatchingText(search);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            where = $"{where} AND (m.\"Name\" LIKE @SearchPattern OR mm.\"Title\" LIKE @SearchPattern)";
+            parameters.Add("SearchPattern", $"%{search}%");
+        }
 
-        var totalElements = await query.CountAsync(ct);
-        var books = await query
-            .OrderBy(m => m.SortName).ThenBy(m => m.Name)
-            .Skip(page * size)
-            .Take(size)
-            .ToListAsync(ct);
+        var countSql = $"""
+            SELECT COUNT(*)
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where};
+            """;
 
-        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var totalElements = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+
+        var pagedSql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
+                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year",
+                   s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where}
+            ORDER BY m."SortName" ASC, m."Name" ASC
+            LIMIT @Take OFFSET @Skip;
+            """;
+
+        parameters.Add("Take", size);
+        parameters.Add("Skip", page * size);
+
+        var books = (await conn.QueryAsync<Media, MediaMetadata, Series, Media>(
+            pagedSql,
+            (media, meta, series) =>
+            {
+                media.Metadata = meta;
+                media.Series = series;
+                return media;
+            },
+            parameters,
+            splitOn: "MediaId,Id")).ToList();
+
+        var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
         var bookDtos = books.Select(b => KomgaDtoMapper.ToBookDto(b, sessions.GetValueOrDefault(b.Id), epubTotals: epubTotals)).ToList();
 
@@ -118,23 +227,48 @@ public class KomgaService : IKomgaService
         int size,
         CancellationToken ct = default)
     {
-        var (where, parameters) = MediaSqlFilters.BuildVisibilityFilter(user);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
 
-        var countSql = MediaSqlFilters.BuildCountSql(where);
-        var pageSql = MediaSqlFilters.BuildLatestPageSql(where);
+        var countSql = $"""
+            SELECT COUNT(*)
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where};
+            """;
 
-        var totalElements = await _db.Database
-            .SqlQueryRaw<int>(countSql, parameters.ToParameters())
-            .SingleAsync(ct);
+        var totalElements = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
 
-        var books = await _db.Media
-            .FromSqlRaw(pageSql, parameters.ToParameters(("@take", size), ("@skip", page * size)))
-            .Include(m => m.Metadata)
-            .Include(m => m.Series)
-            .AsNoTracking()
-            .ToListAsync(ct);
+        var pagedSql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
+                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year",
+                   s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where}
+            ORDER BY m."CreatedAt" DESC, m."Id" DESC
+            LIMIT @Take OFFSET @Skip;
+            """;
 
-        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        parameters.Add("Take", size);
+        parameters.Add("Skip", page * size);
+
+        var books = (await conn.QueryAsync<Media, MediaMetadata, Series, Media>(
+            pagedSql,
+            (media, meta, series) =>
+            {
+                media.Metadata = meta;
+                media.Series = series;
+                return media;
+            },
+            parameters,
+            splitOn: "MediaId,Id")).ToList();
+
+        var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
         var bookDtos = books.Select(b => KomgaDtoMapper.ToBookDto(b, sessions.GetValueOrDefault(b.Id), epubTotals: epubTotals)).ToList();
 
@@ -148,19 +282,51 @@ public class KomgaService : IKomgaService
         int size,
         CancellationToken ct = default)
     {
-        var query = _db.Media.ForUser(user)
-            .Include(m => m.Metadata)
-            .Include(m => m.Series)
-            .Where(m => m.SeriesId == seriesId);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("SeriesId", seriesId);
 
-        var totalElements = await query.CountAsync(ct);
-        var books = await query
-            .OrderBy(m => m.SortName).ThenBy(m => m.Name)
-            .Skip(page * size)
-            .Take(size)
-            .ToListAsync(ct);
+        var fullWhere = $"{where} AND m.\"SeriesId\" = @SeriesId";
 
-        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var countSql = $"""
+            SELECT COUNT(*)
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {fullWhere};
+            """;
+
+        var totalElements = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+
+        var pagedSql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
+                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year",
+                   s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {fullWhere}
+            ORDER BY m."SortName" ASC, m."Name" ASC
+            LIMIT @Take OFFSET @Skip;
+            """;
+
+        parameters.Add("Take", size);
+        parameters.Add("Skip", page * size);
+
+        var books = (await conn.QueryAsync<Media, MediaMetadata, Series, Media>(
+            pagedSql,
+            (media, meta, series) =>
+            {
+                media.Metadata = meta;
+                media.Series = series;
+                return media;
+            },
+            parameters,
+            splitOn: "MediaId,Id")).ToList();
+
+        var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
         var bookDtos = books.Select(b => KomgaDtoMapper.ToBookDto(b, sessions.GetValueOrDefault(b.Id), epubTotals: epubTotals)).ToList();
 
@@ -169,25 +335,76 @@ public class KomgaService : IKomgaService
 
     public async Task<KomgaBookDto?> GetBookByIdAsync(AuthUser user, string id, CancellationToken ct = default)
     {
-        var book = await _db.Media.ForUser(user)
-            .Include(m => m.Metadata)
-            .Include(m => m.Series)
-            .FirstOrDefaultAsync(m => m.Id == id, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("Id", id);
 
+        var sql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
+                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year",
+                   s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" = @Id AND {where}
+            LIMIT 1;
+            """;
+
+        var books = await conn.QueryAsync<Media, MediaMetadata, Series, Media>(
+            sql,
+            (media, meta, series) =>
+            {
+                media.Metadata = meta;
+                media.Series = series;
+                return media;
+            },
+            parameters,
+            splitOn: "MediaId,Id");
+
+        var book = books.FirstOrDefault();
         if (book == null) return null;
 
-        var session = string.IsNullOrWhiteSpace(user.Id)
-            ? null
-            : await _db.ReadingSessions.FirstOrDefaultAsync(s => s.MediaId == id && s.UserId == user.Id, ct);
+        ReadingSession? session = null;
+        if (!string.IsNullOrWhiteSpace(user.Id))
+        {
+            session = await conn.QueryFirstOrDefaultAsync<ReadingSession>(
+                new CommandDefinition(
+                    """
+                    SELECT "Id", "CreatedAt", "ElapsedSeconds", "EndPage", "EndPercentage",
+                           "KoreaderProgress", "MediaId", "Notes", "ReadthroughNumber", "SessionDate",
+                           "StartPage", "StartPercentage", "Status", "UpdatedAt", "UserId",
+                           "RenderedPage", "RenderedTotalPages", "RenderedProfileKey"
+                    FROM "ReadingSessions"
+                    WHERE "MediaId" = @Id AND "UserId" = @UserId
+                    ORDER BY "Id" DESC
+                    LIMIT 1;
+                    """,
+                    new { Id = id, UserId = user.Id },
+                    cancellationToken: ct));
+        }
 
         var progress = await _progress.ResolveAsync(book, session, ct);
-
         return KomgaDtoMapper.ToBookDto(book, session, progress.TotalPages, overrideCurrentPage: progress.Page);
     }
 
     public async Task<List<KomgaBookPageDto>> GetBookPagesAsync(AuthUser user, string id, CancellationToken ct = default)
     {
-        var book = await _db.Media.ForUser(user).FirstOrDefaultAsync(m => m.Id == id, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("Id", id);
+
+        var sql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" = @Id AND {where}
+            LIMIT 1;
+            """;
+
+        var book = await conn.QueryFirstOrDefaultAsync<Media>(new CommandDefinition(sql, parameters, cancellationToken: ct));
         if (book == null || book.Pages <= 0) return [];
 
         if (EpubPageMapStore.IsEpub(book))
@@ -195,10 +412,15 @@ public class KomgaService : IKomgaService
             return await GetEpubBookPagesAsync(book, ct);
         }
 
-        var measured = await _db.MediaPages
-            .Where(p => p.MediaId == book.Id)
-            .OrderBy(p => p.Number)
-            .ToListAsync(ct);
+        var pageSql = """
+            SELECT "FileName", "Height", "MediaId", "MediaType", "Number", "SizeBytes", "Width"
+            FROM "MediaPages"
+            WHERE "MediaId" = @MediaId
+            ORDER BY "Number" ASC;
+            """;
+
+        var measured = (await conn.QueryAsync<MediaPage>(
+            new CommandDefinition(pageSql, new { MediaId = book.Id }, cancellationToken: ct))).ToList();
 
         if (measured.Count == 0)
         {
@@ -253,23 +475,26 @@ public class KomgaService : IKomgaService
             SizeBytes = p.SizeBytes
         }).ToList();
 
-        try
+        if (rows.Count > 0)
         {
-            _db.MediaPages.AddRange(rows);
-            await _db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException ex)
-        {
-            _logger.LogDebug(ex, "Otra peticion ya guardo las paginas de {BookId}", book.Id);
-            foreach (var row in rows)
-            {
-                _db.Entry(row).State = EntityState.Detached;
-            }
+            await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+            const string insertSql = """
+                INSERT INTO "MediaPages" ("MediaId", "Number", "FileName", "MediaType", "Width", "Height", "SizeBytes")
+                VALUES (@MediaId, @Number, @FileName, @MediaType, @Width, @Height, @SizeBytes)
+                ON CONFLICT ("MediaId", "Number") DO NOTHING;
+                """;
 
-            return await _db.MediaPages
-                .Where(p => p.MediaId == book.Id)
-                .OrderBy(p => p.Number)
-                .ToListAsync(ct);
+            await conn.ExecuteAsync(new CommandDefinition(insertSql, rows, cancellationToken: ct));
+
+            const string selectSql = """
+                SELECT "FileName", "Height", "MediaId", "MediaType", "Number", "SizeBytes", "Width"
+                FROM "MediaPages"
+                WHERE "MediaId" = @MediaId
+                ORDER BY "Number" ASC;
+                """;
+
+            return (await conn.QueryAsync<MediaPage>(
+                new CommandDefinition(selectSql, new { MediaId = book.Id }, cancellationToken: ct))).ToList();
         }
 
         return rows;
@@ -282,7 +507,21 @@ public class KomgaService : IKomgaService
         bool completed,
         CancellationToken ct = default)
     {
-        var book = await _db.Media.ForUser(user).FirstOrDefaultAsync(m => m.Id == bookId, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("Id", bookId);
+
+        var sql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" = @Id AND {where}
+            LIMIT 1;
+            """;
+
+        var book = await conn.QueryFirstOrDefaultAsync<Media>(new CommandDefinition(sql, parameters, cancellationToken: ct));
         if (book == null) return false;
 
         var ok = await _progress.RecordAsync(user, book, new ReadingProgressUpdate(page, completed), ct);
@@ -297,28 +536,26 @@ public class KomgaService : IKomgaService
     {
         if (string.IsNullOrWhiteSpace(user.Id)) return false;
 
-        var session = await _db.ReadingSessions
-            .FirstOrDefaultAsync(s => s.MediaId == bookId && s.UserId == user.Id, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        const string deleteSql = """
+            DELETE FROM "ReadingSessions"
+            WHERE "MediaId" = @BookId AND "UserId" = @UserId;
+            """;
 
-        if (session == null) return false;
-
-        _db.ReadingSessions.Remove(session);
-        await _db.SaveChangesAsync(ct);
-        _logger.LogTrace("Deleted Komga read progress for user {UserId}, book {BookId}", user.Id, bookId);
-        return true;
+        var rows = await conn.ExecuteAsync(new CommandDefinition(deleteSql, new { BookId = bookId, UserId = user.Id }, cancellationToken: ct));
+        if (rows > 0)
+        {
+            _logger.LogTrace("Deleted Komga read progress for user {UserId}, book {BookId}", user.Id, bookId);
+            return true;
+        }
+        return false;
     }
-
 
     private async Task CleanStalePagesAsync(string mediaId, CancellationToken ct)
     {
-        var stalePages = await _db.MediaPages
-            .Where(p => p.MediaId == mediaId)
-            .ToListAsync(ct);
-        if (stalePages.Count > 0)
-        {
-            _db.MediaPages.RemoveRange(stalePages);
-            await _db.SaveChangesAsync(ct);
-        }
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        const string sql = """DELETE FROM "MediaPages" WHERE "MediaId" = @MediaId;""";
+        await conn.ExecuteAsync(new CommandDefinition(sql, new { MediaId = mediaId }, cancellationToken: ct));
     }
 
     private async Task<List<KomgaBookPageDto>> GetEpubBookPagesAsync(Media book, CancellationToken ct)
@@ -372,4 +609,3 @@ public class KomgaService : IKomgaService
         };
     }
 }
-

@@ -1,25 +1,29 @@
+using System.IO;
+using Dapper;
+using DiarSpeicher.Core.Domain.Entities;
+using DiarSpeicher.Core.Filesystem;
+using DiarSpeicher.Infrastructure.Data.Extensions;
+using DiarSpeicher.Infrastructure.Reading;
+using Microsoft.Extensions.Logging;
+
 namespace DiarSpeicher.Infrastructure.Catalog;
 
 public sealed partial class DiarSpeicherService
 {
-    public async Task<DiarSpeicherPageResponse<DiarSpeicherMediaDto>> GetMediaAsync(
+    public Task<DiarSpeicherPageResponse<DiarSpeicherMediaDto>> GetMediaAsync(
         AuthUser user,
         int page,
         int pageSize,
         bool newestFirst = false,
         CancellationToken ct = default)
     {
-        var ordered = _db.Media.ForUser(user).Include(m => m.Metadata);
-        var query = newestFirst
-            ? ordered.OrderByDescending(m => m.Id)
-            : ordered.OrderBy(m => m.SortName).ThenBy(m => m.Name);
-
-        return await PageMediaAsync(user, query, page, pageSize, ct);
+        return PageMediaAsync(user, seriesId: null, newestFirst: newestFirst, page: page, pageSize: pageSize, ct: ct);
     }
 
     private async Task<DiarSpeicherPageResponse<DiarSpeicherMediaDto>> PageMediaAsync(
         AuthUser user,
-        IQueryable<Media> query,
+        string? seriesId,
+        bool newestFirst,
         int page,
         int pageSize,
         CancellationToken ct)
@@ -27,11 +31,58 @@ public sealed partial class DiarSpeicherService
         pageSize = Math.Clamp(pageSize, 1, 100);
         page = Math.Max(0, page);
 
-        var total = await query.CountAsync(ct);
-        var mediaList = await query.Skip(page * pageSize).Take(pageSize).ToListAsync(ct);
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
 
+        if (!string.IsNullOrWhiteSpace(seriesId))
+        {
+            where += @" AND m.""SeriesId"" = @SeriesId";
+            parameters.Add("SeriesId", seriesId);
+        }
+
+        var countSql = $"""
+            SELECT COUNT(*)
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where};
+            """;
+
+        var total = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+
+        var orderBy = newestFirst ? @"m.""Id"" DESC" : @"m.""SortName"" ASC, m.""Name"" ASC";
+        parameters.Add("PageSize", pageSize);
+        parameters.Add("Offset", page * pageSize);
+
+        var selectSql = $"""
+            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status",
+                   m."Hash", m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt",
+                   m."ModifiedAt", m."DeletedAt", m."SeriesId",
+                   mm."Id", mm."MediaId", mm."AgeRating", mm."Summary", mm."Publisher", mm."Genres", mm."Number",
+                   mm."Volume", mm."Year", mm."Month", mm."Day", mm."Writers", mm."Pencillers", mm."Inkers",
+                   mm."Colorists", mm."Letterers", mm."CoverArtists", mm."Editors"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where}
+            ORDER BY {orderBy}
+            LIMIT @PageSize OFFSET @Offset;
+            """;
+
+        var rows = await conn.QueryAsync<Media, MediaMetadata?, Media>(
+            new CommandDefinition(selectSql, parameters, cancellationToken: ct),
+            (m, mm) =>
+            {
+                m.Metadata = mm;
+                return m;
+            },
+            splitOn: "Id");
+
+        var mediaList = rows.AsList();
         var mediaIds = mediaList.Select(m => m.Id).ToList();
-        var sessionMap = await _db.GetLatestSessionsPerMediaAsync(user.Id, mediaIds, ct);
+        var sessionMap = await conn.GetLatestSessionsPerMediaAsync(user.Id, mediaIds, ct);
 
         return new DiarSpeicherPageResponse<DiarSpeicherMediaDto>
         {
@@ -45,33 +96,89 @@ public sealed partial class DiarSpeicherService
 
     public async Task<DiarSpeicherMediaDto?> GetMediaByIdAsync(AuthUser user, string id, CancellationToken ct = default)
     {
-        var media = await _db.Media.ForUser(user)
-            .Include(m => m.Metadata)
-            .FirstOrDefaultAsync(m => m.Id == id, ct);
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("Id", id);
 
+        var sql = $"""
+            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status",
+                   m."Hash", m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt",
+                   m."ModifiedAt", m."DeletedAt", m."SeriesId",
+                   mm."Id", mm."MediaId", mm."AgeRating", mm."Summary", mm."Publisher", mm."Genres", mm."Number",
+                   mm."Volume", mm."Year", mm."Month", mm."Day", mm."Writers", mm."Pencillers", mm."Inkers",
+                   mm."Colorists", mm."Letterers", mm."CoverArtists", mm."Editors"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" = @Id AND {where}
+            LIMIT 1;
+            """;
+
+        var rows = await conn.QueryAsync<Media, MediaMetadata?, Media>(
+            new CommandDefinition(sql, parameters, cancellationToken: ct),
+            (m, mm) =>
+            {
+                m.Metadata = mm;
+                return m;
+            },
+            splitOn: "Id");
+
+        var media = rows.FirstOrDefault();
         if (media == null) return null;
 
-        var session = await _db.ReadingSessions
-            .Where(s => s.UserId == user.Id && s.MediaId == id)
-            .OrderByDescending(s => s.Id)
-            .FirstOrDefaultAsync(ct);
+        const string sessionSql = """
+            SELECT "Id", "CreatedAt", "ElapsedSeconds", "EndPage", "EndPercentage",
+                   "KoreaderProgress", "MediaId", "Notes", "ReadthroughNumber", "SessionDate",
+                   "StartPage", "StartPercentage", "Status", "UpdatedAt", "UserId",
+                   "RenderedPage", "RenderedTotalPages", "RenderedProfileKey"
+            FROM "ReadingSessions"
+            WHERE "UserId" = @UserId AND "MediaId" = @MediaId
+            ORDER BY "Id" DESC
+            LIMIT 1;
+            """;
+
+        var session = await conn.QueryFirstOrDefaultAsync<ReadingSession>(
+            new CommandDefinition(sessionSql, new { UserId = user.Id, MediaId = id }, cancellationToken: ct));
 
         return ToMediaDto(media, session);
     }
 
     public async Task<List<DiarSpeicherMediaDto>> GetKeepReadingAsync(AuthUser user, CancellationToken ct = default)
     {
-        var sessions = await _db.GetKeepReadingSessionsAsync(user.Id, ct);
-
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        var sessions = await conn.GetKeepReadingSessionsAsync(user.Id, ct);
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
+        if (mediaIds.Count == 0) return [];
 
-        var mediaList = await _db.Media.ForUser(user)
-            .Include(m => m.Metadata)
-            .Where(m => mediaIds.Contains(m.Id))
-            .ToListAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("MediaIds", mediaIds);
 
-        var mediaMap = mediaList.ToDictionary(m => m.Id);
-        var sessionMap = sessions.ToDictionary(s => s.MediaId);
+        var sql = $"""
+            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status",
+                   m."Hash", m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt",
+                   m."ModifiedAt", m."DeletedAt", m."SeriesId",
+                   mm."Id", mm."MediaId", mm."AgeRating", mm."Summary", mm."Publisher", mm."Genres", mm."Number",
+                   mm."Volume", mm."Year", mm."Month", mm."Day", mm."Writers", mm."Pencillers", mm."Inkers",
+                   mm."Colorists", mm."Letterers", mm."CoverArtists", mm."Editors"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" IN @MediaIds AND {where};
+            """;
+
+        var rows = await conn.QueryAsync<Media, MediaMetadata?, Media>(
+            new CommandDefinition(sql, parameters, cancellationToken: ct),
+            (m, mm) =>
+            {
+                m.Metadata = mm;
+                return m;
+            },
+            splitOn: "Id");
+
+        var mediaMap = rows.ToDictionary(m => m.Id, StringComparer.Ordinal);
+        var sessionMap = sessions.ToDictionary(s => s.MediaId, StringComparer.Ordinal);
 
         var result = new List<DiarSpeicherMediaDto>();
         foreach (var id in mediaIds)
@@ -85,11 +192,29 @@ public sealed partial class DiarSpeicherService
         return result;
     }
 
+    private async Task<Media?> FetchMediaForUserAsync(AuthUser user, string mediaId, CancellationToken ct)
+    {
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("Id", mediaId);
+
+        var sql = $"""
+            SELECT m."Id", m."Name", m."Path", m."Extension", m."ThumbnailPath"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" = @Id AND {where}
+            LIMIT 1;
+            """;
+
+        return await conn.QueryFirstOrDefaultAsync<Media>(
+            new CommandDefinition(sql, parameters, cancellationToken: ct));
+    }
+
     public async Task<OpenedPage?> OpenMediaPageAsync(AuthUser user, string mediaId, int page, CancellationToken ct = default)
     {
-        var media = await _db.Media.ForUser(user)
-            .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
-
+        var media = await FetchMediaForUserAsync(user, mediaId, ct);
         if (media == null || !File.Exists(media.Path)) return null;
 
         var opened = await _bookProcessor.OpenPageAsync(media.Path, page, ct);
@@ -109,13 +234,10 @@ public sealed partial class DiarSpeicherService
 
     public async Task<ExtractedPage?> GetMediaPageAsync(AuthUser user, string mediaId, int page, CancellationToken ct = default)
     {
-        var media = await _db.Media.ForUser(user)
-            .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
-
+        var media = await FetchMediaForUserAsync(user, mediaId, ct);
         if (media == null || !File.Exists(media.Path)) return null;
 
         var extracted = await _bookProcessor.ExtractPageAsync(media.Path, page, ct);
-
         if (extracted != null)
         {
             try
@@ -133,9 +255,7 @@ public sealed partial class DiarSpeicherService
 
     public async Task<(string Path, string ContentType)?> GetMediaFileAsync(AuthUser user, string mediaId, CancellationToken ct = default)
     {
-        var media = await _db.Media.ForUser(user)
-            .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
-
+        var media = await FetchMediaForUserAsync(user, mediaId, ct);
         if (media == null || !File.Exists(media.Path)) return null;
 
         return (media.Path, ContentTypeExtensions.FromExtension(media.Extension).ToMimeType());
@@ -143,9 +263,7 @@ public sealed partial class DiarSpeicherService
 
     public async Task<bool> UpdateProgressAsync(AuthUser user, string mediaId, DiarSpeicherUpdateProgressInput input, CancellationToken ct = default)
     {
-        var media = await _db.Media.ForUser(user)
-            .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
-
+        var media = await FetchMediaForUserAsync(user, mediaId, ct);
         if (media == null) return false;
 
         return await _progress.RecordAsync(
@@ -157,7 +275,7 @@ public sealed partial class DiarSpeicherService
 
     public async Task<bool> DeleteMediaAsync(AuthUser user, string id, bool deleteFile = false, CancellationToken ct = default)
     {
-        var media = await _db.Media.ForUser(user).FirstOrDefaultAsync(m => m.Id == id, ct);
+        var media = await FetchMediaForUserAsync(user, id, ct);
         if (media == null) return false;
 
         if (deleteFile)
@@ -165,8 +283,8 @@ public sealed partial class DiarSpeicherService
             EnsureTrashed(media.Path, "el fichero");
             await PurgeIndexUnderPathAsync(user, media.Path, ct);
 
-            // La purga por ruta ya se ha llevado esta fila y su miniatura.
-            if (await _db.Media.FirstOrDefaultAsync(m => m.Id == id, ct) == null) return true;
+            var checkStillExists = await FetchMediaForUserAsync(user, id, ct);
+            if (checkStillExists == null) return true;
         }
 
         if (!string.IsNullOrWhiteSpace(media.ThumbnailPath))
@@ -174,8 +292,9 @@ public sealed partial class DiarSpeicherService
             TryDeleteFile(media.ThumbnailPath);
         }
 
-        _db.Media.Remove(media);
-        await _db.SaveChangesAsync(ct);
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        const string deleteSql = @"DELETE FROM ""Media"" WHERE ""Id"" = @Id;";
+        await conn.ExecuteAsync(new CommandDefinition(deleteSql, new { Id = id }, cancellationToken: ct));
 
         return true;
     }

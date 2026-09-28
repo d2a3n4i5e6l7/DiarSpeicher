@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
+using Dapper;
 using DiarSpeicher.Core.Domain.MangaBaka;
+using DiarSpeicher.Infrastructure.Data;
 
 namespace DiarSpeicher.Infrastructure.Metadata;
 
@@ -12,17 +14,7 @@ public interface ISeriesMetadataMatcher
 
 /// <summary>
 /// Empareja una serie local con una del volcado y vuelca sus datos en
-/// <see cref="SeriesMetadata"/>.
-/// <para>
-/// El emparejado no se hace solo: <c>Galaxy Angel</c> devuelve cinco obras distintas en el
-/// volcado, y elegir por parecido de título acabaría escribiendo la ficha equivocada. Este
-/// servicio propone; decide una persona.
-/// </para>
-/// <para>
-/// Lo externo vive en <c>SeriesMetadata</c> y lo que venía dentro del archivo, en
-/// <c>MediaMetadata</c>. Al no compartir tabla, revertir es borrar una fila y lo embebido
-/// sigue intacto: una metadata externa equivocada no destruye la del fichero.
-/// </para>
+/// <see cref="Core.Domain.Entities.SeriesMetadata"/>.
 /// </summary>
 public class SeriesMetadataMatcher : ISeriesMetadataMatcher
 {
@@ -44,12 +36,12 @@ public class SeriesMetadataMatcher : ISeriesMetadataMatcher
     /// <summary>Marca de procedencia en <c>SeriesMetadata.MetaType</c>.</summary>
     public const string SourceTag = "mangabaka";
 
-    private readonly DiarSpeicherDbContext _dbContext;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly IMangaBakaCatalog _catalog;
 
-    public SeriesMetadataMatcher(DiarSpeicherDbContext dbContext, IMangaBakaCatalog catalog)
+    public SeriesMetadataMatcher(ISqliteConnectionFactory connectionFactory, IMangaBakaCatalog catalog)
     {
-        _dbContext = dbContext;
+        _connectionFactory = connectionFactory;
         _catalog = catalog;
     }
 
@@ -58,10 +50,10 @@ public class SeriesMetadataMatcher : ISeriesMetadataMatcher
         int limit,
         CancellationToken cancellationToken = default)
     {
-        var name = await _dbContext.Series
-            .Where(s => s.Id == seriesId)
-            .Select(s => s.Name)
-            .FirstOrDefaultAsync(cancellationToken);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(cancellationToken);
+        const string sql = """SELECT "Name" FROM "Series" WHERE "Id" = @SeriesId LIMIT 1;""";
+        var name = await conn.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(sql, new { SeriesId = seriesId }, cancellationToken: cancellationToken));
 
         if (string.IsNullOrWhiteSpace(name)) return [];
 
@@ -70,60 +62,77 @@ public class SeriesMetadataMatcher : ISeriesMetadataMatcher
 
     public async Task<bool> ApplyAsync(string seriesId, int mangaBakaId, CancellationToken cancellationToken = default)
     {
-        var series = await _dbContext.Series
-            .Include(s => s.Metadata)
-            .FirstOrDefaultAsync(s => s.Id == seriesId, cancellationToken);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(cancellationToken);
+        const string checkSql = """SELECT 1 FROM "Series" WHERE "Id" = @SeriesId LIMIT 1;""";
+        var exists = await conn.ExecuteScalarAsync<int?>(
+            new CommandDefinition(checkSql, new { SeriesId = seriesId }, cancellationToken: cancellationToken));
 
-        if (series is null) return false;
+        if (!exists.HasValue) return false;
 
         var external = await _catalog.GetAsync(mangaBakaId, cancellationToken);
         if (external is null) return false;
 
-        var metadata = series.Metadata;
-        if (metadata is null)
+        var parameters = new
         {
-            metadata = new SeriesMetadata { SeriesId = series.Id };
-            _dbContext.SeriesMetadata.Add(metadata);
-            series.Metadata = metadata;
-        }
+            SeriesId = seriesId,
+            MetaType = SourceTag,
+            Comicid = external.Id,
+            Title = external.Title,
+            Summary = external.Description,
+            Publisher = external.Publishers,
+            Writers = external.Authors,
+            Genres = external.Genres,
+            Status = external.Status,
+            Year = external.Year,
+            ComicImage = external.CoverUrl,
+            Links = external.CanonicalUrl,
+            Booktype = external.Type,
+            TotalIssues = ParseCount(external.FinalVolume),
+            PublicationRun = external.TotalChapters,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
 
-        metadata.MetaType = SourceTag;
-        metadata.Comicid = external.Id;
-        metadata.Title = external.Title;
-        metadata.Summary = external.Description;
-        metadata.Publisher = external.Publishers;
-        metadata.Writers = external.Authors;
-        metadata.Genres = external.Genres;
-        metadata.Status = external.Status;
-        metadata.Year = external.Year;
-        metadata.ComicImage = external.CoverUrl;
-        metadata.Links = external.CanonicalUrl;
-        metadata.Booktype = external.Type;
-        metadata.TotalIssues = ParseCount(external.FinalVolume);
-        metadata.PublicationRun = external.TotalChapters;
+        const string upsertSql = """
+            INSERT INTO "SeriesMetadata" (
+                "SeriesId", "MetaType", "Comicid", "Title", "Summary", "Publisher", "Writers",
+                "Genres", "Status", "Year", "ComicImage", "Links", "Booktype", "TotalIssues", "PublicationRun"
+            ) VALUES (
+                @SeriesId, @MetaType, @Comicid, @Title, @Summary, @Publisher, @Writers,
+                @Genres, @Status, @Year, @ComicImage, @Links, @Booktype, @TotalIssues, @PublicationRun
+            )
+            ON CONFLICT ("SeriesId") DO UPDATE SET
+                "MetaType" = excluded."MetaType",
+                "Comicid" = excluded."Comicid",
+                "Title" = excluded."Title",
+                "Summary" = excluded."Summary",
+                "Publisher" = excluded."Publisher",
+                "Writers" = excluded."Writers",
+                "Genres" = excluded."Genres",
+                "Status" = excluded."Status",
+                "Year" = excluded."Year",
+                "ComicImage" = excluded."ComicImage",
+                "Links" = excluded."Links",
+                "Booktype" = excluded."Booktype",
+                "TotalIssues" = excluded."TotalIssues",
+                "PublicationRun" = excluded."PublicationRun";
 
-        series.UpdatedAt = DateTimeOffset.UtcNow;
-        await _dbContext.SaveChangesAsync(cancellationToken);
+            UPDATE "Series" SET "UpdatedAt" = @UpdatedAt WHERE "Id" = @SeriesId;
+            """;
+
+        await conn.ExecuteAsync(new CommandDefinition(upsertSql, parameters, cancellationToken: cancellationToken));
         return true;
     }
 
     public async Task<bool> ClearAsync(string seriesId, CancellationToken cancellationToken = default)
     {
-        var metadata = await _dbContext.SeriesMetadata
-            .FirstOrDefaultAsync(m => m.SeriesId == seriesId, cancellationToken);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(cancellationToken);
+        const string sql = """DELETE FROM "SeriesMetadata" WHERE "SeriesId" = @SeriesId;""";
+        var rows = await conn.ExecuteAsync(
+            new CommandDefinition(sql, new { SeriesId = seriesId }, cancellationToken: cancellationToken));
 
-        if (metadata is null) return false;
-
-        _dbContext.SeriesMetadata.Remove(metadata);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+        return rows > 0;
     }
 
-    /// <summary>
-    /// Quita del nombre de carpeta lo que no es el título: corchetes de scanlation, rangos
-    /// de tomos, años y etiquetas de calidad. Es la diferencia entre buscar
-    /// "Accel World Tomos [01-08][Completo]" y buscar "Accel World".
-    /// </summary>
     internal static string CleanFolderName(string name)
     {
         var cleaned = BracketedRegex.Replace(name, " ");
@@ -133,10 +142,6 @@ public class SeriesMetadataMatcher : ISeriesMetadataMatcher
         return cleaned.Trim();
     }
 
-    /// <summary>
-    /// <c>final_volume</c> llega como texto y a veces trae adornos ("12", "12+", "?").
-    /// Solo interesa el número: es lo que permite decir "3 de 12".
-    /// </summary>
     private static int? ParseCount(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;

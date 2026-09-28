@@ -8,12 +8,13 @@ namespace DiarSpeicher.Tests;
 
 internal static class TestReadingProgress
 {
-    public static IReadingProgress For(DiarSpeicherDbContext db, EpubDeviceProfile? profile = null) =>
+    public static IReadingProgress For(ISqliteConnectionFactory factory, EpubDeviceProfile? profile = null) =>
         new ReadingProgress(
-            db,
-            new EpubPageMapStore(db, NullLogger<EpubPageMapStore>.Instance),
+            factory,
+            new EpubPageMapStore(factory, NullLogger<EpubPageMapStore>.Instance),
             new FixedProfileProvider(profile ?? EpubDeviceProfile.GetDefaults()[0]),
             NullLogger<ReadingProgress>.Instance);
+
 
     private sealed class FixedProfileProvider : IEpubProfileProvider
     {

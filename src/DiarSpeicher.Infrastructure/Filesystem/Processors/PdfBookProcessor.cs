@@ -1,5 +1,6 @@
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
+using DiarSpeicher.Infrastructure.Filesystem.Imaging;
 using SkiaSharp;
 using PDFtoImage;
 
@@ -141,9 +142,7 @@ public class PdfBookProcessor : IBookProcessor
 
     private static (int? Width, int? Height) PixelSize(ExtractedPage page)
     {
-        using var data = SKData.CreateCopy(page.Data);
-        using var codec = SKCodec.Create(data);
-        return codec is null ? (null, null) : (codec.Info.Width, codec.Info.Height);
+        return SkiaImages.ReadDimensions(page.Data) is (int width, int height) ? (width, height) : (null, null);
     }
 
     /// <summary>
@@ -162,8 +161,7 @@ public class PdfBookProcessor : IBookProcessor
             using var skBitmap = Conversion.ToImage(stream, page: pageNumber - 1);
             if (skBitmap == null) return null;
 
-            using var image = SKImage.FromBitmap(skBitmap);
-            using var data = image.Encode(SKEncodedImageFormat.Webp, 85);
+            using var data = SkiaImages.Encode(skBitmap, SKEncodedImageFormat.Webp, 85);
             if (data == null) return null;
 
             return new ExtractedPage(ContentType.Webp, data.ToArray());

@@ -1,106 +1,116 @@
-using DiarSpeicher.Core.Domain.Entities;
-using DiarSpeicher.Core.Domain.Enums;
+using Dapper;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Data.Extensions;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
 public sealed class AgeFilterMatrixTests : IDisposable
 {
     private const int MaxAge = 13;
-
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
 
     public AgeFilterMatrixTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>().UseSqlite(_connection).Options;
-
-        using var ctx = new DiarSpeicherDbContext(_options);
-        ctx.Database.EnsureCreated();
-        Seed(ctx);
+        _db = new TestSqliteDatabase();
+        Seed();
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
-        GC.SuppressFinalize(this);
+        _db.Dispose();
     }
 
-    private static void Seed(DiarSpeicherDbContext ctx)
+    private void Seed()
     {
+        var conn = _db.Connection;
         var libraryId = Guid.NewGuid().ToString();
-        ctx.Libraries.Add(new Library
-        {
-            Id = libraryId,
-            Name = "Mixta",
-            Path = "/libs/mixta",
-            Status = FileStatus.Ready,
-            Config = new LibraryConfig(),
-        });
 
-        Series Serie(string nombre, int? rating, bool conMetadata)
+        const string insertConfigSql = """
+            INSERT INTO "LibraryConfigs" ("Id", "DefaultReadingDir", "DefaultReadingMode", "LibraryPattern", "LibraryType")
+            VALUES (1, 'LTR', 'Webtoon', 'Default', 'Manga');
+            """;
+        conn.Execute(insertConfigSql);
+
+        const string insertLibrarySql = """
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, @Name, @Path, 'Ready', 1, @CreatedAt);
+            """;
+        conn.Execute(insertLibrarySql, new { Id = libraryId, Name = "Mixta", Path = "/libs/mixta", CreatedAt = DateTimeOffset.UtcNow });
+
+        void InsertSerie(string nombre, int? rating, bool conMetadata)
         {
-            var s = new Series
+            const string insertSeriesSql = """
+                INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+                VALUES (@Id, @Name, @Path, @LibraryId, 'Ready', @CreatedAt);
+                """;
+            conn.Execute(insertSeriesSql, new
             {
                 Id = nombre,
                 Name = nombre,
                 Path = $"/libs/mixta/{nombre}",
                 LibraryId = libraryId,
-                Status = FileStatus.Ready,
-            };
-            if (conMetadata) s.Metadata = new SeriesMetadata { AgeRating = rating };
-            ctx.Series.Add(s);
-            return s;
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+
+            if (conMetadata)
+            {
+                const string insertMetaSql = """
+                    INSERT INTO "SeriesMetadata" ("SeriesId", "AgeRating")
+                    VALUES (@SeriesId, @AgeRating);
+                    """;
+                conn.Execute(insertMetaSql, new { SeriesId = nombre, AgeRating = rating });
+            }
         }
 
-        var sinMetadata = Serie("s_sin_metadata", null, conMetadata: false);
-        var ratingNulo = Serie("s_rating_nulo", null, conMetadata: true);
-        var ratingApto = Serie("s_rating_apto", MaxAge - 3, conMetadata: true);
-        var ratingAlto = Serie("s_rating_alto", MaxAge + 3, conMetadata: true);
+        InsertSerie("serie_sin_meta", null, conMetadata: false);
+        InsertSerie("serie_nula", null, conMetadata: true);
+        InsertSerie("serie_apta", MaxAge - 3, conMetadata: true);
+        InsertSerie("serie_alta", MaxAge + 3, conMetadata: true);
 
-        void Tomo(string id, Series? serie, int? rating, bool conMetadata)
+        void InsertTomo(string id, string? seriesId, int? rating, bool conMetadata)
         {
-            var m = new Media
+            const string insertMediaSql = """
+                INSERT INTO "Media" ("Id", "Name", "Path", "Extension", "Size", "SeriesId", "Status", "CreatedAt")
+                VALUES (@Id, @Name, @Path, 'cbz', 1, @SeriesId, 'Ready', @CreatedAt);
+                """;
+            conn.Execute(insertMediaSql, new
             {
                 Id = id,
                 Name = id,
                 Path = $"/libs/mixta/{id}.cbz",
-                Extension = "cbz",
-                Pages = 10,
-                SeriesId = serie?.Id,
-                Status = FileStatus.Ready,
-            };
-            if (conMetadata) m.Metadata = new MediaMetadata { AgeRating = rating };
-            ctx.Media.Add(m);
+                SeriesId = seriesId,
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+
+            if (conMetadata)
+            {
+                const string insertMetaSql = """
+                    INSERT INTO "MediaMetadata" ("MediaId", "AgeRating")
+                    VALUES (@MediaId, @AgeRating);
+                    """;
+                conn.Execute(insertMetaSql, new { MediaId = id, AgeRating = rating });
+            }
         }
 
-        foreach (var (sufijo, serie) in new (string, Series?)[]
+        foreach (var (sufijo, serieId) in new (string, string?)[]
         {
             ("sin_serie", null),
-            ("serie_sin_meta", sinMetadata),
-            ("serie_nula", ratingNulo),
-            ("serie_apta", ratingApto),
-            ("serie_alta", ratingAlto),
+            ("serie_sin_meta", "serie_sin_meta"),
+            ("serie_nula", "serie_nula"),
+            ("serie_apta", "serie_apta"),
+            ("serie_alta", "serie_alta"),
         })
         {
-            Tomo($"m_sin_meta__{sufijo}", serie, null, conMetadata: false);
-            Tomo($"m_rating_nulo__{sufijo}", serie, null, conMetadata: true);
-            Tomo($"m_apto__{sufijo}", serie, MaxAge - 3, conMetadata: true);
-            Tomo($"m_alto__{sufijo}", serie, MaxAge + 3, conMetadata: true);
+            InsertTomo($"m_sin_meta__{sufijo}", serieId, null, conMetadata: false);
+            InsertTomo($"m_rating_nulo__{sufijo}", serieId, null, conMetadata: true);
+            InsertTomo($"m_apto__{sufijo}", serieId, MaxAge - 3, conMetadata: true);
+            InsertTomo($"m_alto__{sufijo}", serieId, MaxAge + 3, conMetadata: true);
         }
-
-        ctx.SaveChanges();
     }
 
     private List<string> Visibles(bool restrictOnUnset)
     {
-        using var ctx = new DiarSpeicherDbContext(_options);
         var user = new AuthUser
         {
             Id = "menor",
@@ -110,7 +120,18 @@ public sealed class AgeFilterMatrixTests : IDisposable
             RestrictOnUnset = restrictOnUnset,
         };
 
-        return ctx.Media.ForUser(user).Select(m => m.Id).OrderBy(id => id).ToList();
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        var sql = $"""
+            SELECT m."Id"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where}
+            ORDER BY m."Id" ASC;
+            """;
+
+        return _db.Connection.Query<string>(sql, parameters).ToList();
     }
 
     [Fact]

@@ -1,93 +1,86 @@
-﻿using DiarSpeicher.Core.Domain.Entities;
+using Dapper;
+using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Opds;
-using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Opds;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
 public sealed class OpdsV2Tests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
     private string _kidBookId = null!;
     private string _adultBookId = null!;
 
     public OpdsV2Tests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
-
-        SeedTestData(context);
+        _db = new TestSqliteDatabase();
+        SeedTestData();
     }
 
-    private void SeedTestData(DiarSpeicherDbContext context)
+    private void SeedTestData()
     {
-        var cfg = new LibraryConfig();
-        context.LibraryConfigs.Add(cfg);
-        context.SaveChanges();
+        var conn = _db.Connection;
 
-        var lib = new Library { Name = "Manga & Comics", Path = "/data/comics", ConfigId = cfg.Id };
-        context.Libraries.Add(lib);
-        context.SaveChanges();
+        const string insertConfigSql = """
+            INSERT INTO "LibraryConfigs" ("Id") VALUES (1);
+            """;
+        conn.Execute(insertConfigSql);
 
-        var series = new Series { Name = "One Piece", Path = "/data/comics/op", LibraryId = lib.Id };
-        context.Series.Add(series);
-        context.SaveChanges();
+        var libId = Guid.NewGuid().ToString();
+        const string insertLibrarySql = """
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Manga & Comics', '/data/comics', 'Ready', 1, @Now);
+            """;
+        conn.Execute(insertLibrarySql, new { Id = libId, Now = DateTimeOffset.UtcNow });
 
-        var kidBook = new Media
+        var seriesId = Guid.NewGuid().ToString();
+        const string insertSeriesSql = """
+            INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+            VALUES (@Id, 'One Piece', '/data/comics/op', @LibraryId, 'Ready', @Now);
+            """;
+        conn.Execute(insertSeriesSql, new { Id = seriesId, LibraryId = libId, Now = DateTimeOffset.UtcNow });
+
+        var kidBookId = Guid.NewGuid().ToString();
+        var adultBookId = Guid.NewGuid().ToString();
+
+        const string insertMediaSql = """
+            INSERT INTO "Media" ("Id", "Name", "Path", "Extension", "Pages", "Size", "SeriesId", "Status", "CreatedAt")
+            VALUES (@Id, @Name, @Path, 'cbz', @Pages, @Size, @SeriesId, 'Ready', @Now);
+            """;
+        conn.Execute(insertMediaSql, new[]
         {
-            Name = "One Piece Vol 01",
-            Path = "/data/comics/op/01.cbz",
-            Extension = "cbz",
-            Pages = 200,
-            Size = 50000000,
-            SeriesId = series.Id,
-            Metadata = new MediaMetadata { Title = "Romance Dawn", AgeRating = 10 }
-        };
+            new { Id = kidBookId, Name = "One Piece Vol 01", Path = "/data/comics/op/01.cbz", Pages = 200, Size = 50000000L, SeriesId = seriesId, Now = DateTimeOffset.UtcNow },
+            new { Id = adultBookId, Name = "Berserk Vol 01", Path = "/data/comics/op/b01.cbz", Pages = 220, Size = 60000000L, SeriesId = seriesId, Now = DateTimeOffset.UtcNow }
+        });
 
-        var adultBook = new Media
+        const string insertMetaSql = """
+            INSERT INTO "MediaMetadata" ("MediaId", "Title", "AgeRating")
+            VALUES (@MediaId, @Title, @AgeRating);
+            """;
+        conn.Execute(insertMetaSql, new[]
         {
-            Name = "Berserk Vol 01",
-            Path = "/data/comics/op/b01.cbz",
-            Extension = "cbz",
-            Pages = 220,
-            Size = 60000000,
-            SeriesId = series.Id,
-            Metadata = new MediaMetadata { Title = "The Black Swordsman", AgeRating = 18 }
-        };
+            new { MediaId = kidBookId, Title = "Romance Dawn", AgeRating = 10 },
+            new { MediaId = adultBookId, Title = "The Black Swordsman", AgeRating = 18 }
+        });
 
-        context.Media.AddRange(kidBook, adultBook);
+        const string insertUserSql = """
+            INSERT INTO "Users" ("Id", "Username", "CreatedAt")
+            VALUES ('reader_v2', 'luffy', @Now);
+            """;
+        conn.Execute(insertUserSql, new { Now = DateTimeOffset.UtcNow });
 
-        var readerUser = new User
-        {
-            Id = "reader_v2",
-            Username = "luffy"
-        };
-        context.Users.Add(readerUser);
-
-        context.SaveChanges();
-
-        _kidBookId = kidBook.Id;
-        _adultBookId = adultBook.Id;
+        _kidBookId = kidBookId;
+        _adultBookId = adultBookId;
     }
 
     [Fact]
     public void GetAuthenticationDoc_ReturnsValidAuthDocument()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsV2Service(_db.Factory, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var authDoc = service.GetAuthenticationDoc(null);
 
@@ -99,8 +92,7 @@ public sealed class OpdsV2Tests : IDisposable
     [Fact]
     public async Task GetCatalogFeedAsync_ReturnsJsonLdFeedWithNavigationAndGroups()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsV2Service(_db.Factory, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var feed = await service.GetCatalogFeedAsync(user, null);
@@ -116,8 +108,7 @@ public sealed class OpdsV2Tests : IDisposable
     [Fact]
     public async Task GetPublicationAsync_ReturnsValidManifestWithReadingOrder()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsV2Service(_db.Factory, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var pub = await service.GetPublicationAsync(user, _kidBookId, null);
@@ -128,7 +119,6 @@ public sealed class OpdsV2Tests : IDisposable
         Assert.NotEmpty(pub.Images);
         Assert.NotEmpty(pub.Links);
 
-        // Verifica que contenga las 200 páginas en el readingOrder
         Assert.Equal(200, pub.ReadingOrder.Count);
         Assert.Equal("/opds/v2.0/books/" + _kidBookId + "/pages/0?zero_based=true", pub.ReadingOrder[0].Href);
     }
@@ -136,12 +126,10 @@ public sealed class OpdsV2Tests : IDisposable
     [Fact]
     public async Task Progression_CanUpdateAndRetrieveProgress()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsV2Service(_db.Factory, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "reader_v2", Username = "luffy", IsServerOwner = false };
 
-        // 1. Actualizar progreso a página 45
         var updateSuccess = await service.UpdateProgressionAsync(user, _kidBookId, new OpdsV2Progression
         {
             Page = 45,
@@ -150,15 +138,13 @@ public sealed class OpdsV2Tests : IDisposable
 
         Assert.True(updateSuccess);
 
-        // 2. Recuperar progreso
         var prog = await service.GetProgressionAsync(user, _kidBookId);
         Assert.NotNull(prog);
         Assert.Equal(45, prog.Page);
         Assert.Equal(0.225m, prog.Percentage);
 
-        // 3. Verificar estado en base de datos
-        var session = await context.ReadingSessions
-            .FirstOrDefaultAsync(s => s.MediaId == _kidBookId && s.UserId == "reader_v2");
+        const string sessionSql = """SELECT * FROM "ReadingSessions" WHERE "MediaId" = @MediaId AND "UserId" = @UserId LIMIT 1;""";
+        var session = await _db.Connection.QueryFirstOrDefaultAsync<ReadingSession>(sessionSql, new { MediaId = _kidBookId, UserId = "reader_v2" });
         Assert.NotNull(session);
         Assert.Equal(45, session.EndPage);
         Assert.Equal(ReadingStatus.Reading, session.Status);
@@ -167,8 +153,7 @@ public sealed class OpdsV2Tests : IDisposable
     [Fact]
     public async Task GetBooksFeedAsync_EnforcesParentalAgeRestrictionInOpdsV2()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new OpdsV2Service(context, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsV2Service(_db.Factory, NullLogger<OpdsV2Service>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var childUser = new AuthUser
         {
@@ -187,6 +172,6 @@ public sealed class OpdsV2Tests : IDisposable
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
     }
 }

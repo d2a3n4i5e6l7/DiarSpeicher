@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\DiarSpeicher.Core\DiarSpeicher.Core.csproj" />
@@ -6,21 +6,8 @@
 
   <ItemGroup>
     <PackageReference Include="AngleSharp" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
-      <!-- "runtime" es obligatorio aunque arrastre Roslyn al publish: dotnet ef necesita
-           el ensamblado de Design en la salida del proyecto de arranque para construir el
-           modelo. Quitarlo ahorra 22 MB y rompe "dotnet ef migrations add". -->
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools">
-      <!-- "runtime" es obligatorio aunque arrastre Roslyn al publish: dotnet ef necesita
-           el ensamblado de Design en la salida del proyecto de arranque para construir el
-           modelo. Quitarlo ahorra 22 MB y rompe "dotnet ef migrations add". -->
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="PdfPig" />
     <PackageReference Include="PDFtoImage" />

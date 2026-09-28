@@ -6,11 +6,10 @@
 
   <ItemGroup>
     <PackageVersion Include="AngleSharp" Version="1.8.2" />
+    <PackageVersion Include="Dapper" Version="2.1.66" />
     <PackageVersion Include="HotChocolate.AspNetCore" Version="16.6.6" />
-    <PackageVersion Include="HotChocolate.Data.EntityFramework" Version="16.6.6" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.12" />
+    <PackageVersion Include="HotChocolate.Data" Version="16.6.6" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.ICU.ICU4C.Runtime" Version="72.1.0.3" />
     <PackageVersion Include="PdfPig" Version="0.1.16" />

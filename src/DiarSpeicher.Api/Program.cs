@@ -17,7 +17,6 @@ using DiarSpeicher.Infrastructure.Opds;
 using DiarSpeicher.Infrastructure.Catalog;
 using DiarSpeicher.Infrastructure.Sync;
 using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -30,17 +29,8 @@ var connectionString = new SqliteConnectionStringBuilder(configuredConnection)
     ForeignKeys = true
 }.ToString();
 
-const int SqliteMaxBatchSize = 200;
-
-builder.Services.AddDbContext<DiarSpeicherDbContext>(options =>
-{
-    options.UseSqlite(connectionString, sqlite => sqlite.MaxBatchSize(SqliteMaxBatchSize));
-});
-
-builder.Services.AddDbContextFactory<DiarSpeicherDbContext>(options =>
-{
-    options.UseSqlite(connectionString, sqlite => sqlite.MaxBatchSize(SqliteMaxBatchSize));
-}, lifetime: ServiceLifetime.Scoped);
+SqliteTypeHandlers.Initialize();
+builder.Services.AddSingleton<ISqliteConnectionFactory, SqliteConnectionFactory>();
 
 builder.Services.AddHttpContextAccessor();
 
@@ -134,13 +124,9 @@ var app = builder.Build();
 
 EnsureDataDirectories(app.Services, connectionString);
 
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<DiarSpeicherDbContext>();
-    await db.Database.MigrateAsync();
-    await db.InitializeSqliteWalAsync();
-    await db.BackfillSortNamesAsync();
-}
+var connectionFactory = app.Services.GetRequiredService<ISqliteConnectionFactory>();
+await connectionFactory.InitializeDatabaseAsync();
+await connectionFactory.BackfillSortNamesAsync();
 
 var forwardedHeaders = new ForwardedHeadersOptions
 {

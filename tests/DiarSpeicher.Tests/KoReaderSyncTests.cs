@@ -1,93 +1,65 @@
+using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Sync;
-using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Sync;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
 public sealed class KoReaderSyncTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
     private readonly string _koreaderHash = "koreader-sample-hash-12345";
     private string _mediaId = null!;
 
     public KoReaderSyncTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
-
-        SeedTestData(context);
+        _db = new TestSqliteDatabase();
+        SeedTestData();
     }
 
-    private void SeedTestData(DiarSpeicherDbContext context)
+    private void SeedTestData()
     {
-        var cfg = new LibraryConfig();
-        context.LibraryConfigs.Add(cfg);
-        context.SaveChanges();
+        var conn = _db.Connection;
 
-        var user = new User
-        {
-            Id = "guts",
-            Username = "guts",
-            IsServerOwner = true
-        };
-        context.Users.Add(user);
+        conn.Execute("""INSERT INTO "LibraryConfigs" ("Id") VALUES (1);""");
 
-        var lib = new Library
-        {
-            Name = "Manga",
-            Path = "/media/manga",
-            ConfigId = cfg.Id
-        };
-        context.Libraries.Add(lib);
-        context.SaveChanges();
+        conn.Execute("""
+            INSERT INTO "Users" ("Id", "Username", "IsServerOwner", "CreatedAt")
+            VALUES ('guts', 'guts', 1, @Now);
+            """, new { Now = DateTimeOffset.UtcNow });
 
-        var series = new Series
-        {
-            Name = "Berserk",
-            Path = "/media/manga/berserk",
-            LibraryId = lib.Id
-        };
-        context.Series.Add(series);
-        context.SaveChanges();
+        var libId = Guid.NewGuid().ToString();
+        conn.Execute("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Manga', '/media/manga', 'Ready', 1, @Now);
+            """, new { Id = libId, Now = DateTimeOffset.UtcNow });
 
-        var media = new Media
-        {
-            Name = "Berserk Vol 01",
-            Path = "/media/manga/berserk/vol01.cbz",
-            Extension = "cbz",
-            Pages = 200,
-            KoreaderHash = _koreaderHash,
-            SeriesId = series.Id,
-            Metadata = new MediaMetadata
-            {
-                Title = "The Black Swordsman",
-                AgeRating = 18
-            }
-        };
-        context.Media.Add(media);
-        context.SaveChanges();
-        _mediaId = media.Id;
+        var seriesId = Guid.NewGuid().ToString();
+        conn.Execute("""
+            INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+            VALUES (@Id, 'Berserk', '/media/manga/berserk', @LibraryId, 'Ready', @Now);
+            """, new { Id = seriesId, LibraryId = libId, Now = DateTimeOffset.UtcNow });
+
+        _mediaId = Guid.NewGuid().ToString();
+        conn.Execute("""
+            INSERT INTO "Media" ("Id", "Name", "Path", "Extension", "Pages", "KoreaderHash", "SeriesId", "Status", "CreatedAt")
+            VALUES (@Id, 'Berserk Vol 01', '/media/manga/berserk/vol01.cbz', 'cbz', 200, @Hash, @SeriesId, 'Ready', @Now);
+            """, new { Id = _mediaId, Hash = _koreaderHash, SeriesId = seriesId, Now = DateTimeOffset.UtcNow });
+
+        conn.Execute("""
+            INSERT INTO "MediaMetadata" ("MediaId", "Title", "AgeRating")
+            VALUES (@MediaId, 'The Black Swordsman', 18);
+            """, new { MediaId = _mediaId });
     }
 
     [Fact]
     public async Task CheckAuthorizedAsync_ReturnsOkResponse()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new KoReaderService(context, NullLogger<KoReaderService>.Instance);
+        var service = new KoReaderService(_db.Factory, NullLogger<KoReaderService>.Instance);
 
         var result = await service.CheckAuthorizedAsync();
 
@@ -97,8 +69,7 @@ public sealed class KoReaderSyncTests : IDisposable
     [Fact]
     public async Task UpdateAndGetProgressAsync_FullLifecycle_TracksKoReaderPosition()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new KoReaderService(context, NullLogger<KoReaderService>.Instance);
+        var service = new KoReaderService(_db.Factory, NullLogger<KoReaderService>.Instance);
 
         var user = new AuthUser
         {
@@ -133,7 +104,9 @@ public sealed class KoReaderSyncTests : IDisposable
         Assert.Equal("45", updated.Progress);
 
         // 4. Verify DB entity
-        var session = await context.ReadingSessions.FirstOrDefaultAsync(s => s.UserId == user.Id && s.MediaId == _mediaId);
+        var session = await _db.Connection.QueryFirstOrDefaultAsync<ReadingSession>(
+            """SELECT * FROM "ReadingSessions" WHERE "UserId" = @UserId AND "MediaId" = @MediaId""",
+            new { UserId = user.Id, MediaId = _mediaId });
         Assert.NotNull(session);
         Assert.Equal(45, session.EndPage);
         Assert.Equal(0.225m, session.EndPercentage);
@@ -150,7 +123,9 @@ public sealed class KoReaderSyncTests : IDisposable
             DeviceId = "kobo-dev-1"
         });
 
-        var finishedSession = await context.ReadingSessions.FirstOrDefaultAsync(s => s.UserId == user.Id && s.MediaId == _mediaId);
+        var finishedSession = await _db.Connection.QueryFirstOrDefaultAsync<ReadingSession>(
+            """SELECT * FROM "ReadingSessions" WHERE "UserId" = @UserId AND "MediaId" = @MediaId""",
+            new { UserId = user.Id, MediaId = _mediaId });
         Assert.NotNull(finishedSession);
         Assert.Equal(ReadingStatus.Finished, finishedSession.Status);
     }
@@ -158,8 +133,7 @@ public sealed class KoReaderSyncTests : IDisposable
     [Fact]
     public async Task GetProgressAsync_EnforcesParentalRestrictions()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new KoReaderService(context, NullLogger<KoReaderService>.Instance);
+        var service = new KoReaderService(_db.Factory, NullLogger<KoReaderService>.Instance);
 
         var childUser = new AuthUser
         {
@@ -183,6 +157,6 @@ public sealed class KoReaderSyncTests : IDisposable
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
     }
 }

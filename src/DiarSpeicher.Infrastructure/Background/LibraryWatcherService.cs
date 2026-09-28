@@ -1,5 +1,8 @@
-using Microsoft.Extensions.DependencyInjection;
+using Dapper;
+using DiarSpeicher.Infrastructure.Data;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace DiarSpeicher.Infrastructure.Background;
 
@@ -10,7 +13,7 @@ namespace DiarSpeicher.Infrastructure.Background;
 public class LibraryWatcherService : BackgroundService
 {
     private readonly IScannerQueue _queue;
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly ILogger<LibraryWatcherService> _logger;
     private readonly WatcherOptions _options;
 
@@ -20,12 +23,12 @@ public class LibraryWatcherService : BackgroundService
 
     public LibraryWatcherService(
         IScannerQueue queue,
-        IServiceScopeFactory scopeFactory,
+        ISqliteConnectionFactory connectionFactory,
         ILogger<LibraryWatcherService> logger,
         IOptions<StorageOptions> storageOptions)
     {
         _queue = queue;
-        _scopeFactory = scopeFactory;
+        _connectionFactory = connectionFactory;
         _logger = logger;
         _options = storageOptions.Value.Watcher;
     }
@@ -69,14 +72,14 @@ public class LibraryWatcherService : BackgroundService
 
     private async Task StartWatchersAsync(CancellationToken ct)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<DiarSpeicherDbContext>();
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        const string sql = """
+            SELECT "Id", "Path"
+            FROM "Libraries"
+            WHERE "Status" != 'Missing' OR "Status" IS NULL;
+            """;
 
-        var libraries = await db.Libraries
-            .AsNoTracking()
-            .Where(l => l.Status != FileStatus.Missing)
-            .Select(l => new { l.Id, l.Path })
-            .ToListAsync(ct);
+        var libraries = await conn.QueryAsync<(string Id, string Path)>(new CommandDefinition(sql, cancellationToken: ct));
 
         foreach (var library in libraries)
         {

@@ -1,14 +1,12 @@
-using DiarSpeicher.Core.Domain.Entities;
+using Dapper;
+using DiarSpeicher.Core.Domain.Catalog;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Core.Domain.Catalog;
 using DiarSpeicher.Infrastructure.Background;
-using DiarSpeicher.Infrastructure.Data;
-using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Catalog;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
+using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
@@ -19,28 +17,18 @@ namespace DiarSpeicher.Tests;
 /// </summary>
 public sealed class UploadPolicyTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
     private readonly string _libraryDir;
 
     public UploadPolicyTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
-
+        _db = new TestSqliteDatabase();
         _libraryDir = Directory.CreateTempSubdirectory("diar-upload-tests-").FullName;
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
         if (Directory.Exists(_libraryDir)) Directory.Delete(_libraryDir, recursive: true);
         GC.SuppressFinalize(this);
     }
@@ -109,28 +97,33 @@ public sealed class UploadPolicyTests : IDisposable
     private async Task<(DiarSpeicherService Service, string LibraryId, AuthUser Owner)> ArrangeAsync(
         Action<DiarSpeicher.Infrastructure.Storage.UploadOptions> configure)
     {
-        var db = new DiarSpeicherDbContext(_options);
+        var conn = _db.Connection;
 
-        var library = new Library
+        var configId = await conn.QuerySingleAsync<long>("""
+            INSERT INTO "LibraryConfigs" DEFAULT VALUES RETURNING "Id";
+            """);
+
+        var libraryId = Guid.NewGuid().ToString();
+        await conn.ExecuteAsync("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Comics', @Path, 'Ready', @ConfigId, @Now);
+            """, new
         {
-            Name = "Comics",
+            Id = libraryId,
             Path = _libraryDir,
-            Status = FileStatus.Ready,
-            Config = new LibraryConfig()
-        };
-
-        db.Libraries.Add(library);
-        await db.SaveChangesAsync();
+            ConfigId = configId,
+            Now = DateTimeOffset.UtcNow
+        });
 
         var composite = new CompositeBookProcessor(new IBookProcessor[] { new ZipBookProcessor() });
         var service = new DiarSpeicherService(
-            db,
+            _db.Factory,
             composite,
             new ScannerQueue(),
             NullLogger<DiarSpeicherService>.Instance,
             TestStorageOptions.With(configure),
-            TestReadingProgress.For(db));
+            TestReadingProgress.For(_db.Factory));
 
-        return (service, library.Id, new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true });
+        return (service, libraryId, new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true });
     }
 }

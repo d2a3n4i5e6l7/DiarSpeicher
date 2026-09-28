@@ -11,10 +11,10 @@ internal static class KomgaDtoMapper
         Root = l.Path
     };
 
-    internal static KomgaSeriesDto ToSeriesDto(Series s)
+    internal static KomgaSeriesDto ToSeriesDto(Series s, int? bookCountOverride = null)
     {
         var title = s.Metadata?.Title ?? s.Name;
-        var booksCount = s.Media.Count(m => m.DeletedAt == null);
+        var booksCount = bookCountOverride ?? s.Media.Count(m => m.DeletedAt == null);
 
         return new KomgaSeriesDto
         {

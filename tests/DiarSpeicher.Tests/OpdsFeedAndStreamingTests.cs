@@ -1,22 +1,20 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Xml.Linq;
+using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Filesystem;
-using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Opds;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
 public sealed class OpdsFeedAndStreamingTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
     private readonly string _tempDir;
     private readonly string _thumbnailPath;
     private readonly string _testCbzPath;
@@ -26,15 +24,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
 
     public OpdsFeedAndStreamingTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
+        _db = new TestSqliteDatabase();
 
         _tempDir = Path.Combine(Path.GetTempPath(), $"diar_opds_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
@@ -44,7 +34,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
         File.WriteAllBytes(_thumbnailPath, JpegBuilder.Solid(64, 96));
         CreateSampleCbz(_testCbzPath);
 
-        SeedTestData(context);
+        SeedTestData();
     }
 
     private static void CreateSampleCbz(string path)
@@ -72,84 +62,67 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
         using (var s = entry3.Open()) s.Write(dummyJpeg);
     }
 
-    private void SeedTestData(DiarSpeicherDbContext context)
+    private void SeedTestData()
     {
-        var cfg1 = new LibraryConfig();
-        var cfg2 = new LibraryConfig();
-        context.LibraryConfigs.AddRange(cfg1, cfg2);
-        context.SaveChanges();
+        var conn = _db.Connection;
 
-        var mainLib = new Library { Name = "Comics Library", Path = "/data/comics", ConfigId = cfg1.Id };
-        var hiddenLib = new Library { Name = "Secret Archives", Path = "/data/secret", ConfigId = cfg2.Id };
-        context.Libraries.AddRange(mainLib, hiddenLib);
-        context.SaveChanges();
-        _hiddenLibId = hiddenLib.Id;
+        conn.Execute("""
+            INSERT INTO "LibraryConfigs" ("Id") VALUES (1);
+            INSERT INTO "LibraryConfigs" ("Id") VALUES (2);
+            """);
 
-        var series = new Series
+        var mainLibId = Guid.NewGuid().ToString();
+        var hiddenLibId = Guid.NewGuid().ToString();
+        _hiddenLibId = hiddenLibId;
+
+        conn.Execute("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@MainId, 'Comics Library', '/data/comics', 'Ready', 1, @Now);
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@HiddenId, 'Secret Archives', '/data/secret', 'Ready', 2, @Now);
+            """, new { MainId = mainLibId, HiddenId = hiddenLibId, Now = DateTimeOffset.UtcNow });
+
+        var seriesId = Guid.NewGuid().ToString();
+        conn.Execute("""
+            INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+            VALUES (@Id, 'Marvel Adventures', '/data/comics/marvel', @LibId, 'Ready', @Now);
+            """, new { Id = seriesId, LibId = mainLibId, Now = DateTimeOffset.UtcNow });
+
+        var kidBookId = Guid.NewGuid().ToString();
+        var adultBookId = Guid.NewGuid().ToString();
+        _kidBookId = kidBookId;
+        _adultBookId = adultBookId;
+
+        var fileSize = new FileInfo(_testCbzPath).Length;
+        conn.Execute("""
+            INSERT INTO "Media" ("Id", "Name", "Path", "Extension", "Pages", "Size", "SeriesId", "ThumbnailPath", "Status", "CreatedAt")
+            VALUES (@Id, @Name, @Path, 'cbz', 3, @Size, @SeriesId, @ThumbnailPath, 'Ready', @Now);
+            """, new[]
         {
-            Name = "Marvel Adventures",
-            Path = "/data/comics/marvel",
-            LibraryId = mainLib.Id
-        };
-        context.Series.Add(series);
-        context.SaveChanges();
+            new { Id = kidBookId, Name = "Spider-Man Kid", Path = _testCbzPath, Size = fileSize, SeriesId = seriesId, ThumbnailPath = _thumbnailPath, Now = DateTimeOffset.UtcNow },
+            new { Id = adultBookId, Name = "Deadpool MAX", Path = _testCbzPath, Size = fileSize, SeriesId = seriesId, ThumbnailPath = (string?)null, Now = DateTimeOffset.UtcNow }
+        });
 
-        var kidBook = new Media
+        conn.Execute("""
+            INSERT INTO "MediaMetadata" ("MediaId", "Title", "AgeRating", "Summary", "Writers")
+            VALUES (@MediaId, @Title, @AgeRating, @Summary, @Writers);
+            """, new[]
         {
-            Name = "Spider-Man Kid",
-            Path = _testCbzPath,
-            Extension = "cbz",
-            Pages = 3,
-            Size = new FileInfo(_testCbzPath).Length,
-            SeriesId = series.Id,
-            ThumbnailPath = _thumbnailPath,
-            Metadata = new MediaMetadata
-            {
-                Title = "Spider-Man Kid #1",
-                AgeRating = 10,
-                Summary = "Family friendly adventure",
-                Writers = "Stan Lee"
-            }
-        };
+            new { MediaId = kidBookId, Title = "Spider-Man Kid #1", AgeRating = (int?)10, Summary = "Family friendly adventure", Writers = "Stan Lee" },
+            new { MediaId = adultBookId, Title = "Deadpool MAX #1", AgeRating = (int?)18, Summary = "Explicit violence and adult themes", Writers = "David Lapham" }
+        });
 
-        var adultBook = new Media
-        {
-            Name = "Deadpool MAX",
-            Path = _testCbzPath,
-            Extension = "cbz",
-            Pages = 3,
-            Size = new FileInfo(_testCbzPath).Length,
-            SeriesId = series.Id,
-            Metadata = new MediaMetadata
-            {
-                Title = "Deadpool MAX #1",
-                AgeRating = 18,
-                Summary = "Explicit violence and adult themes",
-                Writers = "David Lapham"
-            }
-        };
-
-        context.Media.AddRange(kidBook, adultBook);
-
-        var testUser = new User
-        {
-            Id = "reader_1",
-            Username = "reader_john"
-        };
-        context.Users.Add(testUser);
-
-        context.SaveChanges();
-
-        _kidBookId = kidBook.Id;
-        _adultBookId = adultBook.Id;
+        conn.Execute("""
+            INSERT INTO "Users" ("Id", "Username", "CreatedAt")
+            VALUES ('reader_1', 'reader_john', @Now);
+            """, new { Now = DateTimeOffset.UtcNow });
     }
 
     [Fact]
     public async Task GetCatalogXmlAsync_ReturnsValidCatalogFeeds()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsService(_db.Factory, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var xml = await service.GetCatalogXmlAsync(user, null);
@@ -173,11 +146,10 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     [Fact]
     public async Task GetBooksFeedAsync_EnforcesParentalAgeRestriction()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsService(_db.Factory, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
-        // 1. Usuario con restricción de edad 12 años
+        // 1. Usuario con restriccion de edad 12 anos
         var childUser = new AuthUser
         {
             Id = "child_user",
@@ -198,7 +170,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
         Assert.Contains("Spider-Man Kid #1", childBookTitles);
         Assert.DoesNotContain("Deadpool MAX #1", childBookTitles);
 
-        // 2. Dueño del servidor: ve ambos libros
+        // 2. Dueno del servidor: ve ambos libros
         var ownerUser = new AuthUser { Id = "owner", Username = "boss", IsServerOwner = true };
         var ownerXml = await service.GetBooksFeedAsync(ownerUser, null, 0, null);
         var ownerDoc = XDocument.Parse(ownerXml);
@@ -215,9 +187,8 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     [Fact]
     public async Task GetLibrariesFeedAsync_EnforcesExcludedLibraries()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsService(_db.Factory, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var restrictedUser = new AuthUser
         {
@@ -243,13 +214,11 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     [Fact]
     public async Task GetBookPageAsync_ExtractsRealPageAndTracksReadingProgression()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsService(_db.Factory, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "reader_1", Username = "reader_john", IsServerOwner = false };
 
-        // El servicio recibe la pagina ya normalizada a base 1; de zero_based se encarga el endpoint.
         var (extractedPage, book) = await service.OpenBookPageAsync(
             user,
             _kidBookId,
@@ -267,9 +236,10 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
             Assert.True(copia.Length > 0);
         }
 
-        // Verificar que se haya registrado la sesión de lectura en la base de datos
-        var session = await context.ReadingSessions
-            .FirstOrDefaultAsync(s => s.MediaId == _kidBookId && s.UserId == "reader_1");
+        // Verificar que se haya registrado la sesion de lectura en la base de datos
+        var session = await _db.Connection.QueryFirstOrDefaultAsync<ReadingSession>(
+            """SELECT * FROM "ReadingSessions" WHERE "MediaId" = @MediaId AND "UserId" = @UserId""",
+            new { MediaId = _kidBookId, UserId = "reader_1" });
 
         Assert.NotNull(session);
         Assert.Equal(1, session.EndPage);
@@ -279,9 +249,8 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     [Fact]
     public async Task GetMediaForDownloadAsync_PreventsUnauthorizedAccess()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsService(_db.Factory, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var childUser = new AuthUser
         {
@@ -304,13 +273,12 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     [Fact]
     public async Task GetSearchFeedXmlAsync_ReturnsLibrariesSeriesAndBooksMatchingQuery()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsService(_db.Factory, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
 
-        // Búsqueda por "Spider"
+        // Busqueda por "Spider"
         var xml = await service.GetSearchFeedXmlAsync(user, "Spider", null);
         Assert.NotNull(xml);
         var doc = XDocument.Parse(xml);
@@ -323,7 +291,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
         Assert.NotNull(titles);
         Assert.Contains("Spider-Man Kid #1", titles);
 
-        // Búsqueda vacía -> retorna feed vacío sin errores
+        // Busqueda vacia -> retorna feed vacio sin errores
         var emptyXml = await service.GetSearchFeedXmlAsync(user, "", null);
         var emptyDoc = XDocument.Parse(emptyXml);
         Assert.Empty(emptyDoc.Root?.Elements(atom + "entry") ?? []);
@@ -332,21 +300,22 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     [Fact]
     public async Task GetKeepReadingFeedXmlAsync_ReturnsBooksWithActiveSessions()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsService(_db.Factory, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
-        // Crear una sesión de lectura activa para reader_1 en _kidBookId
-        context.ReadingSessions.Add(new ReadingSession
+        // Crear una sesion de lectura activa para reader_1 en _kidBookId
+        await _db.Connection.ExecuteAsync("""
+            INSERT INTO "ReadingSessions" ("UserId", "MediaId", "StartPage", "EndPage", "Status", "SessionDate", "CreatedAt", "UpdatedAt")
+            VALUES (@UserId, @MediaId, @StartPage, @EndPage, @Status, @Now, @Now, @Now);
+            """, new
         {
             UserId = "reader_1",
             MediaId = _kidBookId,
             StartPage = 1,
             EndPage = 2,
-            Status = ReadingStatus.Reading,
-            UpdatedAt = DateTimeOffset.UtcNow
+            Status = nameof(ReadingStatus.Reading),
+            Now = DateTimeOffset.UtcNow
         });
-        await context.SaveChangesAsync();
 
         var user = new AuthUser { Id = "reader_1", Username = "reader_john", IsServerOwner = false };
         var xml = await service.GetKeepReadingFeedXmlAsync(user, null);
@@ -366,9 +335,8 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
     [Fact]
     public async Task GetBookThumbnailAsync_ReturnsValidImageData()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var processor = new CompositeBookProcessor([new ZipBookProcessor()]);
-        var service = new OpdsService(context, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(context));
+        var service = new OpdsService(_db.Factory, processor, NullLogger<OpdsService>.Instance, TestLinkPrefix.Root, TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "reader_1", Username = "reader_john", IsServerOwner = true };
 
@@ -381,7 +349,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
         if (Directory.Exists(_tempDir))
         {
             try

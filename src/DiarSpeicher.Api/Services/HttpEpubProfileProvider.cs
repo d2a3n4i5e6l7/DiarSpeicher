@@ -1,25 +1,25 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Dapper;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Data;
-using Microsoft.EntityFrameworkCore;
 
 namespace DiarSpeicher.Api.Services;
 
 public class HttpEpubProfileProvider : IEpubProfileProvider
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly ILogger<HttpEpubProfileProvider> _logger;
 
     public HttpEpubProfileProvider(
         IHttpContextAccessor httpContextAccessor,
-        IServiceScopeFactory scopeFactory,
+        ISqliteConnectionFactory connectionFactory,
         ILogger<HttpEpubProfileProvider> logger)
     {
         _httpContextAccessor = httpContextAccessor;
-        _scopeFactory = scopeFactory;
+        _connectionFactory = connectionFactory;
         _logger = logger;
     }
 
@@ -62,12 +62,14 @@ public class HttpEpubProfileProvider : IEpubProfileProvider
         {
             if (httpContext.Items["AuthUser"] is not AuthUser authUser) return null;
 
-            using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<DiarSpeicherDbContext>();
-            var prefs = await db.UserPreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == authUser.Id, ct);
-            if (string.IsNullOrWhiteSpace(prefs?.EpubProfilesJson)) return null;
+            await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+            const string sql = """SELECT "EpubProfilesJson" FROM "UserPreferences" WHERE "UserId" = @UserId LIMIT 1;""";
+            var json = await conn.QueryFirstOrDefaultAsync<string>(
+                new CommandDefinition(sql, new { UserId = authUser.Id }, cancellationToken: ct));
 
-            var profiles = JsonSerializer.Deserialize<List<EpubDeviceProfile>>(prefs.EpubProfilesJson);
+            if (string.IsNullOrWhiteSpace(json)) return null;
+
+            var profiles = JsonSerializer.Deserialize<List<EpubDeviceProfile>>(json);
             if (profiles == null || profiles.Count == 0) return null;
 
             return profiles.FirstOrDefault(p => p.IsDefault) ?? profiles[0];

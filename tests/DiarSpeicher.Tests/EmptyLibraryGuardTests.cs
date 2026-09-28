@@ -1,12 +1,13 @@
+using System.IO.Compression;
+using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
@@ -16,35 +17,29 @@ namespace DiarSpeicher.Tests;
 /// </summary>
 public sealed class EmptyLibraryGuardTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
     private readonly string _tempDir;
 
     public EmptyLibraryGuardTests()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
-        _connection.Open();
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>().UseSqlite(_connection).Options;
-        using var ctx = new DiarSpeicherDbContext(_options);
-        ctx.Database.EnsureCreated();
-
+        _db = new TestSqliteDatabase();
         _tempDir = Path.Combine(Path.GetTempPath(), $"diar_guard_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
         if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true);
         GC.SuppressFinalize(this);
     }
 
-    private LibraryScannerService NewScanner(DiarSpeicherDbContext db)
+    private LibraryScannerService NewScanner()
     {
         var processors = new IBookProcessor[] { new ZipBookProcessor() };
         var composite = new CompositeBookProcessor(processors);
         return new LibraryScannerService(
-            db,
+            _db.Factory,
             new DirectoryScanner(),
             composite,
             new ThumbnailService(composite, NullLogger<ThumbnailService>.Instance),
@@ -54,38 +49,35 @@ public sealed class EmptyLibraryGuardTests : IDisposable
 
     private async Task<string> SeedLibraryWithSeriesAsync(string libDir)
     {
-        using var ctx = new DiarSpeicherDbContext(_options);
+        var configId = await _db.Connection.QuerySingleAsync<long>("""
+            INSERT INTO "LibraryConfigs" ("LibraryPattern") VALUES ('SeriesBased') RETURNING "Id";
+            """);
+
         var libraryId = Guid.NewGuid().ToString();
+        await _db.Connection.ExecuteAsync("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Montada', @Path, 'Ready', @ConfigId, @Now);
+            """, new { Id = libraryId, Path = libDir, ConfigId = configId, Now = DateTimeOffset.UtcNow });
 
-        ctx.Libraries.Add(new Library
+        var serieId = Ulid.NewUlid().ToString();
+        var seriePath = Path.Combine(libDir, "Bleach");
+        await _db.Connection.ExecuteAsync("""
+            INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+            VALUES (@Id, 'Bleach', @Path, @LibraryId, 'Ready', @Now);
+            """, new { Id = serieId, Path = seriePath, LibraryId = libraryId, Now = DateTimeOffset.UtcNow });
+
+        var mediaId = Guid.NewGuid().ToString();
+        await _db.Connection.ExecuteAsync("""
+            INSERT INTO "Media" ("Id", "Name", "Path", "Extension", "Pages", "SeriesId", "Status", "CreatedAt")
+            VALUES (@Id, 'vol01.cbz', @Path, 'cbz', 20, @SeriesId, 'Ready', @Now);
+            """, new
         {
-            Id = libraryId,
-            Name = "Montada",
-            Path = libDir,
-            Status = FileStatus.Ready,
-            Config = new LibraryConfig { LibraryPattern = LibraryPattern.SeriesBased },
+            Id = mediaId,
+            Path = Path.Combine(seriePath, "vol01.cbz"),
+            SeriesId = serieId,
+            Now = DateTimeOffset.UtcNow
         });
 
-        var serie = new Series
-        {
-            Id = Ulid.NewUlid().ToString(),
-            Name = "Bleach",
-            Path = Path.Combine(libDir, "Bleach"),
-            LibraryId = libraryId,
-            Status = FileStatus.Ready,
-        };
-        ctx.Series.Add(serie);
-        ctx.Media.Add(new Media
-        {
-            Name = "vol01.cbz",
-            Path = Path.Combine(serie.Path, "vol01.cbz"),
-            Extension = "cbz",
-            Pages = 20,
-            SeriesId = serie.Id,
-            Status = FileStatus.Ready,
-        });
-
-        await ctx.SaveChangesAsync();
         return libraryId;
     }
 
@@ -96,15 +88,14 @@ public sealed class EmptyLibraryGuardTests : IDisposable
         Directory.CreateDirectory(libDir);          // existe, pero sin contenido
         var libraryId = await SeedLibraryWithSeriesAsync(libDir);
 
-        using (var db = new DiarSpeicherDbContext(_options))
-        {
-            var report = await NewScanner(db).ScanLibraryAsync(libraryId);
-            Assert.True(report.Success);
-        }
+        var report = await NewScanner().ScanLibraryAsync(libraryId);
+        Assert.True(report.Success);
 
-        using var check = new DiarSpeicherDbContext(_options);
-        Assert.All(await check.Series.ToListAsync(), s => Assert.Equal(FileStatus.Ready, s.Status));
-        Assert.All(await check.Media.ToListAsync(), m => Assert.Equal(FileStatus.Ready, m.Status));
+        var allSeries = (await _db.Connection.QueryAsync<Series>("""SELECT * FROM "Series" """)).ToList();
+        Assert.All(allSeries, s => Assert.Equal(FileStatus.Ready, s.Status));
+
+        var allMedia = (await _db.Connection.QueryAsync<Media>("""SELECT * FROM "Media" """)).ToList();
+        Assert.All(allMedia, m => Assert.Equal(FileStatus.Ready, m.Status));
     }
 
     [Fact]
@@ -118,19 +109,16 @@ public sealed class EmptyLibraryGuardTests : IDisposable
         var viva = Path.Combine(libDir, "Naruto");
         Directory.CreateDirectory(viva);
         var libro = Path.Combine(viva, "vol01.cbz");
-        using (var zip = System.IO.Compression.ZipFile.Open(libro, System.IO.Compression.ZipArchiveMode.Create))
+        using (var zip = ZipFile.Open(libro, ZipArchiveMode.Create))
         {
             using var s = zip.CreateEntry("01.jpg").Open();
             s.Write([0xFF, 0xD8, 0xFF, 0xE0]);
         }
 
-        using (var db = new DiarSpeicherDbContext(_options))
-        {
-            await NewScanner(db).ScanLibraryAsync(libraryId);
-        }
+        await NewScanner().ScanLibraryAsync(libraryId);
 
-        using var check = new DiarSpeicherDbContext(_options);
-        var bleach = await check.Series.FirstAsync(s => s.Name == "Bleach");
+        var bleach = await _db.Connection.QueryFirstAsync<Series>(
+            """SELECT * FROM "Series" WHERE "Name" = 'Bleach'""");
         Assert.Equal(FileStatus.Missing, bleach.Status);
     }
 }

@@ -1,3 +1,7 @@
+using System.IO;
+using Dapper;
+using DiarSpeicher.Infrastructure.Data.Extensions;
+
 namespace DiarSpeicher.Infrastructure.Catalog;
 
 public sealed partial class DiarSpeicherService
@@ -117,8 +121,11 @@ public sealed partial class DiarSpeicherService
             return Reject(UploadOutcome.PermissionDenied, "This account is not allowed to upload files.");
         }
 
-        var library = await _db.Libraries.ForUser(user)
-            .FirstOrDefaultAsync(l => l.Id == libraryId, ct);
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
+        parameters.Add("LibraryId", libraryId);
+        var sql = $@"SELECT ""Id"", ""Path"" FROM ""Libraries"" l WHERE l.""Id"" = @LibraryId AND {where} LIMIT 1;";
+        var library = await conn.QueryFirstOrDefaultAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: ct));
 
         if (library == null || !Directory.Exists(library.Path))
         {

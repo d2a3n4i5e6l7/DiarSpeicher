@@ -1,38 +1,26 @@
-﻿using DiarSpeicher.Api.Middleware;
+using System.Security.Claims;
+using Dapper;
+using DiarSpeicher.Api.Middleware;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Infrastructure.Data;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
 public sealed class GatewayIdentityTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
 
     public GatewayIdentityTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
+        _db = new TestSqliteDatabase();
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
-        GC.SuppressFinalize(this);
+        _db.Dispose();
     }
-
-    private DiarSpeicherDbContext NewContext() => new(_options);
 
     private async Task<HttpContext> InvokeAsync(params (string Name, string Value)[] headers)
     {
@@ -50,8 +38,7 @@ public sealed class GatewayIdentityTests : IDisposable
             return Task.CompletedTask;
         });
 
-        await using var db = NewContext();
-        await middleware.InvokeAsync(context, db);
+        await middleware.InvokeAsync(context, _db.Factory);
 
         Assert.True(nextCalled);
         return context;
@@ -67,8 +54,8 @@ public sealed class GatewayIdentityTests : IDisposable
 
         Assert.Null(Resolved(context));
 
-        await using var db = NewContext();
-        Assert.Empty(await db.Users.ToListAsync());
+        var users = _db.Connection.Query<User>("SELECT * FROM \"Users\"");
+        Assert.Empty(users);
     }
 
     [Fact]
@@ -81,8 +68,7 @@ public sealed class GatewayIdentityTests : IDisposable
         Assert.True(user.IsServerOwner);
         Assert.Equal("diar", user.Username);
 
-        await using var db = NewContext();
-        var mirrored = Assert.Single(await db.Users.ToListAsync());
+        var mirrored = Assert.Single(_db.Connection.Query<User>("SELECT * FROM \"Users\""));
         Assert.Equal("u1", mirrored.Id);
         Assert.True(mirrored.IsServerOwner);
     }
@@ -95,8 +81,8 @@ public sealed class GatewayIdentityTests : IDisposable
 
         Assert.False(Resolved(context)!.IsServerOwner);
 
-        await using var db = NewContext();
-        Assert.Equal(2, await db.Users.CountAsync());
+        var count = _db.Connection.ExecuteScalar<int>("SELECT COUNT(*) FROM \"Users\"");
+        Assert.Equal(2, count);
     }
 
     [Fact]
@@ -105,8 +91,8 @@ public sealed class GatewayIdentityTests : IDisposable
         await InvokeAsync(("X-Auth-Sub", "u1"), ("X-Auth-User", "diar"));
         await InvokeAsync(("X-Auth-Sub", "u1"), ("X-Auth-User", "diar"));
 
-        await using var db = NewContext();
-        Assert.Single(await db.Users.ToListAsync());
+        var users = _db.Connection.Query<User>("SELECT * FROM \"Users\"");
+        Assert.Single(users);
     }
 
     [Fact]
@@ -115,8 +101,7 @@ public sealed class GatewayIdentityTests : IDisposable
         await InvokeAsync(("X-Auth-Sub", "u1"), ("X-Auth-User", "viejo"));
         await InvokeAsync(("X-Auth-Sub", "u1"), ("X-Auth-User", "nuevo"));
 
-        await using var db = NewContext();
-        var mirrored = Assert.Single(await db.Users.ToListAsync());
+        var mirrored = Assert.Single(_db.Connection.Query<User>("SELECT * FROM \"Users\""));
         Assert.Equal("nuevo", mirrored.Username);
     }
 
@@ -145,16 +130,11 @@ public sealed class GatewayIdentityTests : IDisposable
     [Fact]
     public async Task ExistingMirrorKeepsItsAgeRestriction()
     {
-        await using (var seed = NewContext())
-        {
-            seed.Users.Add(new User
-            {
-                Id = "u1",
-                Username = "diar",
-                AgeRestriction = new AgeRestriction { Age = 7, RestrictOnUnset = false }
-            });
-            await seed.SaveChangesAsync();
-        }
+        _db.Connection.Execute(
+            "INSERT INTO \"Users\" (\"Id\", \"Username\", \"CreatedAt\") VALUES ('u1', 'diar', @Now);",
+            new { Now = DateTimeOffset.UtcNow });
+        _db.Connection.Execute(
+            "INSERT INTO \"AgeRestrictions\" (\"UserId\", \"Age\", \"RestrictOnUnset\") VALUES ('u1', 7, 0);");
 
         var context = await InvokeAsync(("X-Auth-Sub", "u1"), ("X-Auth-User", "diar"));
 
@@ -166,32 +146,22 @@ public sealed class GatewayIdentityTests : IDisposable
     [Fact]
     public async Task ExistingMirrorKeepsItsLibraryExclusions()
     {
-        await using (var seed = NewContext())
-        {
-            seed.Libraries.Add(new Library
-            {
-                Id = "lib-1",
-                Name = "Comics",
-                Path = "/comics",
-                Config = new LibraryConfig()
-            });
-            seed.Users.Add(new User { Id = "u1", Username = "diar" });
-            await seed.SaveChangesAsync();
-
-            seed.LibraryExclusions.Add(new LibraryExclusion { LibraryId = "lib-1", UserId = "u1" });
-            await seed.SaveChangesAsync();
-        }
+        _db.Connection.Execute(
+            "INSERT INTO \"LibraryConfigs\" (\"Id\") VALUES (1);");
+        _db.Connection.Execute(
+            "INSERT INTO \"Libraries\" (\"Id\", \"Name\", \"Path\", \"ConfigId\", \"CreatedAt\") VALUES ('lib-1', 'Comics', '/comics', 1, @Now);",
+            new { Now = DateTimeOffset.UtcNow });
+        _db.Connection.Execute(
+            "INSERT INTO \"Users\" (\"Id\", \"Username\", \"CreatedAt\") VALUES ('u1', 'diar', @Now);",
+            new { Now = DateTimeOffset.UtcNow });
+        _db.Connection.Execute(
+            "INSERT INTO \"LibraryExclusions\" (\"LibraryId\", \"UserId\") VALUES ('lib-1', 'u1');");
 
         var context = await InvokeAsync(("X-Auth-Sub", "u1"), ("X-Auth-User", "diar"));
 
         Assert.Contains("lib-1", Resolved(context)!.ExcludedLibraryIds);
     }
 
-    /// <summary>
-    /// nginx only strips the X-Auth-* headers it names one by one, and X-Auth-Server-Owner is
-    /// not one of them, so it arrives straight from the client. Honouring it would let any
-    /// authenticated user promote themselves permanently.
-    /// </summary>
     [Fact]
     public async Task ServerOwnerHeaderDoesNotPromoteAnyone()
     {
@@ -202,14 +172,10 @@ public sealed class GatewayIdentityTests : IDisposable
 
         Assert.False(Resolved(context)!.IsServerOwner);
 
-        await using var db = NewContext();
-        var mirrored = await db.Users.FirstAsync(u => u.Id == "u2");
+        var mirrored = _db.Connection.QueryFirst<User>("SELECT * FROM \"Users\" WHERE \"Id\" = 'u2'");
         Assert.False(mirrored.IsServerOwner);
     }
 
-    /// <summary>
-    /// Nor may it demote the owner, which is the same hole read the other way round.
-    /// </summary>
     [Fact]
     public async Task ServerOwnerHeaderDoesNotDemoteTheOwner()
     {
@@ -219,16 +185,10 @@ public sealed class GatewayIdentityTests : IDisposable
 
         Assert.True(Resolved(context)!.IsServerOwner);
 
-        await using var db = NewContext();
-        var mirrored = await db.Users.FirstAsync(u => u.Id == "u1");
+        var mirrored = _db.Connection.QueryFirst<User>("SELECT * FROM \"Users\" WHERE \"Id\" = 'u1'");
         Assert.True(mirrored.IsServerOwner);
     }
 
-    /// <summary>
-    /// The gateway may send the literal "anonymous" on a public route. Mirroring it would
-    /// create one user row shared by every anonymous visitor, and on a fresh instance that row
-    /// would take server ownership.
-    /// </summary>
     [Fact]
     public async Task AnonymousSubjectResolvesNoIdentity()
     {
@@ -236,15 +196,10 @@ public sealed class GatewayIdentityTests : IDisposable
 
         Assert.Null(Resolved(context));
 
-        await using var db = NewContext();
-        Assert.Empty(await db.Users.ToListAsync());
+        var users = _db.Connection.Query<User>("SELECT * FROM \"Users\"");
+        Assert.Empty(users);
     }
 
-    /// <summary>
-    /// The gateway clears the header in its proxy_forward snippet and injects the validated
-    /// value afterwards. Should nginx forward both instead of keeping the last, the identity is
-    /// the last value, not the cleared one.
-    /// </summary>
     [Fact]
     public async Task DuplicatedSubjectHeaderTakesTheInjectedValue()
     {
@@ -254,8 +209,7 @@ public sealed class GatewayIdentityTests : IDisposable
 
         var middleware = new GatewayIdentityMiddleware(_ => Task.CompletedTask);
 
-        await using var db = NewContext();
-        await middleware.InvokeAsync(context, db);
+        await middleware.InvokeAsync(context, _db.Factory);
 
         Assert.Equal("u1", Resolved(context)!.Id);
     }
@@ -274,12 +228,6 @@ public sealed class GatewayIdentityTests : IDisposable
         Assert.True(user.HasPermission(Permissions.AccessKoboSync));
     }
 
-    /// <summary>
-    /// El primer usuario que llega se queda la propiedad del servidor, asi que este caso
-    /// comprueba la exencion de <see cref="AuthUser.HasPermission"/>: sin ella, una instancia
-    /// recien desplegada se quedaria sin nadie capaz de subir nada, porque los permisos por
-    /// defecto del Gateway no incluyen FileUpload.
-    /// </summary>
     [Fact]
     public async Task ServerOwnerIsExemptFromPermissions()
     {
@@ -294,11 +242,9 @@ public sealed class GatewayIdentityTests : IDisposable
     [Fact]
     public async Task MissingPermissionIsDenied()
     {
-        await using (var seed = NewContext())
-        {
-            seed.Users.Add(new User { Id = "owner", Username = "owner", IsServerOwner = true });
-            await seed.SaveChangesAsync();
-        }
+        _db.Connection.Execute(
+            "INSERT INTO \"Users\" (\"Id\", \"Username\", \"IsServerOwner\", \"CreatedAt\") VALUES ('owner', 'owner', 1, @Now);",
+            new { Now = DateTimeOffset.UtcNow });
 
         var context = await InvokeAsync(
             ("X-Auth-Sub", "u2"),
@@ -310,15 +256,12 @@ public sealed class GatewayIdentityTests : IDisposable
         Assert.False(user.HasPermission(Permissions.FileUpload));
     }
 
-    /// <summary>El Gateway acepta "*" como comodin; el plugin debe entenderlo igual.</summary>
     [Fact]
     public async Task WildcardGrantsEveryPermission()
     {
-        await using (var seed = NewContext())
-        {
-            seed.Users.Add(new User { Id = "owner", Username = "owner", IsServerOwner = true });
-            await seed.SaveChangesAsync();
-        }
+        _db.Connection.Execute(
+            "INSERT INTO \"Users\" (\"Id\", \"Username\", \"IsServerOwner\", \"CreatedAt\") VALUES ('owner', 'owner', 1, @Now);",
+            new { Now = DateTimeOffset.UtcNow });
 
         var context = await InvokeAsync(("X-Auth-Sub", "u2"), ("X-Auth-Perms", "*"));
 
@@ -328,18 +271,12 @@ public sealed class GatewayIdentityTests : IDisposable
         Assert.True(user.HasPermission(Permissions.ManageLibrary));
     }
 
-    /// <summary>
-    /// Misma trampa que con X-Auth-Sub: nginx blanquea la cabecera y luego inyecta la validada,
-    /// de modo que la primera aparicion vendria vacia y dejaria al usuario sin permisos.
-    /// </summary>
     [Fact]
     public async Task DuplicatedPermissionsHeaderTakesTheInjectedValue()
     {
-        await using (var seed = NewContext())
-        {
-            seed.Users.Add(new User { Id = "owner", Username = "owner", IsServerOwner = true });
-            await seed.SaveChangesAsync();
-        }
+        _db.Connection.Execute(
+            "INSERT INTO \"Users\" (\"Id\", \"Username\", \"IsServerOwner\", \"CreatedAt\") VALUES ('owner', 'owner', 1, @Now);",
+            new { Now = DateTimeOffset.UtcNow });
 
         var context = new DefaultHttpContext();
         context.Request.Path = "/api/v2/series";
@@ -348,8 +285,7 @@ public sealed class GatewayIdentityTests : IDisposable
 
         var middleware = new GatewayIdentityMiddleware(_ => Task.CompletedTask);
 
-        await using var db = NewContext();
-        await middleware.InvokeAsync(context, db);
+        await middleware.InvokeAsync(context, _db.Factory);
 
         Assert.True(Resolved(context)!.HasPermission(Permissions.FileUpload));
     }

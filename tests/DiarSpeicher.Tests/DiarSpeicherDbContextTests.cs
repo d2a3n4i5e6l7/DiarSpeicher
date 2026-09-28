@@ -1,167 +1,152 @@
+using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
-using DiarSpeicher.Infrastructure.Data;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace DiarSpeicher.Tests;
 
-public sealed class DiarSpeicherDbContextTests : IDisposable
+public sealed class SqliteDatabaseTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
 
-    public DiarSpeicherDbContextTests()
+    public SqliteDatabaseTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
+        _db = new TestSqliteDatabase();
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
     }
 
     [Fact]
     public async Task Can_Insert_And_Retrieve_Library_With_Series_And_Media()
     {
-        using (var context = new DiarSpeicherDbContext(_options))
+        var conn = _db.Connection;
+
+        const string insertConfigSql = """
+            INSERT INTO "LibraryConfigs" ("ConvertRarToZip", "DefaultReadingDir", "DefaultReadingMode", "LibraryPattern", "LibraryType")
+            VALUES (0, 'LTR', 'Webtoon', 'SeriesBased', 'Comic');
+            SELECT last_insert_rowid();
+            """;
+        var configId = await conn.ExecuteScalarAsync<int>(insertConfigSql);
+
+        var libraryId = Guid.NewGuid().ToString();
+        const string insertLibrarySql = """
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, @Name, @Path, 'Ready', @ConfigId, @CreatedAt);
+            """;
+        await conn.ExecuteAsync(insertLibrarySql, new
         {
-            var config = new LibraryConfig
-            {
-                LibraryType = LibraryType.Comic,
-                LibraryPattern = LibraryPattern.SeriesBased
-            };
-            context.LibraryConfigs.Add(config);
-            await context.SaveChangesAsync();
+            Id = libraryId,
+            Name = "Comics Library",
+            Path = "/data/comics",
+            ConfigId = configId,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
 
-            var library = new Library
-            {
-                Name = "Comics Library",
-                Path = "/data/comics",
-                ConfigId = config.Id
-            };
-            context.Libraries.Add(library);
-            await context.SaveChangesAsync();
-
-            var series = new Series
-            {
-                Name = "Batman (2016)",
-                Path = "/data/comics/Batman",
-                LibraryId = library.Id,
-                Metadata = new SeriesMetadata
-                {
-                    Publisher = "DC Comics",
-                    AgeRating = 12
-                }
-            };
-            context.Series.Add(series);
-            await context.SaveChangesAsync();
-
-            var media = new Media
-            {
-                Name = "Batman 001.cbz",
-                Path = "/data/comics/Batman/Batman 001.cbz",
-                Extension = "cbz",
-                Pages = 32,
-                Size = 1024 * 1024 * 25,
-                SeriesId = series.Id,
-                Metadata = new MediaMetadata
-                {
-                    Title = "I Am Gotham - Part 1",
-                    Number = 1.0m,
-                    AgeRating = 12
-                }
-            };
-            context.Media.Add(media);
-            await context.SaveChangesAsync();
-        }
-
-        using (var context = new DiarSpeicherDbContext(_options))
+        var seriesId = Guid.NewGuid().ToString();
+        const string insertSeriesSql = """
+            INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+            VALUES (@Id, @Name, @Path, @LibraryId, 'Ready', @CreatedAt);
+            """;
+        await conn.ExecuteAsync(insertSeriesSql, new
         {
-            var savedMedia = await context.Media
-                .Include(m => m.Series)
-                    .ThenInclude(s => s!.Library)
-                .Include(m => m.Metadata)
-                .FirstOrDefaultAsync(m => m.Name == "Batman 001.cbz");
+            Id = seriesId,
+            Name = "Batman (2016)",
+            Path = "/data/comics/Batman",
+            LibraryId = libraryId,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
 
-            Assert.NotNull(savedMedia);
-            Assert.Equal("cbz", savedMedia.Extension);
-            Assert.NotNull(savedMedia.Series);
-            Assert.Equal("Batman (2016)", savedMedia.Series.Name);
-            Assert.NotNull(savedMedia.Series.Library);
-            Assert.Equal("Comics Library", savedMedia.Series.Library.Name);
-            Assert.NotNull(savedMedia.Metadata);
-            Assert.Equal(12, savedMedia.Metadata.AgeRating);
-            Assert.Equal(1.0m, savedMedia.Metadata.Number);
-        }
+        const string insertSeriesMetaSql = """
+            INSERT INTO "SeriesMetadata" ("SeriesId", "Publisher", "Year")
+            VALUES (@SeriesId, 'DC Comics', 2016);
+            """;
+        await conn.ExecuteAsync(insertSeriesMetaSql, new { SeriesId = seriesId });
+
+        var mediaId = Guid.NewGuid().ToString();
+        const string insertMediaSql = """
+            INSERT INTO "Media" ("Id", "Name", "Path", "Extension", "Size", "Pages", "SeriesId", "Status", "CreatedAt")
+            VALUES (@Id, @Name, @Path, 'cbz', 1048576, 32, @SeriesId, 'Ready', @CreatedAt);
+            """;
+        await conn.ExecuteAsync(insertMediaSql, new
+        {
+            Id = mediaId,
+            Name = "Batman #01.cbz",
+            Path = "/data/comics/Batman/Batman #01.cbz",
+            SeriesId = seriesId,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        const string querySql = """
+            SELECT l."Id", l."Name", s."Id", s."Name", sm."SeriesId", sm."Publisher", m."Id", m."Name"
+            FROM "Libraries" l
+            JOIN "Series" s ON s."LibraryId" = l."Id"
+            JOIN "SeriesMetadata" sm ON sm."SeriesId" = s."Id"
+            JOIN "Media" m ON m."SeriesId" = s."Id"
+            WHERE l."Id" = @Id;
+            """;
+
+        var retrieved = await conn.QueryAsync<Library, Series, SeriesMetadata, Media, (Library, Series, SeriesMetadata, Media)>(
+            querySql,
+            (l, s, sm, m) => (l, s, sm, m),
+            new { Id = libraryId },
+            splitOn: "Id,SeriesId,Id");
+
+        var first = retrieved.FirstOrDefault();
+        Assert.NotNull(first.Item1);
+        Assert.Equal("Comics Library", first.Item1.Name);
+        Assert.Equal("Batman (2016)", first.Item2.Name);
+        Assert.Equal("DC Comics", first.Item3.Publisher);
+        Assert.Equal("Batman #01.cbz", first.Item4.Name);
     }
 
     [Fact]
-    public async Task Can_Track_Reading_Sessions_With_ReadingStatus()
+    public async Task Cascade_Delete_Works_When_Library_Is_Deleted()
     {
-        string mediaId;
-        using (var context = new DiarSpeicherDbContext(_options))
+        var conn = _db.Connection;
+
+        const string insertConfigSql = """
+            INSERT INTO "LibraryConfigs" ("ConvertRarToZip", "DefaultReadingDir", "DefaultReadingMode", "LibraryPattern", "LibraryType")
+            VALUES (0, 'LTR', 'Webtoon', 'SeriesBased', 'Comic');
+            SELECT last_insert_rowid();
+            """;
+        var configId = await conn.ExecuteScalarAsync<int>(insertConfigSql);
+
+        var libraryId = Guid.NewGuid().ToString();
+        const string insertLibrarySql = """
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, @Name, @Path, 'Ready', @ConfigId, @CreatedAt);
+            """;
+        await conn.ExecuteAsync(insertLibrarySql, new
         {
-            var config = new LibraryConfig { LibraryType = LibraryType.Manga };
-            context.LibraryConfigs.Add(config);
-            await context.SaveChangesAsync();
+            Id = libraryId,
+            Name = "To Delete",
+            Path = "/data/delete",
+            ConfigId = configId,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
 
-            var library = new Library { Name = "Manga", Path = "/data/manga", ConfigId = config.Id };
-            context.Libraries.Add(library);
-            await context.SaveChangesAsync();
-
-            var series = new Series { Name = "One Piece", Path = "/data/manga/op", LibraryId = library.Id };
-            context.Series.Add(series);
-            await context.SaveChangesAsync();
-
-            var media = new Media { Name = "Chapter 1.cbz", Path = "/data/manga/op/01.cbz", Extension = "cbz", SeriesId = series.Id };
-            context.Media.Add(media);
-            await context.SaveChangesAsync();
-
-            mediaId = media.Id;
-        }
-
-        using (var context = new DiarSpeicherDbContext(_options))
+        var seriesId = Guid.NewGuid().ToString();
+        const string insertSeriesSql = """
+            INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+            VALUES (@Id, @Name, @Path, @LibraryId, 'Ready', @CreatedAt);
+            """;
+        await conn.ExecuteAsync(insertSeriesSql, new
         {
-            var user = new User { Id = "user_reader_1", Username = "reader1" };
-            context.Users.Add(user);
-            await context.SaveChangesAsync();
+            Id = seriesId,
+            Name = "Series",
+            Path = "/data/delete/Series",
+            LibraryId = libraryId,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
 
-            var session = new ReadingSession
-            {
-                UserId = user.Id,
-                MediaId = mediaId,
-                StartPage = 1,
-                EndPage = 15,
-                StartPercentage = 0.0m,
-                EndPercentage = 0.5m,
-                Status = ReadingStatus.Reading,
-                ReadthroughNumber = 1
-            };
+        const string deleteLibrarySql = """DELETE FROM "Libraries" WHERE "Id" = @Id;""";
+        await conn.ExecuteAsync(deleteLibrarySql, new { Id = libraryId });
 
-            context.ReadingSessions.Add(session);
-            await context.SaveChangesAsync();
-        }
-
-        using (var context = new DiarSpeicherDbContext(_options))
-        {
-            var session = await context.ReadingSessions
-                .FirstOrDefaultAsync(s => s.UserId == "user_reader_1");
-
-            Assert.NotNull(session);
-            Assert.Equal(15, session.EndPage);
-            Assert.Equal(ReadingStatus.Reading, session.Status);
-            Assert.False(session.IsComplete());
-            Assert.False(session.IsFinalized());
-        }
+        const string countSeriesSql = """SELECT COUNT(*) FROM "Series" WHERE "Id" = @Id;""";
+        var seriesCount = await conn.ExecuteScalarAsync<int>(countSeriesSql, new { Id = seriesId });
+        Assert.Equal(0, seriesCount);
     }
 }

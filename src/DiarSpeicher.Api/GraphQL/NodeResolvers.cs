@@ -1,8 +1,8 @@
+using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Data.Extensions;
-using Microsoft.EntityFrameworkCore;
 
 namespace DiarSpeicher.Api.GraphQL;
 
@@ -63,17 +63,17 @@ public class LibraryResolvers
 
 public sealed class MediaBySeriesDataLoader : GroupedDataLoader<string, Media>
 {
-    private readonly IDbContextFactory<DiarSpeicherDbContext> _dbFactory;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly IHttpContextAccessor _httpContextAccessor;
 
     public MediaBySeriesDataLoader(
-        IDbContextFactory<DiarSpeicherDbContext> dbFactory,
+        ISqliteConnectionFactory connectionFactory,
         IHttpContextAccessor httpContextAccessor,
         IBatchScheduler batchScheduler,
         DataLoaderOptions options)
         : base(batchScheduler, options)
     {
-        _dbFactory = dbFactory;
+        _connectionFactory = connectionFactory;
         _httpContextAccessor = httpContextAccessor;
     }
 
@@ -81,30 +81,40 @@ public sealed class MediaBySeriesDataLoader : GroupedDataLoader<string, Media>
         IReadOnlyList<string> keys,
         CancellationToken cancellationToken)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        if (keys.Count == 0) return Array.Empty<Media>().ToLookup(m => m.SeriesId!);
 
-        var media = await db.Media
-            .ForUser(_httpContextAccessor.GetAuthUser())
-            .Where(m => m.SeriesId != null && keys.Contains(m.SeriesId))
-            .ToListAsync(cancellationToken);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(cancellationToken);
+        var user = _httpContextAccessor.GetAuthUser();
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("SeriesKeys", keys);
 
+        var sql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."SeriesId" IN @SeriesKeys AND {where};
+            """;
+
+        var media = await conn.QueryAsync<Media>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
         return media.ToLookup(m => m.SeriesId!);
     }
 }
 
 public sealed class SeriesByLibraryDataLoader : GroupedDataLoader<string, Series>
 {
-    private readonly IDbContextFactory<DiarSpeicherDbContext> _dbFactory;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly IHttpContextAccessor _httpContextAccessor;
 
     public SeriesByLibraryDataLoader(
-        IDbContextFactory<DiarSpeicherDbContext> dbFactory,
+        ISqliteConnectionFactory connectionFactory,
         IHttpContextAccessor httpContextAccessor,
         IBatchScheduler batchScheduler,
         DataLoaderOptions options)
         : base(batchScheduler, options)
     {
-        _dbFactory = dbFactory;
+        _connectionFactory = connectionFactory;
         _httpContextAccessor = httpContextAccessor;
     }
 
@@ -112,30 +122,38 @@ public sealed class SeriesByLibraryDataLoader : GroupedDataLoader<string, Series
         IReadOnlyList<string> keys,
         CancellationToken cancellationToken)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        if (keys.Count == 0) return Array.Empty<Series>().ToLookup(s => s.LibraryId!);
 
-        var series = await db.Series
-            .ForUser(_httpContextAccessor.GetAuthUser())
-            .Where(s => s.LibraryId != null && keys.Contains(s.LibraryId))
-            .ToListAsync(cancellationToken);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(cancellationToken);
+        var user = _httpContextAccessor.GetAuthUser();
+        var (where, parameters) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
+        parameters.Add("LibraryKeys", keys);
 
+        var sql = $"""
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt"
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE s."LibraryId" IN @LibraryKeys AND {where};
+            """;
+
+        var series = await conn.QueryAsync<Series>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
         return series.ToLookup(s => s.LibraryId!);
     }
 }
 
 public sealed class SeriesByIdDataLoader : BatchDataLoader<string, Series>
 {
-    private readonly IDbContextFactory<DiarSpeicherDbContext> _dbFactory;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly IHttpContextAccessor _httpContextAccessor;
 
     public SeriesByIdDataLoader(
-        IDbContextFactory<DiarSpeicherDbContext> dbFactory,
+        ISqliteConnectionFactory connectionFactory,
         IHttpContextAccessor httpContextAccessor,
         IBatchScheduler batchScheduler,
         DataLoaderOptions options)
         : base(batchScheduler, options)
     {
-        _dbFactory = dbFactory;
+        _connectionFactory = connectionFactory;
         _httpContextAccessor = httpContextAccessor;
     }
 
@@ -143,28 +161,38 @@ public sealed class SeriesByIdDataLoader : BatchDataLoader<string, Series>
         IReadOnlyList<string> keys,
         CancellationToken cancellationToken)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        if (keys.Count == 0) return new Dictionary<string, Series>();
 
-        return await db.Series
-            .ForUser(_httpContextAccessor.GetAuthUser())
-            .Where(s => keys.Contains(s.Id))
-            .ToDictionaryAsync(s => s.Id, cancellationToken);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(cancellationToken);
+        var user = _httpContextAccessor.GetAuthUser();
+        var (where, parameters) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
+        parameters.Add("SeriesKeys", keys);
+
+        var sql = $"""
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt"
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE s."Id" IN @SeriesKeys AND {where};
+            """;
+
+        var series = await conn.QueryAsync<Series>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
+        return series.ToDictionary(s => s.Id);
     }
 }
 
 public sealed class LibraryByIdDataLoader : BatchDataLoader<string, Library>
 {
-    private readonly IDbContextFactory<DiarSpeicherDbContext> _dbFactory;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly IHttpContextAccessor _httpContextAccessor;
 
     public LibraryByIdDataLoader(
-        IDbContextFactory<DiarSpeicherDbContext> dbFactory,
+        ISqliteConnectionFactory connectionFactory,
         IHttpContextAccessor httpContextAccessor,
         IBatchScheduler batchScheduler,
         DataLoaderOptions options)
         : base(batchScheduler, options)
     {
-        _dbFactory = dbFactory;
+        _connectionFactory = connectionFactory;
         _httpContextAccessor = httpContextAccessor;
     }
 
@@ -172,12 +200,21 @@ public sealed class LibraryByIdDataLoader : BatchDataLoader<string, Library>
         IReadOnlyList<string> keys,
         CancellationToken cancellationToken)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        if (keys.Count == 0) return new Dictionary<string, Library>();
 
-        return await db.Libraries
-            .ForUser(_httpContextAccessor.GetAuthUser())
-            .Where(l => keys.Contains(l.Id))
-            .ToDictionaryAsync(l => l.Id, cancellationToken);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(cancellationToken);
+        var user = _httpContextAccessor.GetAuthUser();
+        var (where, parameters) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
+        parameters.Add("LibraryKeys", keys);
+
+        var sql = $"""
+            SELECT l."Id", l."CreatedAt", l."Description", l."Name", l."Path", l."Status", l."UpdatedAt"
+            FROM "Libraries" l
+            WHERE l."Id" IN @LibraryKeys AND {where};
+            """;
+
+        var libraries = await conn.QueryAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
+        return libraries.ToDictionary(l => l.Id);
     }
 }
 

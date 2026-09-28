@@ -20,18 +20,16 @@ public class DatabaseBackupService : BackgroundService
     /// </summary>
     private static readonly string[] SlotFileNames = ["back1.db", "back2.db"];
 
-    // The context and its factory are both scoped, so a singleton BackgroundService reaches
-    // them through a scope of its own rather than by injection.
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly ILogger<DatabaseBackupService> _logger;
     private readonly StorageOptions _storage;
 
     public DatabaseBackupService(
-        IServiceScopeFactory scopeFactory,
+        ISqliteConnectionFactory connectionFactory,
         ILogger<DatabaseBackupService> logger,
         IOptions<StorageOptions> storageOptions)
     {
-        _scopeFactory = scopeFactory;
+        _connectionFactory = connectionFactory;
         _logger = logger;
         _storage = storageOptions.Value;
     }
@@ -102,13 +100,7 @@ public class DatabaseBackupService : BackgroundService
 
         try
         {
-            string? connectionString;
-            using (var scope = _scopeFactory.CreateScope())
-            {
-                var context = scope.ServiceProvider.GetRequiredService<DiarSpeicherDbContext>();
-                connectionString = context.Database.GetConnectionString();
-            }
-
+            var connectionString = _connectionFactory.ConnectionString;
             if (string.IsNullOrWhiteSpace(connectionString))
             {
                 _logger.LogWarning("Skipping backup: the database has no connection string");

@@ -8,7 +8,8 @@ using DiarSpeicher.Infrastructure.Data.Extensions;
 using DiarSpeicher.Infrastructure.Storage;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+using Dapper;
+using DiarSpeicher.Core.Domain.Entities;
 using Microsoft.Extensions.Options;
 
 namespace DiarSpeicher.Api.Endpoints;
@@ -50,7 +51,7 @@ public static class TusEndpoints
 
     private static async Task<IResult> HandleCreationAsync(
         HttpContext ctx,
-        DiarSpeicherDbContext db,
+        [FromServices] ISqliteConnectionFactory connectionFactory,
         [FromServices] IOptions<StorageOptions> storageOptions,
         CancellationToken ct)
     {
@@ -65,7 +66,17 @@ public static class TusEndpoints
         var (metaError, libraryId, safeFileName, subpath) = ValidateUploadMetadata(ctx, storageOptions.Value.Upload);
         if (metaError != null) return metaError;
 
-        var library = await db.Libraries.ForUser(user).FirstOrDefaultAsync(l => l.Id == libraryId, ct);
+        await using var conn = await connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
+        parameters.Add("Id", libraryId);
+        var sql = $"""
+            SELECT l."Id", l."Path"
+            FROM "Libraries" l
+            WHERE l."Id" = @Id AND {where}
+            LIMIT 1;
+            """;
+
+        var library = await conn.QueryFirstOrDefaultAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: ct));
         if (library == null || !Directory.Exists(library.Path))
         {
             return Results.NotFound("Library not found.");

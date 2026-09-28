@@ -1,58 +1,74 @@
+using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
-using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Data.Extensions;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
 public sealed class ReadingSessionQueryTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
 
     public ReadingSessionQueryTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
+        _db = new TestSqliteDatabase();
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
-        GC.SuppressFinalize(this);
+        _db.Dispose();
     }
-
-    private DiarSpeicherDbContext NewContext() => new(_options);
 
     private async Task SeedAsync(params ReadingSession[] sessions)
     {
-        await using var db = NewContext();
-        db.Users.Add(new User { Id = "u1", Username = "reader" });
-        db.Users.Add(new User { Id = "u2", Username = "other" });
+        var conn = _db.Connection;
 
-        foreach (var mediaId in sessions.Select(s => s.MediaId).Distinct())
+        const string insertUserSql = """
+            INSERT OR IGNORE INTO "Users" ("Id", "Username", "IsServerOwner", "CreatedAt")
+            VALUES (@Id, @Username, 0, @CreatedAt);
+            """;
+
+        await conn.ExecuteAsync(insertUserSql, new[]
         {
-            db.Media.Add(new Media
-            {
-                Id = mediaId,
-                Name = mediaId,
-                Path = $"/{mediaId}.cbz",
-                Extension = "cbz",
-                Size = 1
-            });
-        }
+            new { Id = "u1", Username = "reader", CreatedAt = DateTimeOffset.UtcNow },
+            new { Id = "u2", Username = "other", CreatedAt = DateTimeOffset.UtcNow }
+        });
 
-        db.ReadingSessions.AddRange(sessions);
-        await db.SaveChangesAsync();
+        const string insertMediaSql = """
+            INSERT OR IGNORE INTO "Media" ("Id", "Name", "Path", "Extension", "Size", "Status", "CreatedAt")
+            VALUES (@Id, @Name, @Path, @Extension, @Size, 'Ready', @CreatedAt);
+            """;
+
+        var mediaList = sessions.Select(s => s.MediaId).Distinct().Select(id => new
+        {
+            Id = id,
+            Name = id,
+            Path = $"/{id}.cbz",
+            Extension = "cbz",
+            Size = 1L,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        await conn.ExecuteAsync(insertMediaSql, mediaList);
+
+        const string insertSessionSql = """
+            INSERT INTO "ReadingSessions" ("MediaId", "UserId", "Status", "EndPage", "SessionDate", "CreatedAt", "UpdatedAt")
+            VALUES (@MediaId, @UserId, @Status, @EndPage, @SessionDate, @CreatedAt, @UpdatedAt);
+            """;
+
+        var sessionRows = sessions.Select(s => new
+        {
+            s.MediaId,
+            s.UserId,
+            Status = s.Status.ToString(),
+            s.EndPage,
+            SessionDate = s.SessionDate.ToString("yyyy-MM-dd"),
+            s.CreatedAt,
+            s.UpdatedAt
+        });
+
+        await conn.ExecuteAsync(insertSessionSql, sessionRows);
     }
 
     private static ReadingSession Session(
@@ -66,6 +82,7 @@ public sealed class ReadingSessionQueryTests : IDisposable
             UserId = userId,
             Status = status,
             EndPage = endPage,
+            SessionDate = DateOnly.FromDateTime(DateTime.UtcNow),
             CreatedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
             UpdatedAt = updatedAt
         };
@@ -78,8 +95,7 @@ public sealed class ReadingSessionQueryTests : IDisposable
             Session("m1", endPage: 20),
             Session("m1", endPage: 30));
 
-        await using var db = NewContext();
-        var map = await db.GetLatestSessionsPerMediaAsync("u1", new[] { "m1" });
+        var map = await _db.Connection.GetLatestSessionsPerMediaAsync("u1", new[] { "m1" });
 
         Assert.Single(map);
         Assert.Equal(30, map["m1"].EndPage);
@@ -93,8 +109,7 @@ public sealed class ReadingSessionQueryTests : IDisposable
             Session("m1"),
             Session("m2"));
 
-        await using var db = NewContext();
-        var map = await db.GetLatestSessionsPerMediaAsync("u1", new[] { "m1", "m2" });
+        var map = await _db.Connection.GetLatestSessionsPerMediaAsync("u1", new[] { "m1", "m2" });
 
         Assert.Equal(2, map.Count);
         Assert.Equal("m1", map["m1"].MediaId);
@@ -108,8 +123,7 @@ public sealed class ReadingSessionQueryTests : IDisposable
             Session("m1", userId: "u1", endPage: 5),
             Session("m1", userId: "u2", endPage: 99));
 
-        await using var db = NewContext();
-        var map = await db.GetLatestSessionsPerMediaAsync("u1", new[] { "m1" });
+        var map = await _db.Connection.GetLatestSessionsPerMediaAsync("u1", new[] { "m1" });
 
         Assert.Equal(5, map["m1"].EndPage);
     }
@@ -119,10 +133,8 @@ public sealed class ReadingSessionQueryTests : IDisposable
     {
         await SeedAsync(Session("m1"));
 
-        await using var db = NewContext();
-
-        Assert.Empty(await db.GetLatestSessionsPerMediaAsync(null, new[] { "m1" }));
-        Assert.Empty(await db.GetLatestSessionsPerMediaAsync("u1", Array.Empty<string>()));
+        Assert.Empty(await _db.Connection.GetLatestSessionsPerMediaAsync(null, new[] { "m1" }));
+        Assert.Empty(await _db.Connection.GetLatestSessionsPerMediaAsync("u1", Array.Empty<string>()));
     }
 
     [Fact]
@@ -133,8 +145,7 @@ public sealed class ReadingSessionQueryTests : IDisposable
             Session("m1", updatedAt: new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero)),
             Session("m2", updatedAt: new DateTimeOffset(2026, 4, 1, 0, 0, 0, TimeSpan.Zero)));
 
-        await using var db = NewContext();
-        var sessions = await db.GetKeepReadingSessionsAsync("u1");
+        var sessions = await _db.Connection.GetKeepReadingSessionsAsync("u1");
 
         Assert.Equal(new[] { "m1", "m2" }, sessions.Select(s => s.MediaId));
         Assert.Equal(new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero), sessions[0].UpdatedAt);
@@ -147,8 +158,7 @@ public sealed class ReadingSessionQueryTests : IDisposable
             Session("m1"),
             Session("m2", updatedAt: new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero)));
 
-        await using var db = NewContext();
-        var sessions = await db.GetKeepReadingSessionsAsync("u1");
+        var sessions = await _db.Connection.GetKeepReadingSessionsAsync("u1");
 
         Assert.Equal(new[] { "m2", "m1" }, sessions.Select(s => s.MediaId));
     }
@@ -160,8 +170,7 @@ public sealed class ReadingSessionQueryTests : IDisposable
             Session("m1", status: ReadingStatus.Finished),
             Session("m2"));
 
-        await using var db = NewContext();
-        var sessions = await db.GetKeepReadingSessionsAsync("u1");
+        var sessions = await _db.Connection.GetKeepReadingSessionsAsync("u1");
 
         Assert.Equal("m2", Assert.Single(sessions).MediaId);
     }

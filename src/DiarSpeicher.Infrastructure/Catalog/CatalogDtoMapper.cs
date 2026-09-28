@@ -42,7 +42,9 @@ public static class CatalogDtoMapper
         };
     }
 
-    public static DiarSpeicherSeriesDto ToSeriesDto(Series s)
+    public static DiarSpeicherSeriesDto ToSeriesDto(Series s) => ToSeriesDto(s, s.Media?.Count ?? 0);
+
+    public static DiarSpeicherSeriesDto ToSeriesDto(Series s, int mediaCount)
     {
         return new DiarSpeicherSeriesDto
         {
@@ -51,7 +53,7 @@ public static class CatalogDtoMapper
             Path = s.Path,
             Status = s.Status.ToString(),
             LibraryId = s.LibraryId ?? string.Empty,
-            MediaCount = s.Media.Count,
+            MediaCount = mediaCount,
             Description = s.Description ?? s.Metadata?.Summary,
             CoverUpdatedAt = s.ThumbnailMeta,
             Metadata = ToSeriesMetadataDto(s.Metadata)

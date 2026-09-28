@@ -1,19 +1,24 @@
+using System.Data;
+using System.IO;
 using System.Text;
-using System.Text.Json;
+using Dapper;
+using DiarSpeicher.Core.Domain.Entities;
+using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Sync;
+using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Data.Extensions;
+using Microsoft.Extensions.Logging;
 
 namespace DiarSpeicher.Infrastructure.Sync;
 
 public sealed class KoboService : IKoboService
 {
-    private readonly DiarSpeicherDbContext _db;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly ILogger<KoboService> _logger;
 
-    public KoboService(
-        DiarSpeicherDbContext db,
-        ILogger<KoboService> logger)
+    public KoboService(ISqliteConnectionFactory connectionFactory, ILogger<KoboService> logger)
     {
-        _db = db;
+        _connectionFactory = connectionFactory;
         _logger = logger;
     }
 
@@ -48,14 +53,39 @@ public sealed class KoboService : IKoboService
     {
         var offset = ParseSyncTokenOffset(clientSyncToken);
 
-        var query = _db.Media.ForUser(user)
-            .Include(m => m.Metadata)
-            .Include(m => m.Series)
-            .Where(m => m.Extension == "epub" || m.Extension == ".epub")
-            .OrderBy(m => m.Id);
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("LimitPlusOne", limit + 1);
+        parameters.Add("Offset", offset);
 
         _logger.LogInformation("Kobo sync for user {UserId}, offset {Offset}", user.Id, offset);
-        var mediaList = await query.Skip(offset).Take(limit + 1).ToListAsync(ct);
+
+        var selectSql = $"""
+            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status",
+                   m."Hash", m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt",
+                   m."ModifiedAt", m."DeletedAt", m."SeriesId",
+                   mm."Id", mm."MediaId", mm."AgeRating", mm."Title", mm."TitleSort", mm."Summary", mm."Publisher", mm."Genres", mm."Number",
+                   mm."Volume", mm."Year", mm."Month", mm."Day", mm."Writers", mm."Pencillers", mm."Inkers",
+                   mm."Colorists", mm."Letterers", mm."CoverArtists", mm."Editors",
+                   s."Id", s."Name"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE (m."Extension" = 'epub' OR m."Extension" = '.epub') AND {where}
+            ORDER BY m."Id" ASC
+            LIMIT @LimitPlusOne OFFSET @Offset;
+            """;
+
+        var mediaList = (await conn.QueryAsync<Media, MediaMetadata?, Series?, Media>(
+            new CommandDefinition(selectSql, parameters, cancellationToken: ct),
+            (m, mm, s) =>
+            {
+                m.Metadata = mm;
+                m.Series = s;
+                return m;
+            },
+            splitOn: "Id,Id")).AsList();
 
         var hasMore = mediaList.Count > limit;
         if (hasMore)
@@ -64,7 +94,7 @@ public sealed class KoboService : IKoboService
         }
 
         var mediaIds = mediaList.Select(m => m.Id).ToList();
-        var sessionMap = await _db.GetLatestSessionsPerMediaAsync(user.Id, mediaIds, ct);
+        var sessionMap = await conn.GetLatestSessionsPerMediaAsync(user.Id, mediaIds, ct);
 
         var items = mediaList.Select(m => ToKoboEntitlementContainer(m, baseUrl, apiKey, sessionMap.GetValueOrDefault(m.Id))).ToList();
 
@@ -88,15 +118,38 @@ public sealed class KoboService : IKoboService
         string bookId,
         CancellationToken ct = default)
     {
-        var media = await _db.Media.ForUser(user)
-            .Include(m => m.Metadata)
-            .Include(m => m.Series)
-            .FirstOrDefaultAsync(m => m.Id == bookId, ct);
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("Id", bookId);
 
-        if (media == null)
-        {
-            return null;
-        }
+        var selectSql = $"""
+            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status",
+                   m."Hash", m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt",
+                   m."ModifiedAt", m."DeletedAt", m."SeriesId",
+                   mm."Id", mm."MediaId", mm."AgeRating", mm."Title", mm."TitleSort", mm."Summary", mm."Publisher", mm."Genres", mm."Number",
+                   mm."Volume", mm."Year", mm."Month", mm."Day", mm."Writers", mm."Pencillers", mm."Inkers",
+                   mm."Colorists", mm."Letterers", mm."CoverArtists", mm."Editors",
+                   s."Id", s."Name"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" = @Id AND {where}
+            LIMIT 1;
+            """;
+
+        var rows = await conn.QueryAsync<Media, MediaMetadata?, Series?, Media>(
+            new CommandDefinition(selectSql, parameters, cancellationToken: ct),
+            (m, mm, s) =>
+            {
+                m.Metadata = mm;
+                m.Series = s;
+                return m;
+            },
+            splitOn: "Id,Id");
+
+        var media = rows.FirstOrDefault();
+        if (media == null) return null;
 
         var container = ToKoboEntitlementContainer(media, baseUrl, apiKey, null);
         return container.BookMetadata;
@@ -107,8 +160,22 @@ public sealed class KoboService : IKoboService
         string bookId,
         CancellationToken ct = default)
     {
-        var media = await _db.Media.ForUser(user)
-            .FirstOrDefaultAsync(m => m.Id == bookId, ct);
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("Id", bookId);
+
+        var selectSql = $"""
+            SELECT m."Id", m."Path"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" = @Id AND {where}
+            LIMIT 1;
+            """;
+
+        var media = await conn.QueryFirstOrDefaultAsync<Media>(
+            new CommandDefinition(selectSql, parameters, cancellationToken: ct));
 
         if (media == null || !File.Exists(media.Path))
         {

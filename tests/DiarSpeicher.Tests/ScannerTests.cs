@@ -1,12 +1,11 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
+using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Filesystem;
-using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Filesystem.Thumbnails;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -36,17 +35,6 @@ public sealed class ScannerTests : IDisposable
             // Ignore cleanup errors in temp dir
         }
         GC.SuppressFinalize(this);
-    }
-
-    private DiarSpeicherDbContext CreateInMemoryDbContext()
-    {
-        var options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite($"Data Source=file:{Guid.NewGuid():N}?mode=memory&cache=shared")
-            .Options;
-
-        var context = new DiarSpeicherDbContext(options);
-        context.Database.EnsureCreated();
-        return context;
     }
 
     [Fact]
@@ -114,7 +102,7 @@ public sealed class ScannerTests : IDisposable
     public async Task LibraryScannerService_FullCycle_Discover_Missing_And_Recover()
     {
         // Arrange
-        using var dbContext = CreateInMemoryDbContext();
+        using var db = new TestSqliteDatabase();
 
         var libDir = Path.Combine(_tempRootDir, "BooksLibrary");
         Directory.CreateDirectory(libDir);
@@ -123,28 +111,28 @@ public sealed class ScannerTests : IDisposable
         Directory.CreateDirectory(seriesDir);
 
         var bookPath = Path.Combine(seriesDir, "vol01.cbz");
-        using (var zip = System.IO.Compression.ZipFile.Open(bookPath, System.IO.Compression.ZipArchiveMode.Create))
+        using (var zip = ZipFile.Open(bookPath, ZipArchiveMode.Create))
         {
             var e = zip.CreateEntry("01.jpg");
             using var s = e.Open();
             s.Write([0xFF, 0xD8, 0xFF, 0xE0]);
         }
 
+        var configId = await db.Connection.QuerySingleAsync<long>("""
+            INSERT INTO "LibraryConfigs" ("LibraryPattern") VALUES ('SeriesBased') RETURNING "Id";
+            """);
+
         var libraryId = Guid.NewGuid().ToString();
-        var library = new Library
+        await db.Connection.ExecuteAsync("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Books', @Path, 'Ready', @ConfigId, @Now);
+            """, new
         {
             Id = libraryId,
-            Name = "Books",
             Path = libDir,
-            Status = FileStatus.Ready,
-            Config = new LibraryConfig
-            {
-                LibraryPattern = LibraryPattern.SeriesBased
-            }
-        };
-
-        dbContext.Libraries.Add(library);
-        await dbContext.SaveChangesAsync();
+            ConfigId = configId,
+            Now = DateTimeOffset.UtcNow
+        });
 
         var scanner = new DirectoryScanner();
         var processors = new IBookProcessor[]
@@ -156,7 +144,7 @@ public sealed class ScannerTests : IDisposable
         var compositeProcessor = new CompositeBookProcessor(processors);
         var thumbnailService = new ThumbnailService(compositeProcessor, NullLogger<ThumbnailService>.Instance);
         var scannerService = new LibraryScannerService(
-            dbContext,
+            db.Factory,
             scanner,
             compositeProcessor,
             thumbnailService,
@@ -171,14 +159,16 @@ public sealed class ScannerTests : IDisposable
         Assert.Equal(1UL, report1.CreatedSeries);
         Assert.Equal(1UL, report1.CreatedMedia);
 
-        var createdMedia = await dbContext.Media.FirstOrDefaultAsync(m => m.Path == bookPath);
+        var createdMedia = await db.Connection.QueryFirstOrDefaultAsync<Media>(
+            """SELECT * FROM "Media" WHERE "Path" = @Path""", new { Path = bookPath });
         Assert.NotNull(createdMedia);
         Assert.Equal(FileStatus.Ready, createdMedia.Status);
         Assert.Equal("vol01", createdMedia.Name);
         Assert.Equal("cbz", createdMedia.Extension);
 
         // Verify ScannedDirectories has recorded mtimes
-        var scannedDirs = await dbContext.ScannedDirectories.ToListAsync();
+        var scannedDirs = (await db.Connection.QueryAsync<ScannedDirectory>(
+            """SELECT * FROM "ScannedDirectories" """)).ToList();
         Assert.NotEmpty(scannedDirs);
 
         // Act 2: Remove file from disk and rescan (Missing)
@@ -187,12 +177,13 @@ public sealed class ScannerTests : IDisposable
 
         // Assert 2
         Assert.True(report2.Success);
-        var missingMedia = await dbContext.Media.FirstOrDefaultAsync(m => m.Path == bookPath);
+        var missingMedia = await db.Connection.QueryFirstOrDefaultAsync<Media>(
+            """SELECT * FROM "Media" WHERE "Path" = @Path""", new { Path = bookPath });
         Assert.NotNull(missingMedia);
         Assert.Equal(FileStatus.Missing, missingMedia.Status);
 
         // Act 3: Restore file on disk and rescan (Recovered)
-        using (var zip = System.IO.Compression.ZipFile.Open(bookPath, System.IO.Compression.ZipArchiveMode.Create))
+        using (var zip = ZipFile.Open(bookPath, ZipArchiveMode.Create))
         {
             var e = zip.CreateEntry("01.jpg");
             using var s = e.Open();
@@ -202,7 +193,8 @@ public sealed class ScannerTests : IDisposable
 
         // Assert 3
         Assert.True(report3.Success);
-        var restoredMedia = await dbContext.Media.FirstOrDefaultAsync(m => m.Path == bookPath);
+        var restoredMedia = await db.Connection.QueryFirstOrDefaultAsync<Media>(
+            """SELECT * FROM "Media" WHERE "Path" = @Path""", new { Path = bookPath });
         Assert.NotNull(restoredMedia);
         Assert.Equal(FileStatus.Ready, restoredMedia.Status);
     }
@@ -216,7 +208,7 @@ public sealed class ScannerTests : IDisposable
     public async Task LibraryScannerService_ParallelScan_AttributesResultsToTheCorrectMedia()
     {
         // Arrange
-        using var dbContext = CreateInMemoryDbContext();
+        using var db = new TestSqliteDatabase();
 
         var libDir = Path.Combine(_tempRootDir, "ParallelLib");
         Directory.CreateDirectory(libDir);
@@ -243,16 +235,21 @@ public sealed class ScannerTests : IDisposable
             }
         }
 
+        var configId = await db.Connection.QuerySingleAsync<long>("""
+            INSERT INTO "LibraryConfigs" ("LibraryPattern") VALUES ('SeriesBased') RETURNING "Id";
+            """);
+
         var libraryId = Guid.NewGuid().ToString();
-        dbContext.Libraries.Add(new Library
+        await db.Connection.ExecuteAsync("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Parallel', @Path, 'Ready', @ConfigId, @Now);
+            """, new
         {
             Id = libraryId,
-            Name = "Parallel",
             Path = libDir,
-            Status = FileStatus.Ready,
-            Config = new LibraryConfig { LibraryPattern = LibraryPattern.SeriesBased }
+            ConfigId = configId,
+            Now = DateTimeOffset.UtcNow
         });
-        await dbContext.SaveChangesAsync();
 
         var compositeProcessor = new CompositeBookProcessor(new IBookProcessor[]
         {
@@ -261,7 +258,7 @@ public sealed class ScannerTests : IDisposable
             new EpubBookProcessor()
         });
         var scannerService = new LibraryScannerService(
-            dbContext,
+            db.Factory,
             new DirectoryScanner(),
             compositeProcessor,
             new ThumbnailService(compositeProcessor, NullLogger<ThumbnailService>.Instance),
@@ -276,7 +273,8 @@ public sealed class ScannerTests : IDisposable
         Assert.Equal((ulong)seriesCount, report.CreatedSeries);
         Assert.Equal((ulong)(seriesCount * booksPerSeries), report.CreatedMedia);
 
-        var allMedia = await dbContext.Media.ToListAsync();
+        var allMedia = (await db.Connection.QueryAsync<Media>(
+            """SELECT * FROM "Media" """)).ToList();
         Assert.Equal(seriesCount * booksPerSeries, allMedia.Count);
 
         foreach (var media in allMedia)

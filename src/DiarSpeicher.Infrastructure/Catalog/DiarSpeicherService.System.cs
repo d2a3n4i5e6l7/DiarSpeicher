@@ -1,10 +1,14 @@
+using Dapper;
+
 namespace DiarSpeicher.Infrastructure.Catalog;
 
 public sealed partial class DiarSpeicherService
 {
     public async Task<DiarSpeicherSystemStatusDto> GetSystemStatusAsync(CancellationToken ct = default)
     {
-        var userCount = await _db.Users.CountAsync(ct);
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        const string sql = @"SELECT COUNT(*) FROM ""Users"";";
+        var userCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(sql, cancellationToken: ct));
         return new DiarSpeicherSystemStatusDto
         {
             Status = "OK",

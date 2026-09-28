@@ -16,7 +16,7 @@ using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Filesystem.Processors;
-using Microsoft.EntityFrameworkCore;
+using Dapper;
 
 namespace DiarSpeicher.Api.Endpoints;
 
@@ -753,10 +753,11 @@ public static class DiarSpeicherEndpoints
         group.MapPut("/users/{id}/epub-profiles", HandlePutEpubProfiles);
     }
 
-    private static IResult HandleGetEpubProfiles(
+    private static async Task<IResult> HandleGetEpubProfiles(
         string id,
         HttpContext httpContext,
-        [FromServices] DiarSpeicherDbContext db)
+        [FromServices] ISqliteConnectionFactory connectionFactory,
+        CancellationToken ct)
     {
         if (httpContext.Items[AuthUserKey] is not AuthUser user) return Results.Unauthorized();
 
@@ -766,15 +767,19 @@ public static class DiarSpeicherEndpoints
             return Results.Forbid();
         }
 
-        var prefs = db.UserPreferences.FirstOrDefault(p => p.UserId == targetId);
-        if (prefs?.EpubProfilesJson == null)
+        await using var conn = await connectionFactory.CreateConnectionAsync(ct);
+        const string sql = """SELECT "EpubProfilesJson" FROM "UserPreferences" WHERE "UserId" = @UserId LIMIT 1;""";
+        var json = await conn.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(sql, new { UserId = targetId }, cancellationToken: ct));
+
+        if (json == null)
         {
             return Results.Ok(EpubDeviceProfile.GetDefaults());
         }
 
         try
         {
-            var profiles = JsonSerializer.Deserialize<List<EpubDeviceProfile>>(prefs.EpubProfilesJson);
+            var profiles = JsonSerializer.Deserialize<List<EpubDeviceProfile>>(json);
             return Results.Ok(profiles ?? EpubDeviceProfile.GetDefaults());
         }
         catch
@@ -787,7 +792,7 @@ public static class DiarSpeicherEndpoints
         string id,
         [FromBody] List<EpubDeviceProfile> profiles,
         HttpContext httpContext,
-        [FromServices] DiarSpeicherDbContext db,
+        [FromServices] ISqliteConnectionFactory connectionFactory,
         CancellationToken ct)
     {
         if (httpContext.Items[AuthUserKey] is not AuthUser user) return Results.Unauthorized();
@@ -798,14 +803,15 @@ public static class DiarSpeicherEndpoints
             return Results.Forbid();
         }
 
-        var affectedBooks = await CountAffectedBooksAsync(db, targetId, profiles, ct);
-        await SaveUserPreferencesAsync(db, targetId, profiles, ct);
+        await using var conn = await connectionFactory.CreateConnectionAsync(ct);
+        var affectedBooks = await CountAffectedBooksAsync(conn, targetId, profiles, ct);
+        await SaveUserPreferencesAsync(conn, targetId, profiles, ct);
 
         return Results.Ok(new { updated = true, count = profiles.Count, affectedBooks });
     }
 
     private static async Task<int> CountAffectedBooksAsync(
-        DiarSpeicherDbContext db,
+        System.Data.Common.DbConnection conn,
         string targetId,
         List<EpubDeviceProfile> profiles,
         CancellationToken ct)
@@ -814,34 +820,32 @@ public static class DiarSpeicherEndpoints
         if (newProfile == null) return 0;
 
         var profileKey = EpubRasterizer.BuildProfileKey(newProfile);
-        return await db.ReadingSessions
-            .CountAsync(s => s.UserId == targetId
-                && s.Status == ReadingStatus.Reading
-                && s.RenderedPage != null
-                && s.RenderedProfileKey != profileKey, ct);
+        const string sql = """
+            SELECT COUNT(*)
+            FROM "ReadingSessions"
+            WHERE "UserId" = @UserId
+              AND "Status" = 'Reading'
+              AND "RenderedPage" IS NOT NULL
+              AND ("RenderedProfileKey" IS NULL OR "RenderedProfileKey" != @ProfileKey);
+            """;
+
+        return await conn.ExecuteScalarAsync<int>(
+            new CommandDefinition(sql, new { UserId = targetId, ProfileKey = profileKey }, cancellationToken: ct));
     }
 
     private static async Task SaveUserPreferencesAsync(
-        DiarSpeicherDbContext db,
+        System.Data.Common.DbConnection conn,
         string targetId,
         List<EpubDeviceProfile> profiles,
         CancellationToken ct)
     {
-        var prefs = await db.UserPreferences.FirstOrDefaultAsync(p => p.UserId == targetId, ct);
-        if (prefs == null)
-        {
-            prefs = new UserPreferences
-            {
-                UserId = targetId,
-                EpubProfilesJson = JsonSerializer.Serialize(profiles)
-            };
-            db.UserPreferences.Add(prefs);
-        }
-        else
-        {
-            prefs.EpubProfilesJson = JsonSerializer.Serialize(profiles);
-        }
+        var json = JsonSerializer.Serialize(profiles);
+        const string sql = """
+            INSERT INTO "UserPreferences" ("UserId", "EpubProfilesJson")
+            VALUES (@UserId, @Json)
+            ON CONFLICT ("UserId") DO UPDATE SET "EpubProfilesJson" = excluded."EpubProfilesJson";
+            """;
 
-        await db.SaveChangesAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition(sql, new { UserId = targetId, Json = json }, cancellationToken: ct));
     }
 }

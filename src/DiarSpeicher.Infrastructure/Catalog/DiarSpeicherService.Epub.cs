@@ -1,4 +1,12 @@
 using System.Collections.Frozen;
+using System.IO;
+using System.IO.Compression;
+using System.Xml.Linq;
+using Dapper;
+using DiarSpeicher.Core.Domain.Entities;
+using DiarSpeicher.Core.Domain.Models;
+using DiarSpeicher.Core.Filesystem;
+using DiarSpeicher.Infrastructure.Data.Extensions;
 
 namespace DiarSpeicher.Infrastructure.Catalog;
 
@@ -14,7 +22,7 @@ public sealed partial class DiarSpeicherService
         var ncxEntry = archive.Entries.FirstOrDefault(e => e.FullName.EndsWith(".ncx", StringComparison.OrdinalIgnoreCase));
         if (ncxEntry == null) return tocItems;
 
-        await using var stream = await ncxEntry.OpenAsync(ct);
+        using var stream = ncxEntry.Open();
         var doc = await XDocument.LoadAsync(stream, LoadOptions.None, ct);
 
         foreach (var point in doc.Descendants().Where(e => e.Name.LocalName == "navPoint"))
@@ -43,17 +51,32 @@ public sealed partial class DiarSpeicherService
 
     public async Task<DiarSpeicherEpubTocDto?> GetEpubTocAsync(AuthUser user, string mediaId, CancellationToken ct = default)
     {
-        var media = await _db.Media.ForUser(user)
-            .Include(m => m.Metadata)
-            .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "s", "sm");
+        parameters.Add("MediaId", mediaId);
+        var sql = $"""
+            SELECT m."Id", m."Name", m."Path", m."Extension",
+                   mm."Id", mm."Title"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" = @MediaId AND {where}
+            LIMIT 1;
+            """;
+        var rows = await conn.QueryAsync<Media, MediaMetadata?, Media>(
+            new CommandDefinition(sql, parameters, cancellationToken: ct),
+            (m, mm) => { m.Metadata = mm; return m; },
+            splitOn: "Id");
+        var media = rows.FirstOrDefault();
 
         if (media == null || !File.Exists(media.Path)) return null;
 
         var ext = media.Extension.TrimStart('.').ToLowerInvariant();
         if (ext != "epub") return null;
 
-        await using var fileStream = new FileStream(media.Path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
-        await using var archive = await ZipArchive.CreateAsync(fileStream, ZipArchiveMode.Read, leaveOpen: false, entryNameEncoding: null, ct);
+        using var fileStream = new FileStream(media.Path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
+        using var archive = new ZipArchive(fileStream, ZipArchiveMode.Read, leaveOpen: false);
         var tocItems = await ReadNcxTocAsync(archive, ct);
         if (tocItems.Count == 0)
         {
@@ -70,21 +93,32 @@ public sealed partial class DiarSpeicherService
 
     public async Task<(byte[] Data, string ContentType)?> GetEpubResourceAsync(AuthUser user, string mediaId, string resourcePath, CancellationToken ct = default)
     {
-        var media = await _db.Media.ForUser(user)
-            .FirstOrDefaultAsync(m => m.Id == mediaId, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "s", "sm");
+        parameters.Add("MediaId", mediaId);
+        var sql = $"""
+            SELECT m."Id", m."Path"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" = @MediaId AND {where}
+            LIMIT 1;
+            """;
+        var media = await conn.QueryFirstOrDefaultAsync<Media>(new CommandDefinition(sql, parameters, cancellationToken: ct));
 
         if (media == null || !File.Exists(media.Path)) return null;
 
         var cleanPath = resourcePath.TrimStart('/').Split('#')[0];
 
-        await using var fileStream = new FileStream(media.Path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
-        await using var archive = await ZipArchive.CreateAsync(fileStream, ZipArchiveMode.Read, leaveOpen: false, entryNameEncoding: null, ct);
+        using var fileStream = new FileStream(media.Path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
+        using var archive = new ZipArchive(fileStream, ZipArchiveMode.Read, leaveOpen: false);
         var entry = archive.Entries.FirstOrDefault(e => e.FullName.Equals(cleanPath, StringComparison.OrdinalIgnoreCase))
             ?? archive.Entries.FirstOrDefault(e => e.Name.Equals(Path.GetFileName(cleanPath), StringComparison.OrdinalIgnoreCase));
 
         if (entry == null) return null;
 
-        await using var stream = await entry.OpenAsync(ct);
+        using var stream = entry.Open();
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms, ct);
 

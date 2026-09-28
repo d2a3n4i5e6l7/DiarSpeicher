@@ -1,18 +1,16 @@
+using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Komga;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
 public sealed class KomgaCompatibilityTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
     private string _libraryId = null!;
     private string _seriesId = null!;
     private string _kidBookId = null!;
@@ -20,87 +18,59 @@ public sealed class KomgaCompatibilityTests : IDisposable
 
     public KomgaCompatibilityTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
-
-        SeedTestData(context);
+        _db = new TestSqliteDatabase();
+        SeedTestData();
     }
 
-    private void SeedTestData(DiarSpeicherDbContext context)
+    private void SeedTestData()
     {
-        var cfg = new LibraryConfig();
-        context.LibraryConfigs.Add(cfg);
-        context.SaveChanges();
+        var conn = _db.Connection;
 
-        var lib = new Library { Name = "Manga", Path = "/data/manga", ConfigId = cfg.Id };
-        context.Libraries.Add(lib);
-        context.SaveChanges();
-        _libraryId = lib.Id;
+        conn.Execute("""INSERT INTO "LibraryConfigs" ("Id") VALUES (1);""");
 
-        var series = new Series { Name = "Naruto", Path = "/data/manga/naruto", LibraryId = lib.Id };
-        context.Series.Add(series);
-        context.SaveChanges();
-        _seriesId = series.Id;
+        _libraryId = Guid.NewGuid().ToString();
+        conn.Execute("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Manga', '/data/manga', 'Ready', 1, @Now);
+            """, new { Id = _libraryId, Now = DateTimeOffset.UtcNow });
 
-        var kidBook = new Media
+        _seriesId = Guid.NewGuid().ToString();
+        conn.Execute("""
+            INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+            VALUES (@Id, 'Naruto', '/data/manga/naruto', @LibraryId, 'Ready', @Now);
+            """, new { Id = _seriesId, LibraryId = _libraryId, Now = DateTimeOffset.UtcNow });
+
+        _kidBookId = Guid.NewGuid().ToString();
+        _adultBookId = Guid.NewGuid().ToString();
+
+        conn.Execute("""
+            INSERT INTO "Media" ("Id", "Name", "Path", "Extension", "Pages", "Size", "SeriesId", "Status", "CreatedAt")
+            VALUES (@Id, @Name, @Path, 'cbz', @Pages, @Size, @SeriesId, 'Ready', @Now);
+            """, new[]
         {
-            Name = "Naruto Vol 01",
-            Path = "/data/manga/naruto/01.cbz",
-            Extension = "cbz",
-            Pages = 180,
-            Size = 40000000,
-            SeriesId = series.Id,
-            Metadata = new MediaMetadata
-            {
-                Title = "Enter: Naruto Uzumaki!",
-                AgeRating = 12,
-                Writers = "Masashi Kishimoto"
-            }
-        };
+            new { Id = _kidBookId, Name = "Naruto Vol 01", Path = "/data/manga/naruto/01.cbz", Pages = 180, Size = 40000000L, SeriesId = _seriesId, Now = DateTimeOffset.UtcNow },
+            new { Id = _adultBookId, Name = "Berserk Vol 01", Path = "/data/manga/naruto/b01.cbz", Pages = 220, Size = 55000000L, SeriesId = _seriesId, Now = DateTimeOffset.UtcNow }
+        });
 
-        var adultBook = new Media
+        conn.Execute("""
+            INSERT INTO "MediaMetadata" ("MediaId", "Title", "AgeRating", "Writers")
+            VALUES (@MediaId, @Title, @AgeRating, @Writers);
+            """, new[]
         {
-            Name = "Berserk Vol 01",
-            Path = "/data/manga/naruto/b01.cbz",
-            Extension = "cbz",
-            Pages = 220,
-            Size = 55000000,
-            SeriesId = series.Id,
-            Metadata = new MediaMetadata
-            {
-                Title = "The Black Swordsman",
-                AgeRating = 18,
-                Writers = "Kentaro Miura"
-            }
-        };
+            new { MediaId = _kidBookId, Title = "Enter: Naruto Uzumaki!", AgeRating = (int?)12, Writers = "Masashi Kishimoto" },
+            new { MediaId = _adultBookId, Title = "The Black Swordsman", AgeRating = (int?)18, Writers = "Kentaro Miura" }
+        });
 
-        context.Media.AddRange(kidBook, adultBook);
-
-        var readerUser = new User
-        {
-            Id = "reader_komga",
-            Username = "narutofan"
-        };
-        context.Users.Add(readerUser);
-
-        context.SaveChanges();
-
-        _kidBookId = kidBook.Id;
-        _adultBookId = adultBook.Id;
+        conn.Execute("""
+            INSERT INTO "Users" ("Id", "Username", "CreatedAt")
+            VALUES ('reader_komga', 'narutofan', @Now);
+            """, new { Now = DateTimeOffset.UtcNow });
     }
 
     [Fact]
     public async Task GetLibrariesAsync_ReturnsKomgaFormattedLibraries()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new KomgaService(context, NullLogger<KomgaService>.Instance, TestReadingProgress.For(context));
+        var service = new KomgaService(_db.Factory, NullLogger<KomgaService>.Instance, TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var libs = await service.GetLibrariesAsync(user);
@@ -114,8 +84,7 @@ public sealed class KomgaCompatibilityTests : IDisposable
     [Fact]
     public async Task GetSeriesAsync_ReturnsSpringPageableFormat()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new KomgaService(context, NullLogger<KomgaService>.Instance, TestReadingProgress.For(context));
+        var service = new KomgaService(_db.Factory, NullLogger<KomgaService>.Instance, TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var page = await service.GetSeriesAsync(user, _libraryId, null, 0, 20);
@@ -137,8 +106,7 @@ public sealed class KomgaCompatibilityTests : IDisposable
     [Fact]
     public async Task GetBookPagesAsync_ReturnsCorrectPageList()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new KomgaService(context, NullLogger<KomgaService>.Instance, TestReadingProgress.For(context));
+        var service = new KomgaService(_db.Factory, NullLogger<KomgaService>.Instance, TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "admin", Username = "admin", IsServerOwner = true };
         var pages = await service.GetBookPagesAsync(user, _kidBookId);
@@ -153,12 +121,11 @@ public sealed class KomgaCompatibilityTests : IDisposable
     [Fact]
     public async Task ReadProgress_CanUpdateAndDeleteProgress()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new KomgaService(context, NullLogger<KomgaService>.Instance, TestReadingProgress.For(context));
+        var service = new KomgaService(_db.Factory, NullLogger<KomgaService>.Instance, TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "reader_komga", Username = "narutofan", IsServerOwner = false };
 
-        // 1. Actualizar progreso a página 50
+        // 1. Actualizar progreso a pagina 50
         var updateSuccess = await service.UpdateReadProgressAsync(user, _kidBookId, 50, false);
         Assert.True(updateSuccess);
 
@@ -172,16 +139,16 @@ public sealed class KomgaCompatibilityTests : IDisposable
         var deleteSuccess = await service.DeleteReadProgressAsync(user, _kidBookId);
         Assert.True(deleteSuccess);
 
-        var sessionInDb = await context.ReadingSessions
-            .FirstOrDefaultAsync(s => s.MediaId == _kidBookId && s.UserId == "reader_komga");
+        var sessionInDb = await _db.Connection.QueryFirstOrDefaultAsync<ReadingSession>(
+            """SELECT * FROM "ReadingSessions" WHERE "MediaId" = @MediaId AND "UserId" = @UserId""",
+            new { MediaId = _kidBookId, UserId = "reader_komga" });
         Assert.Null(sessionInDb);
     }
 
     [Fact]
     public async Task GetBooksInSeriesAsync_EnforcesParentalAgeRestriction()
     {
-        using var context = new DiarSpeicherDbContext(_options);
-        var service = new KomgaService(context, NullLogger<KomgaService>.Instance, TestReadingProgress.For(context));
+        var service = new KomgaService(_db.Factory, NullLogger<KomgaService>.Instance, TestReadingProgress.For(_db.Factory));
 
         var childUser = new AuthUser
         {
@@ -201,6 +168,6 @@ public sealed class KomgaCompatibilityTests : IDisposable
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
     }
 }

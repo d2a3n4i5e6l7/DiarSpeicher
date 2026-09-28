@@ -1,22 +1,20 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
+using Dapper;
+using DiarSpeicher.Core.Domain.Catalog;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Models;
-using DiarSpeicher.Core.Domain.Catalog;
 using DiarSpeicher.Infrastructure.Background;
-using DiarSpeicher.Infrastructure.Data;
-using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using DiarSpeicher.Infrastructure.Catalog;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
+using DiarSpeicher.Infrastructure.Filesystem.Processors;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace DiarSpeicher.Tests;
 
 public sealed class DiarSpeicherApiTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
-    private readonly DbContextOptions<DiarSpeicherDbContext> _options;
+    private readonly TestSqliteDatabase _db;
     private readonly string _tempEpubPath;
     private string _libraryId = null!;
     private string _seriesId = null!;
@@ -24,20 +22,12 @@ public sealed class DiarSpeicherApiTests : IDisposable
 
     public DiarSpeicherApiTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        _options = new DbContextOptionsBuilder<DiarSpeicherDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-
-        using var context = new DiarSpeicherDbContext(_options);
-        context.Database.EnsureCreated();
+        _db = new TestSqliteDatabase();
 
         _tempEpubPath = Path.Combine(Path.GetTempPath(), $"diarspeicher_test_{Guid.NewGuid():N}.epub");
         CreateSampleEpubWithToc(_tempEpubPath);
 
-        SeedTestData(context);
+        SeedTestData();
     }
 
     private static void CreateSampleEpubWithToc(string path)
@@ -77,80 +67,52 @@ public sealed class DiarSpeicherApiTests : IDisposable
         }
     }
 
-    private void SeedTestData(DiarSpeicherDbContext context)
+    private void SeedTestData()
     {
-        var cfg = new LibraryConfig();
-        context.LibraryConfigs.Add(cfg);
+        var conn = _db.Connection;
 
-        var user = new User
-        {
-            Id = "user_admin",
-            Username = "admin",
-            IsServerOwner = true
-        };
-        context.Users.Add(user);
-        context.SaveChanges();
+        conn.Execute("""INSERT INTO "LibraryConfigs" ("Id") VALUES (1);""");
 
-        var lib = new Library
-        {
-            Name = "Books",
-            Path = "/books",
-            ConfigId = cfg.Id
-        };
-        context.Libraries.Add(lib);
-        context.SaveChanges();
-        _libraryId = lib.Id;
+        conn.Execute("""
+            INSERT INTO "Users" ("Id", "Username", "IsServerOwner", "CreatedAt")
+            VALUES ('user_admin', 'admin', 1, @Now);
+            """, new { Now = DateTimeOffset.UtcNow });
 
-        var series = new Series
-        {
-            Name = "Epic Saga",
-            Path = "/books/epic",
-            LibraryId = lib.Id
-        };
-        context.Series.Add(series);
-        context.SaveChanges();
-        _seriesId = series.Id;
+        _libraryId = Guid.NewGuid().ToString();
+        conn.Execute("""
+            INSERT INTO "Libraries" ("Id", "Name", "Path", "Status", "ConfigId", "CreatedAt")
+            VALUES (@Id, 'Books', '/books', 'Ready', 1, @Now);
+            """, new { Id = _libraryId, Now = DateTimeOffset.UtcNow });
 
-        var media = new Media
-        {
-            Name = "Epic Book 1",
-            Path = _tempEpubPath,
-            Extension = "epub",
-            Pages = 250,
-            SeriesId = series.Id,
-            Metadata = new MediaMetadata
-            {
-                Title = "The Awakening",
-                Writers = "Author Name",
-                Genres = "Sci-Fi",
-                AgeRating = 0
-            }
-        };
-        context.Media.Add(media);
-        context.SaveChanges();
-        _epubMediaId = media.Id;
+        _seriesId = Guid.NewGuid().ToString();
+        conn.Execute("""
+            INSERT INTO "Series" ("Id", "Name", "Path", "LibraryId", "Status", "CreatedAt")
+            VALUES (@Id, 'Epic Saga', '/books/epic', @LibraryId, 'Ready', @Now);
+            """, new { Id = _seriesId, LibraryId = _libraryId, Now = DateTimeOffset.UtcNow });
 
-        var session = new ReadingSession
-        {
-            UserId = user.Id,
-            MediaId = media.Id,
-            StartPage = 1,
-            EndPage = 50,
-            StartPercentage = 0m,
-            EndPercentage = 0.2m,
-            Status = ReadingStatus.Reading
-        };
-        context.ReadingSessions.Add(session);
-        context.SaveChanges();
+        _epubMediaId = Guid.NewGuid().ToString();
+        conn.Execute("""
+            INSERT INTO "Media" ("Id", "Name", "Path", "Extension", "Pages", "SeriesId", "Status", "CreatedAt")
+            VALUES (@Id, 'Epic Book 1', @Path, 'epub', 250, @SeriesId, 'Ready', @Now);
+            """, new { Id = _epubMediaId, Path = _tempEpubPath, SeriesId = _seriesId, Now = DateTimeOffset.UtcNow });
+
+        conn.Execute("""
+            INSERT INTO "MediaMetadata" ("MediaId", "Title", "Writers", "Genres", "AgeRating")
+            VALUES (@MediaId, 'The Awakening', 'Author Name', 'Sci-Fi', 0);
+            """, new { MediaId = _epubMediaId });
+
+        conn.Execute("""
+            INSERT INTO "ReadingSessions" ("UserId", "MediaId", "StartPage", "EndPage", "StartPercentage", "EndPercentage", "Status", "SessionDate", "CreatedAt", "UpdatedAt")
+            VALUES ('user_admin', @MediaId, 1, 50, '0', '0.2', @Status, @Now, @Now, @Now);
+            """, new { MediaId = _epubMediaId, Status = nameof(ReadingStatus.Reading), Now = DateTimeOffset.UtcNow });
     }
 
     [Fact]
     public async Task GetMediaAsync_And_GetKeepReadingAsync_ReturnValidData()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(context));
+        var service = new DiarSpeicherService(_db.Factory, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "user_admin", Username = "admin", IsServerOwner = true };
 
@@ -168,10 +130,9 @@ public sealed class DiarSpeicherApiTests : IDisposable
     [Fact]
     public async Task GetSeriesAsync_And_GetLibrariesAsync_ReturnConfiguredHierarchy()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(context));
+        var service = new DiarSpeicherService(_db.Factory, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "user_admin", Username = "admin", IsServerOwner = true };
 
@@ -191,10 +152,9 @@ public sealed class DiarSpeicherApiTests : IDisposable
     [Fact]
     public async Task TriggerLibraryScanAsync_EnqueuesScanTaskInQueue()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(context));
+        var service = new DiarSpeicherService(_db.Factory, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "user_admin", Username = "admin", IsServerOwner = true };
 
@@ -210,10 +170,9 @@ public sealed class DiarSpeicherApiTests : IDisposable
     [Fact]
     public async Task GetEpubTocAsync_And_GetEpubResourceAsync_ExtractInternalAssets()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(context));
+        var service = new DiarSpeicherService(_db.Factory, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(_db.Factory));
 
         var user = new AuthUser { Id = "user_admin", Username = "admin", IsServerOwner = true };
 
@@ -237,10 +196,9 @@ public sealed class DiarSpeicherApiTests : IDisposable
     [Fact]
     public async Task GetSystemStatusAsync_ReturnsClaimedAndHealthy()
     {
-        using var context = new DiarSpeicherDbContext(_options);
         var composite = new CompositeBookProcessor(new List<IBookProcessor> { new EpubBookProcessor() });
         var queue = new ScannerQueue();
-        var service = new DiarSpeicherService(context, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(context));
+        var service = new DiarSpeicherService(_db.Factory, composite, queue, NullLogger<DiarSpeicherService>.Instance, TestStorageOptions.Default(), TestReadingProgress.For(_db.Factory));
 
         var status = await service.GetSystemStatusAsync();
         Assert.Equal("OK", status.Status);
@@ -250,7 +208,7 @@ public sealed class DiarSpeicherApiTests : IDisposable
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _db.Dispose();
         if (File.Exists(_tempEpubPath))
         {
             File.Delete(_tempEpubPath);

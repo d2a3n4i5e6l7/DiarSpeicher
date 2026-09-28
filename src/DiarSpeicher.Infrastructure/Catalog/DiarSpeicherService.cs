@@ -1,8 +1,16 @@
+using System.Data;
+using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Filesystem;
+using DiarSpeicher.Infrastructure.Filesystem.Processors;
+using DiarSpeicher.Infrastructure.Reading;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
 namespace DiarSpeicher.Infrastructure.Catalog;
 
 public sealed partial class DiarSpeicherService : IDiarSpeicherService
 {
-    private readonly DiarSpeicherDbContext _db;
+    private readonly ISqliteConnectionFactory _connectionFactory;
 
     private readonly ICompositeBookProcessor _bookProcessor;
 
@@ -23,7 +31,7 @@ public sealed partial class DiarSpeicherService : IDiarSpeicherService
     private static readonly string[] CoverExtensions = [".jpg", ".jpeg", ".png", ".webp"];
 
     public DiarSpeicherService(
-        DiarSpeicherDbContext db,
+        ISqliteConnectionFactory connectionFactory,
         ICompositeBookProcessor bookProcessor,
         IScannerQueue scannerQueue,
         ILogger<DiarSpeicherService> logger,
@@ -31,7 +39,7 @@ public sealed partial class DiarSpeicherService : IDiarSpeicherService
         IReadingProgress progress,
         DiarSpeicherServiceOptions? options = null)
     {
-        _db = db;
+        _connectionFactory = connectionFactory;
         _bookProcessor = bookProcessor;
         _scannerQueue = scannerQueue;
         _logger = logger;

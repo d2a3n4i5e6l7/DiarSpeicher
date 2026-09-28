@@ -1,16 +1,22 @@
-﻿using DiarSpeicher.Core.Domain.Entities;
+using System.Data;
+using Dapper;
+using DiarSpeicher.Core.Domain.Entities;
+using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Core.Domain.Sync;
+using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Data.Extensions;
+using Microsoft.Extensions.Logging;
 
 namespace DiarSpeicher.Infrastructure.Sync;
 
 public sealed class KoReaderService : IKoReaderService
 {
-    private readonly DiarSpeicherDbContext _db;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly ILogger<KoReaderService> _logger;
 
-    public KoReaderService(DiarSpeicherDbContext db, ILogger<KoReaderService> logger)
+    public KoReaderService(ISqliteConnectionFactory connectionFactory, ILogger<KoReaderService> logger)
     {
-        _db = db;
+        _connectionFactory = connectionFactory;
         _logger = logger;
     }
 
@@ -21,19 +27,39 @@ public sealed class KoReaderService : IKoReaderService
 
     public async Task<KoReaderProgressResponse> GetProgressAsync(AuthUser user, string koreaderHash, CancellationToken ct = default)
     {
-        var media = await _db.Media.ForUser(user)
-            .FirstOrDefaultAsync(m => m.KoreaderHash == koreaderHash, ct);
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("KoreaderHash", koreaderHash);
 
-        if (media == null)
+        var mediaSql = $"""
+            SELECT m."Id"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."KoreaderHash" = @KoreaderHash AND {where}
+            LIMIT 1;
+            """;
+
+        var mediaId = await conn.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(mediaSql, parameters, cancellationToken: ct));
+
+        if (mediaId == null)
         {
             _logger.LogDebug("Media with KOReader hash {Hash} not found for user {UserId}", koreaderHash, user.Id);
             return new KoReaderProgressResponse { Document = koreaderHash };
         }
 
-        var session = await _db.ReadingSessions
-            .Where(s => s.UserId == user.Id && s.MediaId == media.Id)
-            .OrderByDescending(s => s.Id)
-            .FirstOrDefaultAsync(ct);
+        const string sessionSql = """
+            SELECT "Id", "CreatedAt", "UpdatedAt", "EndPercentage", "KoreaderProgress", "EndPage"
+            FROM "ReadingSessions"
+            WHERE "UserId" = @UserId AND "MediaId" = @MediaId
+            ORDER BY "Id" DESC
+            LIMIT 1;
+            """;
+
+        var session = await conn.QueryFirstOrDefaultAsync<ReadingSession>(
+            new CommandDefinition(sessionSql, new { UserId = user.Id, MediaId = mediaId }, cancellationToken: ct));
 
         if (session == null)
         {
@@ -58,54 +84,101 @@ public sealed class KoReaderService : IKoReaderService
             throw new ArgumentException("Invalid percentage", nameof(input));
         }
 
-        var media = await _db.Media.ForUser(user)
-            .FirstOrDefaultAsync(m => m.KoreaderHash == input.Document, ct);
+        await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("Document", input.Document);
 
-        if (media == null)
+        var mediaSql = $"""
+            SELECT m."Id"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."KoreaderHash" = @Document AND {where}
+            LIMIT 1;
+            """;
+
+        var mediaId = await conn.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(mediaSql, parameters, cancellationToken: ct));
+
+        if (mediaId == null)
         {
             throw new KeyNotFoundException($"Media with KOReader hash '{input.Document}' not found");
         }
 
-        // The auth middleware synthesises a "default-owner" identity while the server has
-        // no users yet. That id has no row in Users, so writing a reading session would
-        // violate the foreign key.
-        var userExists = await _db.Users.AnyAsync(u => u.Id == user.Id, ct);
-        if (!userExists)
+        const string checkUserSql = @"SELECT 1 FROM ""Users"" WHERE ""Id"" = @UserId LIMIT 1;";
+        var userExists = await conn.ExecuteScalarAsync<int?>(
+            new CommandDefinition(checkUserSql, new { UserId = user.Id }, cancellationToken: ct));
+
+        if (userExists is null)
         {
             throw new UnauthorizedAccessException("Reading progress requires a registered user");
         }
 
-        var session = await _db.ReadingSessions
-            .Where(s => s.UserId == user.Id && s.MediaId == media.Id)
-            .OrderByDescending(s => s.Id)
-            .FirstOrDefaultAsync(ct);
+        const string sessionSql = """
+            SELECT "Id", "CreatedAt", "UpdatedAt", "EndPercentage", "KoreaderProgress", "EndPage", "StartPage", "StartPercentage", "Status"
+            FROM "ReadingSessions"
+            WHERE "UserId" = @UserId AND "MediaId" = @MediaId
+            ORDER BY "Id" DESC
+            LIMIT 1;
+            """;
+
+        var session = await conn.QueryFirstOrDefaultAsync<ReadingSession>(
+            new CommandDefinition(sessionSql, new { UserId = user.Id, MediaId = mediaId }, cancellationToken: ct));
+
+        var now = DateTimeOffset.UtcNow;
+        var endPercentage = (decimal)input.Percentage;
+        var koreaderProgress = input.Progress;
+        int? endPage = int.TryParse(input.Progress, out var p) ? p : session?.EndPage;
+        var status = input.Percentage >= 1.0f ? ReadingStatus.Finished : ReadingStatus.Reading;
 
         if (session == null)
         {
-            session = new ReadingSession
+            const string insertSessionSql = """
+                INSERT INTO "ReadingSessions" (
+                    "UserId", "MediaId", "SessionDate", "StartPage", "EndPage", "StartPercentage", "EndPercentage",
+                    "KoreaderProgress", "Status", "CreatedAt", "UpdatedAt"
+                ) VALUES (
+                    @UserId, @MediaId, @SessionDate, 1, @EndPage, 0, @EndPercentage,
+                    @KoreaderProgress, @Status, @CreatedAt, @UpdatedAt
+                );
+                """;
+
+            await conn.ExecuteAsync(new CommandDefinition(insertSessionSql, new
             {
                 UserId = user.Id,
-                MediaId = media.Id,
-                StartPage = 1,
-                StartPercentage = 0,
-                Status = ReadingStatus.Reading,
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-            _db.ReadingSessions.Add(session);
+                MediaId = mediaId,
+                SessionDate = DateOnly.FromDateTime(now.UtcDateTime),
+                EndPage = endPage,
+                EndPercentage = endPercentage,
+                KoreaderProgress = koreaderProgress,
+                Status = status.ToString(),
+                CreatedAt = now,
+                UpdatedAt = now
+            }, cancellationToken: ct));
         }
-
-        session.EndPercentage = (decimal)input.Percentage;
-        session.KoreaderProgress = input.Progress;
-
-        if (int.TryParse(input.Progress, out var page))
+        else
         {
-            session.EndPage = page;
+            const string updateSessionSql = """
+                UPDATE "ReadingSessions"
+                SET "EndPercentage" = @EndPercentage,
+                    "KoreaderProgress" = @KoreaderProgress,
+                    "EndPage" = @EndPage,
+                    "Status" = @Status,
+                    "UpdatedAt" = @UpdatedAt
+                WHERE "Id" = @Id;
+                """;
+
+            await conn.ExecuteAsync(new CommandDefinition(updateSessionSql, new
+            {
+                EndPercentage = endPercentage,
+                KoreaderProgress = koreaderProgress,
+                EndPage = endPage,
+                Status = status.ToString(),
+                UpdatedAt = now,
+                Id = session.Id
+            }, cancellationToken: ct));
         }
-
-        session.Status = input.Percentage >= 1.0f ? ReadingStatus.Finished : ReadingStatus.Reading;
-        session.UpdatedAt = DateTimeOffset.UtcNow;
-
-        await _db.SaveChangesAsync(ct);
 
         return new KoReaderPutProgressResponse
         {

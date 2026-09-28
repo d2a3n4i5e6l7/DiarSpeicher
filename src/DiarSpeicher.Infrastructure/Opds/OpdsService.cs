@@ -1,5 +1,13 @@
+using Dapper;
+using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Opds;
+using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Core.Gateway;
+using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Data.Extensions;
+using DiarSpeicher.Infrastructure.Filesystem.Processors;
+using DiarSpeicher.Infrastructure.Reading;
+using Microsoft.Extensions.Logging;
 
 namespace DiarSpeicher.Infrastructure.Opds;
 
@@ -8,20 +16,20 @@ public class OpdsService : IOpdsService
     private const int PageSize = 20;
     private const string CatalogEndpoint = "catalog";
     private const string SearchLiteral = "search";
-    private readonly DiarSpeicherDbContext _db;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly ICompositeBookProcessor _bookProcessor;
     private readonly ILogger<OpdsService> _logger;
     private readonly ILinkPrefixProvider _linkPrefix;
     private readonly IReadingProgress _progress;
 
     public OpdsService(
-        DiarSpeicherDbContext db,
+        ISqliteConnectionFactory connectionFactory,
         ICompositeBookProcessor bookProcessor,
         ILogger<OpdsService> logger,
         ILinkPrefixProvider linkPrefix,
         IReadingProgress progress)
     {
-        _db = db;
+        _connectionFactory = connectionFactory;
         _bookProcessor = bookProcessor;
         _logger = logger;
         _linkPrefix = linkPrefix;
@@ -113,14 +121,23 @@ public class OpdsService : IOpdsService
 
     public async Task<string> GetLibrariesFeedAsync(AuthUser user, string? search, string? apiKey, CancellationToken ct = default)
     {
-        var query = _db.Libraries.ForUser(user);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            query = query.Where(l => l.Name.Contains(search));
+            where = $"{where} AND l.\"Name\" LIKE @SearchPattern";
+            parameters.Add("SearchPattern", $"%{search}%");
         }
 
-        var libraries = await query.OrderBy(l => l.Name).ToListAsync(ct);
+        var sql = $"""
+            SELECT l."Id", l."CreatedAt", l."Description", l."Name", l."Path", l."Status", l."UpdatedAt"
+            FROM "Libraries" l
+            WHERE {where}
+            ORDER BY l."Name" ASC;
+            """;
+
+        var libraries = await conn.QueryAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: ct));
         var entries = libraries.Select(l => ToOpdsEntry(l, apiKey)).ToList();
 
         var links = new List<OpdsLink>
@@ -135,24 +152,58 @@ public class OpdsService : IOpdsService
 
     public async Task<string> GetLibrarySeriesFeedAsync(AuthUser user, string libraryId, int page, string? apiKey, CancellationToken ct = default)
     {
-        var library = await _db.Libraries.ForUser(user)
-            .FirstOrDefaultAsync(l => l.Id == libraryId, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (libWhere, libParams) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
+        libParams.Add("LibraryId", libraryId);
 
+        var libSql = $"""
+            SELECT l."Id", l."CreatedAt", l."Description", l."Name", l."Path", l."Status", l."UpdatedAt"
+            FROM "Libraries" l
+            WHERE l."Id" = @LibraryId AND {libWhere}
+            LIMIT 1;
+            """;
+
+        var library = await conn.QueryFirstOrDefaultAsync<Library>(new CommandDefinition(libSql, libParams, cancellationToken: ct));
         if (library == null)
         {
             throw new KeyNotFoundException($"Library {libraryId} not found");
         }
 
-        var query = _db.Series.ForUser(user)
-            .Include(s => s.Metadata)
-            .Where(s => s.LibraryId == libraryId);
+        var (where, parameters) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
+        var fullWhere = $"{where} AND s.\"LibraryId\" = @LibraryId";
+        parameters.Add("LibraryId", libraryId);
 
-        var totalCount = await query.CountAsync(ct);
-        var seriesList = await query
-            .OrderBy(s => s.Name)
-            .Skip(page * PageSize)
-            .Take(PageSize)
-            .ToListAsync(ct);
+        var countSql = $"""
+            SELECT COUNT(*)
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {fullWhere};
+            """;
+
+        var totalCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+
+        var pagedSql = $"""
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
+                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year"
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {fullWhere}
+            ORDER BY s."Name" ASC
+            LIMIT @Take OFFSET @Skip;
+            """;
+
+        parameters.Add("Take", PageSize);
+        parameters.Add("Skip", page * PageSize);
+
+        var seriesList = (await conn.QueryAsync<Series, SeriesMetadata, Series>(
+            pagedSql,
+            (s, sm) =>
+            {
+                s.Metadata = sm;
+                return s;
+            },
+            parameters,
+            splitOn: "SeriesId")).ToList();
 
         var entries = seriesList.Select(s => ToOpdsEntry(s, apiKey)).ToList();
         var feed = CreatePaginatedFeed(new PaginatedFeedParams(
@@ -170,19 +221,46 @@ public class OpdsService : IOpdsService
 
     public async Task<string> GetSeriesFeedAsync(AuthUser user, string? search, int page, string? apiKey, CancellationToken ct = default)
     {
-        var query = _db.Series.ForUser(user).Include(s => s.Metadata).AsQueryable();
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            query = query.Where(s => s.Name.Contains(search) || (s.Metadata != null && s.Metadata.Title != null && s.Metadata.Title.Contains(search)));
+            where = $"{where} AND (s.\"Name\" LIKE @SearchPattern OR sm.\"Title\" LIKE @SearchPattern)";
+            parameters.Add("SearchPattern", $"%{search}%");
         }
 
-        var totalCount = await query.CountAsync(ct);
-        var seriesList = await query
-            .OrderBy(s => s.Name)
-            .Skip(page * PageSize)
-            .Take(PageSize)
-            .ToListAsync(ct);
+        var countSql = $"""
+            SELECT COUNT(*)
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where};
+            """;
+
+        var totalCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+
+        var pagedSql = $"""
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
+                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year"
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where}
+            ORDER BY s."Name" ASC
+            LIMIT @Take OFFSET @Skip;
+            """;
+
+        parameters.Add("Take", PageSize);
+        parameters.Add("Skip", page * PageSize);
+
+        var seriesList = (await conn.QueryAsync<Series, SeriesMetadata, Series>(
+            pagedSql,
+            (s, sm) =>
+            {
+                s.Metadata = sm;
+                return s;
+            },
+            parameters,
+            splitOn: "SeriesId")).ToList();
 
         var entries = seriesList.Select(s => ToOpdsEntry(s, apiKey)).ToList();
         var feed = CreatePaginatedFeed(new PaginatedFeedParams(
@@ -200,14 +278,40 @@ public class OpdsService : IOpdsService
 
     public async Task<string> GetLatestSeriesFeedAsync(AuthUser user, int page, string? apiKey, CancellationToken ct = default)
     {
-        var query = _db.Series.ForUser(user).Include(s => s.Metadata).AsQueryable();
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
 
-        var totalCount = await query.CountAsync(ct);
-        var seriesList = await query
-            .OrderByDescending(s => s.Id)
-            .Skip(page * PageSize)
-            .Take(PageSize)
-            .ToListAsync(ct);
+        var countSql = $"""
+            SELECT COUNT(*)
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where};
+            """;
+
+        var totalCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+
+        var pagedSql = $"""
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
+                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year"
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where}
+            ORDER BY s."Id" DESC
+            LIMIT @Take OFFSET @Skip;
+            """;
+
+        parameters.Add("Take", PageSize);
+        parameters.Add("Skip", page * PageSize);
+
+        var seriesList = (await conn.QueryAsync<Series, SeriesMetadata, Series>(
+            pagedSql,
+            (s, sm) =>
+            {
+                s.Metadata = sm;
+                return s;
+            },
+            parameters,
+            splitOn: "SeriesId")).ToList();
 
         var entries = seriesList.Select(s => ToOpdsEntry(s, apiKey)).ToList();
         var feed = CreatePaginatedFeed(new PaginatedFeedParams(
@@ -225,27 +329,76 @@ public class OpdsService : IOpdsService
 
     public async Task<string> GetSeriesBooksFeedAsync(AuthUser user, string seriesId, int page, string? apiKey, CancellationToken ct = default)
     {
-        var series = await _db.Series.ForUser(user)
-            .Include(s => s.Metadata)
-            .FirstOrDefaultAsync(s => s.Id == seriesId, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (sWhere, sParams) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
+        sParams.Add("SeriesId", seriesId);
 
+        var seriesSql = $"""
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
+                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year"
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE s."Id" = @SeriesId AND {sWhere}
+            LIMIT 1;
+            """;
+
+        var seriesRows = await conn.QueryAsync<Series, SeriesMetadata, Series>(
+            seriesSql,
+            (s, sm) =>
+            {
+                s.Metadata = sm;
+                return s;
+            },
+            sParams,
+            splitOn: "SeriesId");
+
+        var series = seriesRows.FirstOrDefault();
         if (series == null)
         {
             throw new KeyNotFoundException($"Series {seriesId} not found");
         }
 
-        var query = _db.Media.ForUser(user)
-            .Include(m => m.Metadata)
-            .Where(m => m.SeriesId == seriesId);
+        var (mWhere, mParams) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        var fullWhere = $"{mWhere} AND m.\"SeriesId\" = @SeriesId";
+        mParams.Add("SeriesId", seriesId);
 
-        var totalCount = await query.CountAsync(ct);
-        var books = await query
-            .OrderBy(m => m.SortName).ThenBy(m => m.Name)
-            .Skip(page * PageSize)
-            .Take(PageSize)
-            .ToListAsync(ct);
+        var countSql = $"""
+            SELECT COUNT(*)
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {fullWhere};
+            """;
 
-        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var totalCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, mParams, cancellationToken: ct));
+
+        var pagedSql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
+                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {fullWhere}
+            ORDER BY m."SortName" ASC, m."Name" ASC
+            LIMIT @Take OFFSET @Skip;
+            """;
+
+        mParams.Add("Take", PageSize);
+        mParams.Add("Skip", page * PageSize);
+
+        var books = (await conn.QueryAsync<Media, MediaMetadata, Media>(
+            pagedSql,
+            (media, meta) =>
+            {
+                media.Metadata = meta;
+                return media;
+            },
+            mParams,
+            splitOn: "MediaId")).ToList();
+
+        var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
         var entries = books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey, epubTotals)).ToList();
 
@@ -265,18 +418,52 @@ public class OpdsService : IOpdsService
 
     public async Task<string> GetBooksFeedAsync(AuthUser user, string? search, int page, string? apiKey, CancellationToken ct = default)
     {
-        var query = _db.Media.ForUser(user).Include(m => m.Metadata).AsQueryable();
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
 
-        query = query.MatchingText(search);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            where = $"{where} AND (m.\"Name\" LIKE @SearchPattern OR mm.\"Title\" LIKE @SearchPattern)";
+            parameters.Add("SearchPattern", $"%{search}%");
+        }
 
-        var totalCount = await query.CountAsync(ct);
-        var books = await query
-            .OrderBy(m => m.SortName).ThenBy(m => m.Name)
-            .Skip(page * PageSize)
-            .Take(PageSize)
-            .ToListAsync(ct);
+        var countSql = $"""
+            SELECT COUNT(*)
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where};
+            """;
 
-        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var totalCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+
+        var pagedSql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
+                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where}
+            ORDER BY m."SortName" ASC, m."Name" ASC
+            LIMIT @Take OFFSET @Skip;
+            """;
+
+        parameters.Add("Take", PageSize);
+        parameters.Add("Skip", page * PageSize);
+
+        var books = (await conn.QueryAsync<Media, MediaMetadata, Media>(
+            pagedSql,
+            (media, meta) =>
+            {
+                media.Metadata = meta;
+                return media;
+            },
+            parameters,
+            splitOn: "MediaId")).ToList();
+
+        var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
         var entries = books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey, epubTotals)).ToList();
 
@@ -295,16 +482,46 @@ public class OpdsService : IOpdsService
 
     public async Task<string> GetLatestBooksFeedAsync(AuthUser user, int page, string? apiKey, CancellationToken ct = default)
     {
-        var query = _db.Media.ForUser(user).Include(m => m.Metadata).AsQueryable();
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
 
-        var totalCount = await query.CountAsync(ct);
-        var books = await query
-            .OrderByDescending(m => m.Id)
-            .Skip(page * PageSize)
-            .Take(PageSize)
-            .ToListAsync(ct);
+        var countSql = $"""
+            SELECT COUNT(*)
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where};
+            """;
 
-        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var totalCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+
+        var pagedSql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
+                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {where}
+            ORDER BY m."Id" DESC
+            LIMIT @Take OFFSET @Skip;
+            """;
+
+        parameters.Add("Take", PageSize);
+        parameters.Add("Skip", page * PageSize);
+
+        var books = (await conn.QueryAsync<Media, MediaMetadata, Media>(
+            pagedSql,
+            (media, meta) =>
+            {
+                media.Metadata = meta;
+                return media;
+            },
+            parameters,
+            splitOn: "MediaId")).ToList();
+
+        var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
         var entries = books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey, epubTotals)).ToList();
 
@@ -323,13 +540,34 @@ public class OpdsService : IOpdsService
 
     public async Task<string> GetKeepReadingFeedXmlAsync(AuthUser user, string? apiKey, CancellationToken ct = default)
     {
-        var sessions = await _db.GetKeepReadingSessionsAsync(user.Id, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var sessions = await conn.GetKeepReadingSessionsAsync(user.Id, ct);
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
 
-        var books = await _db.Media.ForUser(user)
-            .Include(m => m.Metadata)
-            .Where(m => mediaIds.Contains(m.Id))
-            .ToListAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("MediaIds", mediaIds);
+
+        var sql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
+                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" IN @MediaIds AND {where};
+            """;
+
+        var books = mediaIds.Count == 0
+            ? []
+            : (await conn.QueryAsync<Media, MediaMetadata, Media>(
+                sql,
+                (media, meta) =>
+                {
+                    media.Metadata = meta;
+                    return media;
+                },
+                parameters,
+                splitOn: "MediaId")).ToList();
 
         var booksMap = books.ToDictionary(b => b.Id);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
@@ -368,28 +606,76 @@ public class OpdsService : IOpdsService
             return OpdsXmlBuilder.BuildFeedXml(emptyFeed);
         }
 
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
         var entries = new List<OpdsEntry>();
 
-        var libraries = await _db.Libraries.ForUser(user)
-            .Where(l => l.Name.Contains(search))
-            .OrderBy(l => l.Name)
-            .ToListAsync(ct);
+        // 1. Libraries
+        var (lWhere, lParams) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
+        lWhere = $"{lWhere} AND l.\"Name\" LIKE @SearchPattern";
+        lParams.Add("SearchPattern", $"%{search}%");
+
+        var libSql = $"""
+            SELECT l."Id", l."CreatedAt", l."Description", l."Name", l."Path", l."Status", l."UpdatedAt"
+            FROM "Libraries" l
+            WHERE {lWhere}
+            ORDER BY l."Name" ASC;
+            """;
+
+        var libraries = await conn.QueryAsync<Library>(new CommandDefinition(libSql, lParams, cancellationToken: ct));
         entries.AddRange(libraries.Select(l => ToOpdsEntry(l, apiKey)));
 
-        var seriesList = await _db.Series.ForUser(user)
-            .Include(s => s.Metadata)
-            .Where(s => s.Name.Contains(search) || (s.Metadata != null && s.Metadata.Title != null && s.Metadata.Title.Contains(search)))
-            .OrderBy(s => s.Name)
-            .ToListAsync(ct);
+        // 2. Series
+        var (sWhere, sParams) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
+        sWhere = $"{sWhere} AND (s.\"Name\" LIKE @SearchPattern OR sm.\"Title\" LIKE @SearchPattern)";
+        sParams.Add("SearchPattern", $"%{search}%");
+
+        var seriesSql = $"""
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
+                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year"
+            FROM "Series" s
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {sWhere}
+            ORDER BY s."Name" ASC;
+            """;
+
+        var seriesList = await conn.QueryAsync<Series, SeriesMetadata, Series>(
+            seriesSql,
+            (s, sm) =>
+            {
+                s.Metadata = sm;
+                return s;
+            },
+            sParams,
+            splitOn: "SeriesId");
         entries.AddRange(seriesList.Select(s => ToOpdsEntry(s, apiKey)));
 
-        var books = await _db.Media.ForUser(user)
-            .Include(m => m.Metadata)
-            .MatchingText(search)
-            .OrderBy(m => m.SortName).ThenBy(m => m.Name)
-            .ToListAsync(ct);
+        // 3. Books
+        var (mWhere, mParams) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        mWhere = $"{mWhere} AND (m.\"Name\" LIKE @SearchPattern OR mm.\"Title\" LIKE @SearchPattern)";
+        mParams.Add("SearchPattern", $"%{search}%");
 
-        var sessions = await _db.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
+        var booksSql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
+                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE {mWhere}
+            ORDER BY m."SortName" ASC, m."Name" ASC;
+            """;
+
+        var books = (await conn.QueryAsync<Media, MediaMetadata, Media>(
+            booksSql,
+            (media, meta) =>
+            {
+                media.Metadata = meta;
+                return media;
+            },
+            mParams,
+            splitOn: "MediaId")).ToList();
+
+        var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
         entries.AddRange(books.Select(b => ToOpdsEntry(b, sessions.GetValueOrDefault(b.Id), apiKey, epubTotals)));
 
@@ -404,8 +690,21 @@ public class OpdsService : IOpdsService
         PageRequestKind kind = PageRequestKind.Reading,
         CancellationToken ct = default)
     {
-        var book = await _db.Media.ForUser(user)
-            .FirstOrDefaultAsync(m => m.Id == bookId, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("Id", bookId);
+
+        var sql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" = @Id AND {where}
+            LIMIT 1;
+            """;
+
+        var book = await conn.QueryFirstOrDefaultAsync<Media>(new CommandDefinition(sql, parameters, cancellationToken: ct));
 
         if (book == null) return (null, null);
 
@@ -439,25 +738,38 @@ public class OpdsService : IOpdsService
 
     public async Task<Media?> GetMediaForDownloadAsync(AuthUser user, string bookId, CancellationToken ct = default)
     {
-        return await _db.Media.ForUser(user).FirstOrDefaultAsync(m => m.Id == bookId, ct);
+        await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        parameters.Add("Id", bookId);
+
+        var sql = $"""
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt"
+            FROM "Media" m
+            LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
+            LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
+            LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
+            WHERE m."Id" = @Id AND {where}
+            LIMIT 1;
+            """;
+
+        return await conn.QueryFirstOrDefaultAsync<Media>(new CommandDefinition(sql, parameters, cancellationToken: ct));
     }
 
     public async Task<(byte[]? Data, string ContentType)> GetBookThumbnailAsync(AuthUser user, string bookId, CancellationToken ct = default)
     {
-        var book = await _db.Media.ForUser(user).FirstOrDefaultAsync(m => m.Id == bookId, ct);
+        var book = await GetMediaForDownloadAsync(user, bookId, ct);
         if (book == null) return (null, "image/jpeg");
 
         if (!string.IsNullOrWhiteSpace(book.ThumbnailPath) && File.Exists(book.ThumbnailPath))
         {
             var bytes = await File.ReadAllBytesAsync(book.ThumbnailPath, ct);
             var ext = Path.GetExtension(book.ThumbnailPath);
-            var mime = Core.Filesystem.ContentTypeExtensions.FromExtension(ext).MimeType();
+            var mime = ContentTypeExtensions.FromExtension(ext).MimeType();
             return (bytes, mime);
         }
 
         return (null, "image/jpeg");
     }
-
 
     private OpdsEntry ToOpdsEntry(Library library, string? apiKey)
     {
