@@ -99,7 +99,7 @@ public sealed class OpdsFeedAndStreamingTests : IDisposable
             VALUES (@Id, @Name, @Path, 'cbz', 3, @Size, @SeriesId, @ThumbnailPath, 'Ready', @Now);
             """, new[]
         {
-            new { Id = kidBookId, Name = "Spider-Man Kid", Path = _testCbzPath, Size = fileSize, SeriesId = seriesId, ThumbnailPath = _thumbnailPath, Now = DateTimeOffset.UtcNow },
+            new { Id = kidBookId, Name = "Spider-Man Kid", Path = _testCbzPath, Size = fileSize, SeriesId = seriesId, ThumbnailPath = (string?)_thumbnailPath, Now = DateTimeOffset.UtcNow },
             new { Id = adultBookId, Name = "Deadpool MAX", Path = _testCbzPath, Size = fileSize, SeriesId = seriesId, ThumbnailPath = (string?)null, Now = DateTimeOffset.UtcNow }
         });
 

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using DiarSpeicher.Api.Serialization;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Background;
@@ -76,7 +77,7 @@ public static class TusEndpoints
             LIMIT 1;
             """;
 
-        var library = await conn.QueryFirstOrDefaultAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        var library = await conn.QueryFirstOrDefaultAsync<Library>(sql, parameters);
         if (library == null || !Directory.Exists(library.Path))
         {
             return Results.NotFound("Library not found.");
@@ -97,12 +98,12 @@ public static class TusEndpoints
     {
         if (!uploadOptions.EnableUpload)
         {
-            return (Results.Json(new { error = "Uploads are disabled on this server." }, statusCode: StatusCodes.Status403Forbidden), 0);
+            return (ApiResults.Error("Uploads are disabled on this server.", StatusCodes.Status403Forbidden), 0);
         }
 
         if (!user.HasPermission(Permissions.FileUpload))
         {
-            return (Results.Json(new { error = "This account is not allowed to upload files." }, statusCode: StatusCodes.Status403Forbidden), 0);
+            return (ApiResults.Error("This account is not allowed to upload files.", StatusCodes.Status403Forbidden), 0);
         }
 
         if (!ctx.Request.Headers.TryGetValue("Upload-Length", out var lengthValues) ||
@@ -114,7 +115,7 @@ public static class TusEndpoints
 
         if (uploadLength > uploadOptions.MaxFileUploadSize)
         {
-            return (Results.Json(new { error = $"File exceeds maximum allowed size of {uploadOptions.MaxFileUploadSize} bytes." }, statusCode: StatusCodes.Status413PayloadTooLarge), 0);
+            return (ApiResults.Error($"File exceeds maximum allowed size of {uploadOptions.MaxFileUploadSize} bytes.", StatusCodes.Status413PayloadTooLarge), 0);
         }
 
         return (null, uploadLength);
@@ -157,20 +158,15 @@ public static class TusEndpoints
 
         if (!Directory.Exists(fullTargetDir) && !user.HasPermission(Permissions.CreateFolder))
         {
-            return (Results.Json(
-                new { error = "This account is not allowed to create folders in the library." },
-                statusCode: StatusCodes.Status403Forbidden), string.Empty);
+            return (ApiResults.Error("This account is not allowed to create folders in the library.", StatusCodes.Status403Forbidden), string.Empty);
         }
 
         if (!TryEnsureWritableDirectory(fullTargetDir, out var destinationError))
         {
-            return (Results.Json(
-                new
-                {
-                    error = $"Upload destination '{fullTargetDir}' is not writable: {destinationError}. " +
-                            "Check that the libraries volume is not mounted read-only."
-                },
-                statusCode: StatusCodes.Status500InternalServerError), string.Empty);
+            return (ApiResults.Error(
+                $"Upload destination '{fullTargetDir}' is not writable: {destinationError}. " +
+                "Check that the libraries volume is not mounted read-only.",
+                StatusCodes.Status500InternalServerError), string.Empty);
         }
 
         return (null, fullTargetDir);
@@ -210,7 +206,7 @@ public static class TusEndpoints
             UserId = session.UserId
         };
 
-        await File.WriteAllTextAsync(metaPath, JsonSerializer.Serialize(meta), ct);
+        await File.WriteAllTextAsync(metaPath, JsonSerializer.Serialize(meta, PersistedJsonContext.Default.TusUploadMeta), ct);
         await using (var fs = File.Create(partPath))
         {
             fs.SetLength(0);
@@ -241,7 +237,7 @@ public static class TusEndpoints
         try
         {
             var json = await File.ReadAllTextAsync(metaPath, ct);
-            meta = JsonSerializer.Deserialize<TusUploadMeta>(json);
+            meta = JsonSerializer.Deserialize(json, PersistedJsonContext.Default.TusUploadMeta);
         }
         catch
         {
@@ -349,9 +345,7 @@ public static class TusEndpoints
             TryDelete(partPath);
             TryDelete(metaPath);
 
-            return Results.Json(
-                new { error = $"Could not move the upload to its final location: {ex.Message}" },
-                statusCode: StatusCodes.Status500InternalServerError);
+            return ApiResults.Error($"Could not move the upload to its final location: {ex.Message}", StatusCodes.Status500InternalServerError);
         }
 
         File.Delete(metaPath);
@@ -399,7 +393,7 @@ public static class TusEndpoints
         try
         {
             var json = await File.ReadAllTextAsync(metaPath, ct);
-            meta = JsonSerializer.Deserialize<TusUploadMeta>(json);
+            meta = JsonSerializer.Deserialize(json, PersistedJsonContext.Default.TusUploadMeta);
         }
         catch
         {
@@ -441,7 +435,7 @@ public static class TusEndpoints
             try
             {
                 var metaJson = File.ReadAllText(metaPath);
-                var meta = JsonSerializer.Deserialize<TusUploadMeta>(metaJson);
+                var meta = JsonSerializer.Deserialize(metaJson, PersistedJsonContext.Default.TusUploadMeta);
                 if (meta != null && !string.IsNullOrEmpty(meta.PartPath) && File.Exists(meta.PartPath))
                 {
                     File.Delete(meta.PartPath);
@@ -561,7 +555,7 @@ public static class TusEndpoints
                fullTargetDir.StartsWith(libraryPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
-    private sealed class TusUploadMeta
+    internal sealed class TusUploadMeta
     {
         public string UploadId { get; set; } = string.Empty;
         public string LibraryId { get; set; } = string.Empty;

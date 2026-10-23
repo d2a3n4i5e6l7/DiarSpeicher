@@ -1,10 +1,21 @@
 # syntax=docker/dockerfile:1
 
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-builder
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:11.0 AS dotnet-builder
 ARG TARGETARCH
 WORKDIR /build
 
-COPY Directory.Packages.props ./
+# Native AOT enlaza con clang en la maquina que compila. Para arm64 desde x86 hace falta
+# ademas el enlazador y la libc de aarch64: sin ellos el publish muere en el paso de enlace.
+RUN set -eu; \
+    CROSS=""; \
+    if [ "$TARGETARCH" = "arm64" ] && [ "$(dpkg --print-architecture)" != "arm64" ]; then \
+        CROSS="binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu"; \
+    fi; \
+    apt-get update -qq; \
+    apt-get install -y -qq --no-install-recommends clang llvm $CROSS; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY Directory.Build.props Directory.Packages.props ./
 COPY src/DiarSpeicher.Core/DiarSpeicher.Core.csproj src/DiarSpeicher.Core/
 COPY src/DiarSpeicher.Infrastructure/DiarSpeicher.Infrastructure.csproj src/DiarSpeicher.Infrastructure/
 COPY src/DiarSpeicher.Api/DiarSpeicher.Api.csproj src/DiarSpeicher.Api/
@@ -22,7 +33,8 @@ RUN RID="linux-x64"; \
     -r "$RID" \
     --self-contained true \
     --no-restore \
-    -o /build/publish
+    -o /build/publish \
+    && find /build/publish -name '*.dbg' -delete
 
 FROM debian:trixie-slim AS rootfs-builder
 
@@ -65,7 +77,8 @@ RUN set -eu; \
     TRIPLET="$([ "$(dpkg --print-architecture)" = "arm64" ] && echo "aarch64-linux-gnu" || echo "x86_64-linux-gnu")"; \
     { for bin in /rootfs/usr/bin/dash /rootfs/usr/bin/setpriv /rootfs/usr/bin/id \
                  /rootfs/usr/bin/mkdir /rootfs/usr/bin/chown /rootfs/usr/bin/chmod \
-                 /rootfs/usr/bin/env /rootfs/usr/bin/cat /rootfs/usr/bin/ls; do \
+                 /rootfs/usr/bin/env /rootfs/usr/bin/cat /rootfs/usr/bin/ls \
+                 /rootfs/app/DiarSpeicher.Api; do \
           ldd "$bin" 2>/dev/null | awk '/=> \//{print $3}'; \
       done; \
       find /rootfs/app -name '*.so' -o -name '*.so.*' | while read -r so; do \
@@ -93,7 +106,7 @@ COPY --from=rootfs-builder /etc/passwd /etc/group /etc/
 COPY --from=rootfs-builder /rootfs/ /
 
 LABEL org.opencontainers.image.title="DiarSpeicher" \
-    org.opencontainers.image.description="Servidor de comics y libros digitales en .NET 10, servido tras el Gateway"
+    org.opencontainers.image.description="Servidor de comics y libros digitales en .NET 11, servido tras el Gateway"
 
 WORKDIR /app
 

@@ -49,19 +49,16 @@ public sealed partial class DiarSpeicherService
             WHERE {where};
             """;
 
-        var total = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+        var total = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
         var orderBy = newestFirst ? @"m.""Id"" DESC" : @"m.""SortName"" ASC, m.""Name"" ASC";
         parameters.Add("PageSize", pageSize);
         parameters.Add("Offset", page * pageSize);
 
         var selectSql = $"""
-            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status",
-                   m."Hash", m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt",
-                   m."ModifiedAt", m."DeletedAt", m."SeriesId",
-                   mm."Id", mm."MediaId", mm."AgeRating", mm."Summary", mm."Publisher", mm."Genres", mm."Number",
-                   mm."Volume", mm."Year", mm."Month", mm."Day", mm."Writers", mm."Pencillers", mm."Inkers",
-                   mm."Colorists", mm."Letterers", mm."CoverArtists", mm."Editors"
+            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status", m."Hash",
+                   m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt", m."ModifiedAt",
+                   m."DeletedAt", m."SeriesId"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -71,14 +68,7 @@ public sealed partial class DiarSpeicherService
             LIMIT @PageSize OFFSET @Offset;
             """;
 
-        var rows = await conn.QueryAsync<Media, MediaMetadata?, Media>(
-            new CommandDefinition(selectSql, parameters, cancellationToken: ct),
-            (m, mm) =>
-            {
-                m.Metadata = mm;
-                return m;
-            },
-            splitOn: "Id");
+        var rows = await conn.QueryAsync<Media>(selectSql, parameters).WithMetadataAsync(conn);
 
         var mediaList = rows.AsList();
         var mediaIds = mediaList.Select(m => m.Id).ToList();
@@ -101,12 +91,9 @@ public sealed partial class DiarSpeicherService
         parameters.Add("Id", id);
 
         var sql = $"""
-            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status",
-                   m."Hash", m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt",
-                   m."ModifiedAt", m."DeletedAt", m."SeriesId",
-                   mm."Id", mm."MediaId", mm."AgeRating", mm."Summary", mm."Publisher", mm."Genres", mm."Number",
-                   mm."Volume", mm."Year", mm."Month", mm."Day", mm."Writers", mm."Pencillers", mm."Inkers",
-                   mm."Colorists", mm."Letterers", mm."CoverArtists", mm."Editors"
+            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status", m."Hash",
+                   m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt", m."ModifiedAt",
+                   m."DeletedAt", m."SeriesId"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -115,14 +102,7 @@ public sealed partial class DiarSpeicherService
             LIMIT 1;
             """;
 
-        var rows = await conn.QueryAsync<Media, MediaMetadata?, Media>(
-            new CommandDefinition(sql, parameters, cancellationToken: ct),
-            (m, mm) =>
-            {
-                m.Metadata = mm;
-                return m;
-            },
-            splitOn: "Id");
+        var rows = await conn.QueryAsync<Media>(sql, parameters).WithMetadataAsync(conn);
 
         var media = rows.FirstOrDefault();
         if (media == null) return null;
@@ -139,7 +119,7 @@ public sealed partial class DiarSpeicherService
             """;
 
         var session = await conn.QueryFirstOrDefaultAsync<ReadingSession>(
-            new CommandDefinition(sessionSql, new { UserId = user.Id, MediaId = id }, cancellationToken: ct));
+            sessionSql, new { UserId = user.Id, MediaId = id });
 
         return ToMediaDto(media, session);
     }
@@ -155,12 +135,9 @@ public sealed partial class DiarSpeicherService
         parameters.Add("MediaIds", mediaIds);
 
         var sql = $"""
-            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status",
-                   m."Hash", m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt",
-                   m."ModifiedAt", m."DeletedAt", m."SeriesId",
-                   mm."Id", mm."MediaId", mm."AgeRating", mm."Summary", mm."Publisher", mm."Genres", mm."Number",
-                   mm."Volume", mm."Year", mm."Month", mm."Day", mm."Writers", mm."Pencillers", mm."Inkers",
-                   mm."Colorists", mm."Letterers", mm."CoverArtists", mm."Editors"
+            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status", m."Hash",
+                   m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt", m."ModifiedAt",
+                   m."DeletedAt", m."SeriesId"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -168,14 +145,7 @@ public sealed partial class DiarSpeicherService
             WHERE m."Id" IN @MediaIds AND {where};
             """;
 
-        var rows = await conn.QueryAsync<Media, MediaMetadata?, Media>(
-            new CommandDefinition(sql, parameters, cancellationToken: ct),
-            (m, mm) =>
-            {
-                m.Metadata = mm;
-                return m;
-            },
-            splitOn: "Id");
+        var rows = await conn.QueryAsync<Media>(sql, parameters).WithMetadataAsync(conn);
 
         var mediaMap = rows.ToDictionary(m => m.Id, StringComparer.Ordinal);
         var sessionMap = sessions.ToDictionary(s => s.MediaId, StringComparer.Ordinal);
@@ -209,7 +179,7 @@ public sealed partial class DiarSpeicherService
             """;
 
         return await conn.QueryFirstOrDefaultAsync<Media>(
-            new CommandDefinition(sql, parameters, cancellationToken: ct));
+            sql, parameters);
     }
 
     public async Task<OpenedPage?> OpenMediaPageAsync(AuthUser user, string mediaId, int page, CancellationToken ct = default)
@@ -294,7 +264,7 @@ public sealed partial class DiarSpeicherService
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
         const string deleteSql = @"DELETE FROM ""Media"" WHERE ""Id"" = @Id;";
-        await conn.ExecuteAsync(new CommandDefinition(deleteSql, new { Id = id }, cancellationToken: ct));
+        await conn.ExecuteAsync(deleteSql, new { Id = id });
 
         return true;
     }

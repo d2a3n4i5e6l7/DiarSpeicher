@@ -125,7 +125,7 @@ public sealed partial class DiarSpeicherService
         var (where, parameters) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
         parameters.Add("LibraryId", libraryId);
         var sql = $@"SELECT ""Id"", ""Path"" FROM ""Libraries"" l WHERE l.""Id"" = @LibraryId AND {where} LIMIT 1;";
-        var library = await conn.QueryFirstOrDefaultAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        var library = await conn.QueryFirstOrDefaultAsync<Library>(sql, parameters);
 
         if (library == null || !Directory.Exists(library.Path))
         {

@@ -1,6 +1,6 @@
 # Documentación del backend de DiarSpeicher
 
-`DiarSpeicher` es un **servidor de cómics y libros digitales** en .NET 10, pensado para
+`DiarSpeicher` es un **servidor de cómics y libros digitales** en .NET 11, pensado para
 correr en hardware modesto (una TV box de 4 GB de RAM y 6 núcleos). Indexa bibliotecas del
 sistema de ficheros con un escaneo incremental por `mtime`, extrae páginas bajo demanda sin
 descomprimir el archivo completo, y expone el catálogo por seis protocolos distintos —OPDS

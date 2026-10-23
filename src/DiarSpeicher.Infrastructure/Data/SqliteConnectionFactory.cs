@@ -16,11 +16,6 @@ public sealed class SqliteConnectionFactory : ISqliteConnectionFactory
 {
     private readonly string _connectionString;
 
-    static SqliteConnectionFactory()
-    {
-        SqliteTypeHandlers.Initialize();
-    }
-
     public SqliteConnectionFactory(IConfiguration configuration)
     {
         var raw = configuration.GetConnectionString("DefaultConnection")

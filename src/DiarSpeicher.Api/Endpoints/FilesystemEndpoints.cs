@@ -71,7 +71,7 @@ public static class FilesystemEndpoints
 
             return index.TryStartRefresh()
                 ? Results.Accepted(value: index.GetStatus())
-                : Results.Json(new { error = "Ya hay un repaso en marcha." }, statusCode: StatusCodes.Status409Conflict);
+                : ApiResults.Error("Ya hay un repaso en marcha.", StatusCodes.Status409Conflict);
         });
 
         group.MapGet("/search", (
@@ -104,8 +104,8 @@ public static class FilesystemEndpoints
         if (scope != null) return Results.Ok(ToDeletionDto(scope));
 
         return options.Value.TryResolve(path, out var resolved) && !Directory.Exists(resolved) && !File.Exists(resolved)
-            ? Results.NotFound(new { error = "Eso ya no esta en el disco. Se puede quitar del indice sin borrar nada." })
-            : Results.Json(new { error = NotDeletable }, statusCode: StatusCodes.Status403Forbidden);
+            ? Results.NotFound(new ApiError("Eso ya no esta en el disco. Se puede quitar del indice sin borrar nada."))
+            : ApiResults.Error(NotDeletable, StatusCodes.Status403Forbidden);
     }
 
     private static async Task<IResult> HandleDeleteEntry(
@@ -122,9 +122,9 @@ public static class FilesystemEndpoints
         {
             return outcome switch
             {
-                TrashOutcome.NotFound => Results.NotFound(new { error = "Eso ya no esta en el disco." }),
-                TrashOutcome.NotAllowed => Results.Json(new { error = NotDeletable }, statusCode: StatusCodes.Status403Forbidden),
-                _ => Results.Json(new { error = "No se pudo mover a la papelera." }, statusCode: StatusCodes.Status500InternalServerError)
+                TrashOutcome.NotFound => Results.NotFound(new ApiError("Eso ya no esta en el disco.")),
+                TrashOutcome.NotAllowed => ApiResults.Error(NotDeletable, StatusCodes.Status403Forbidden),
+                _ => ApiResults.Error("No se pudo mover a la papelera.", StatusCodes.Status500InternalServerError)
             };
         }
 
@@ -184,7 +184,7 @@ public static class FilesystemEndpoints
 
             return options.Value.TryResolve(path, out var resolved)
                 ? Results.Ok(ReadDisk(resolved))
-                : Results.Json(new { error = OutsideRoots }, statusCode: StatusCodes.Status403Forbidden);
+                : ApiResults.Error(OutsideRoots, StatusCodes.Status403Forbidden);
         });
 
         group.MapPost("/folder", (
@@ -221,14 +221,12 @@ public static class FilesystemEndpoints
 
         if (!options.TryResolve(target, out var resolved))
         {
-            return Results.Json(
-                new { error = OutsideRoots },
-                statusCode: StatusCodes.Status403Forbidden);
+            return ApiResults.Error(OutsideRoots, StatusCodes.Status403Forbidden);
         }
 
         if (!Directory.Exists(resolved))
         {
-            return Results.NotFound(new { error = "La carpeta no existe o no esta montada." });
+            return Results.NotFound(new ApiError("La carpeta no existe o no esta montada."));
         }
 
         List<FolderEntryDto> entries;
@@ -245,15 +243,11 @@ public static class FilesystemEndpoints
         }
         catch (UnauthorizedAccessException)
         {
-            return Results.Json(
-                new { error = "Sin permiso para leer esa carpeta." },
-                statusCode: StatusCodes.Status403Forbidden);
+            return ApiResults.Error("Sin permiso para leer esa carpeta.", StatusCodes.Status403Forbidden);
         }
         catch (IOException)
         {
-            return Results.Json(
-                new { error = "No se pudo leer esa carpeta." },
-                statusCode: StatusCodes.Status500InternalServerError);
+            return ApiResults.Error("No se pudo leer esa carpeta.", StatusCodes.Status500InternalServerError);
         }
 
         return Results.Ok(new FolderListingDto
@@ -279,12 +273,12 @@ public static class FilesystemEndpoints
     {
         if (!options.TryResolve(path, out var resolved))
         {
-            return Results.Json(new { error = OutsideRoots }, statusCode: StatusCodes.Status403Forbidden);
+            return ApiResults.Error(OutsideRoots, StatusCodes.Status403Forbidden);
         }
 
         if (!Directory.Exists(resolved))
         {
-            return Results.NotFound(new { error = "La carpeta no existe o no esta montada." });
+            return Results.NotFound(new ApiError("La carpeta no existe o no esta montada."));
         }
 
         var isCollectionBased = string.Equals(pattern, nameof(LibraryPattern.CollectionBased), StringComparison.OrdinalIgnoreCase);
@@ -351,18 +345,18 @@ public static class FilesystemEndpoints
             || name.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) >= 0
             || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
-            return Results.BadRequest(new { error = "Nombre de carpeta no valido." });
+            return Results.BadRequest(new ApiError("Nombre de carpeta no valido."));
         }
 
         if (!options.TryResolve(input.Parent, out var parent) || !Directory.Exists(parent))
         {
-            return Results.Json(new { error = OutsideRoots }, statusCode: StatusCodes.Status403Forbidden);
+            return ApiResults.Error(OutsideRoots, StatusCodes.Status403Forbidden);
         }
 
         var target = Path.Combine(parent, name);
         if (!options.TryResolve(target, out var resolved))
         {
-            return Results.Json(new { error = OutsideRoots }, statusCode: StatusCodes.Status403Forbidden);
+            return ApiResults.Error(OutsideRoots, StatusCodes.Status403Forbidden);
         }
 
         try
@@ -371,7 +365,7 @@ public static class FilesystemEndpoints
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return Results.BadRequest(new { error = "No se pudo crear la carpeta: " + e.Message });
+            return Results.BadRequest(new ApiError("No se pudo crear la carpeta: " + e.Message));
         }
 
         return Results.Ok(ToEntry(resolved));
@@ -417,6 +411,5 @@ public static class FilesystemEndpoints
         httpContext.Items[AuthUserKey] is AuthUser user && user.HasPermission(Permissions.ManageLibrary);
 
     private static IResult Forbidden() =>
-        Results.Json(new { error = "This account is not allowed to manage libraries." },
-            statusCode: StatusCodes.Status403Forbidden);
+        ApiResults.Error("This account is not allowed to manage libraries.", StatusCodes.Status403Forbidden);
 }

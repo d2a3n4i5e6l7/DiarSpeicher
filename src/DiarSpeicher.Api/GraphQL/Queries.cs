@@ -26,7 +26,7 @@ public class Query
             WHERE {where}
             ORDER BY l."Name" ASC;
             """;
-        return await conn.QueryAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        return await conn.QueryAsync<Library>(sql, parameters);
     }
 
     [UsePaging]
@@ -47,23 +47,15 @@ public class Query
         }
 
         var sql = $"""
-            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
-                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year"
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status",
+                   s."UpdatedAt"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
             WHERE {where}
             ORDER BY s."Name" ASC;
             """;
 
-        return await conn.QueryAsync<Series, SeriesMetadata, Series>(
-            sql,
-            (s, sm) =>
-            {
-                s.Metadata = sm;
-                return s;
-            },
-            parameters,
-            splitOn: "SeriesId");
+        return await conn.QueryAsync<Series>(sql, parameters).WithMetadataAsync(conn);
     }
 
     [UsePaging]
@@ -84,8 +76,9 @@ public class Query
         }
 
         var sql = $"""
-            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
-                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year"
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name",
+                   m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta",
+                   m."ModifiedAt", m."UpdatedAt"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -94,15 +87,7 @@ public class Query
             ORDER BY m."SortName" ASC, m."Name" ASC;
             """;
 
-        return await conn.QueryAsync<Media, MediaMetadata, Media>(
-            sql,
-            (media, meta) =>
-            {
-                media.Metadata = meta;
-                return media;
-            },
-            parameters,
-            splitOn: "MediaId");
+        return await conn.QueryAsync<Media>(sql, parameters).WithMetadataAsync(conn);
     }
 
     /// <summary>
@@ -136,7 +121,7 @@ public class Query
             ORDER BY rs."Id" DESC;
             """;
 
-        return await conn.QueryAsync<ReadingSession>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        return await conn.QueryAsync<ReadingSession>(sql, parameters);
     }
 
     public ServerConfig GetServerConfig(IOptions<StorageOptions> storageOptions)

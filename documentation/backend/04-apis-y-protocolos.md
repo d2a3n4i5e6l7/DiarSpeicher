@@ -150,7 +150,7 @@ esa administración es del plugin del Gateway.
 | --------------- | ------ | ---------------------------------------------------- |
 | `/ping`         | GET    | `"pong"`                                            |
 | `/health`       | GET    | Estado del servicio                                 |
-| `/version`      | GET    | `{ semver: "0.1.0", rev: "net10" }` — constante     |
+| `/version`      | GET    | `{ semver: "0.1.0", rev: "net11" }` — constante     |
 | `/claim`        | GET    | Si el servidor ya tiene dueño                       |
 | `/auth/me`      | GET    | El `AuthUser` resuelto                              |
 

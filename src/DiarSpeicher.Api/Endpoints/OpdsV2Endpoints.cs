@@ -1,3 +1,4 @@
+using DiarSpeicher.Api.Serialization;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Opds;
 using DiarSpeicher.Core.Filesystem;
@@ -29,7 +30,7 @@ public static class OpdsV2Endpoints
         {
             var apiKey = RequestIdentity.GetApiKey(context);
             var doc = opdsV2.GetAuthenticationDoc(apiKey);
-            return Results.Json(doc, contentType: OpdsV2MimeTypes.AuthenticationJson);
+            return Results.Json(doc, ApiJsonContext.Default.OpdsV2AuthenticationDoc, contentType: OpdsV2MimeTypes.AuthenticationJson);
         });
 
         group.MapGet("/catalog", async (HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
@@ -37,7 +38,7 @@ public static class OpdsV2Endpoints
             var user = RequestIdentity.GetAuthUser(context);
             var apiKey = RequestIdentity.GetApiKey(context);
             var feed = await opdsV2.GetCatalogFeedAsync(user, apiKey, ct);
-            return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
+            return Results.Json(feed, ApiJsonContext.Default.OpdsV2Feed, contentType: OpdsV2MimeTypes.OpdsJson);
         });
 
         group.MapGet("/search", async (string? query, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
@@ -45,7 +46,7 @@ public static class OpdsV2Endpoints
             var user = RequestIdentity.GetAuthUser(context);
             var apiKey = RequestIdentity.GetApiKey(context);
             var feed = await opdsV2.SearchFeedAsync(user, query ?? string.Empty, apiKey, ct);
-            return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
+            return Results.Json(feed, ApiJsonContext.Default.OpdsV2Feed, contentType: OpdsV2MimeTypes.OpdsJson);
         });
 
         group.MapGet("/libraries", async (HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
@@ -53,7 +54,7 @@ public static class OpdsV2Endpoints
             var user = RequestIdentity.GetAuthUser(context);
             var apiKey = RequestIdentity.GetApiKey(context);
             var feed = await opdsV2.GetLibrariesFeedAsync(user, apiKey, ct);
-            return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
+            return Results.Json(feed, ApiJsonContext.Default.OpdsV2Feed, contentType: OpdsV2MimeTypes.OpdsJson);
         });
 
         async Task<IResult> LibraryFeed(string id, int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct)
@@ -61,7 +62,7 @@ public static class OpdsV2Endpoints
             var feed = await opdsV2.GetLibrarySeriesFeedAsync(RequestIdentity.GetAuthUser(context), id, Math.Max(0, page ?? 0), RequestIdentity.GetApiKey(context), ct);
             return feed == null
                 ? Results.NotFound()
-                : Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
+                : Results.Json(feed, ApiJsonContext.Default.OpdsV2Feed, contentType: OpdsV2MimeTypes.OpdsJson);
         }
 
         group.MapGet("/libraries/{id}", LibraryFeed);
@@ -72,7 +73,7 @@ public static class OpdsV2Endpoints
             var feed = await opdsV2.GetSeriesBooksFeedAsync(RequestIdentity.GetAuthUser(context), id, Math.Max(0, page ?? 0), RequestIdentity.GetApiKey(context), ct);
             return feed == null
                 ? Results.NotFound()
-                : Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
+                : Results.Json(feed, ApiJsonContext.Default.OpdsV2Feed, contentType: OpdsV2MimeTypes.OpdsJson);
         });
 
         group.MapGet("/series", async (int? page, HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct) =>
@@ -80,7 +81,7 @@ public static class OpdsV2Endpoints
             var user = RequestIdentity.GetAuthUser(context);
             var apiKey = RequestIdentity.GetApiKey(context);
             var feed = await opdsV2.GetSeriesFeedAsync(user, Math.Max(0, page ?? 0), apiKey, ct);
-            return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
+            return Results.Json(feed, ApiJsonContext.Default.OpdsV2Feed, contentType: OpdsV2MimeTypes.OpdsJson);
         });
     }
 
@@ -99,7 +100,7 @@ public static class OpdsV2Endpoints
             var user = RequestIdentity.GetAuthUser(context);
             var apiKey = RequestIdentity.GetApiKey(context);
             var feed = await opdsV2.GetBooksFeedAsync(user, Math.Max(0, page ?? 0), apiKey, ct);
-            return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
+            return Results.Json(feed, ApiJsonContext.Default.OpdsV2Feed, contentType: OpdsV2MimeTypes.OpdsJson);
         }
 
         async Task<IResult> KeepReadingFeed(HttpContext context, IOpdsV2Service opdsV2, CancellationToken ct)
@@ -107,7 +108,7 @@ public static class OpdsV2Endpoints
             var user = RequestIdentity.GetAuthUser(context);
             var apiKey = RequestIdentity.GetApiKey(context);
             var feed = await opdsV2.GetKeepReadingFeedAsync(user, apiKey, ct);
-            return Results.Json(feed, contentType: OpdsV2MimeTypes.OpdsJson);
+            return Results.Json(feed, ApiJsonContext.Default.OpdsV2Feed, contentType: OpdsV2MimeTypes.OpdsJson);
         }
 
         group.MapGet("/books/browse", BooksFeed);
@@ -129,7 +130,7 @@ public static class OpdsV2Endpoints
             var pub = await opdsV2.GetPublicationAsync(user, id, apiKey, ct);
             return pub == null
                 ? Results.NotFound($"Publication {id} not found")
-                : Results.Json(pub, contentType: OpdsV2MimeTypes.PublicationJson);
+                : Results.Json(pub, ApiJsonContext.Default.OpdsV2Publication, contentType: OpdsV2MimeTypes.PublicationJson);
         });
 
         group.MapGet("/books/{id}/thumbnail", async (

@@ -61,13 +61,9 @@ public sealed class KoboService : IKoboService
         _logger.LogInformation("Kobo sync for user {UserId}, offset {Offset}", user.Id, offset);
 
         var selectSql = $"""
-            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status",
-                   m."Hash", m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt",
-                   m."ModifiedAt", m."DeletedAt", m."SeriesId",
-                   mm."Id", mm."MediaId", mm."AgeRating", mm."Title", mm."TitleSort", mm."Summary", mm."Publisher", mm."Genres", mm."Number",
-                   mm."Volume", mm."Year", mm."Month", mm."Day", mm."Writers", mm."Pencillers", mm."Inkers",
-                   mm."Colorists", mm."Letterers", mm."CoverArtists", mm."Editors",
-                   s."Id", s."Name"
+            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status", m."Hash",
+                   m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt", m."ModifiedAt",
+                   m."DeletedAt", m."SeriesId"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -77,15 +73,7 @@ public sealed class KoboService : IKoboService
             LIMIT @LimitPlusOne OFFSET @Offset;
             """;
 
-        var mediaList = (await conn.QueryAsync<Media, MediaMetadata?, Series?, Media>(
-            new CommandDefinition(selectSql, parameters, cancellationToken: ct),
-            (m, mm, s) =>
-            {
-                m.Metadata = mm;
-                m.Series = s;
-                return m;
-            },
-            splitOn: "Id,Id")).AsList();
+        var mediaList = (await conn.QueryAsync<Media>(selectSql, parameters).WithMetadataAsync(conn).WithSeriesAsync(conn)).AsList();
 
         var hasMore = mediaList.Count > limit;
         if (hasMore)
@@ -123,13 +111,9 @@ public sealed class KoboService : IKoboService
         parameters.Add("Id", bookId);
 
         var selectSql = $"""
-            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status",
-                   m."Hash", m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt",
-                   m."ModifiedAt", m."DeletedAt", m."SeriesId",
-                   mm."Id", mm."MediaId", mm."AgeRating", mm."Title", mm."TitleSort", mm."Summary", mm."Publisher", mm."Genres", mm."Number",
-                   mm."Volume", mm."Year", mm."Month", mm."Day", mm."Writers", mm."Pencillers", mm."Inkers",
-                   mm."Colorists", mm."Letterers", mm."CoverArtists", mm."Editors",
-                   s."Id", s."Name"
+            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status", m."Hash",
+                   m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt", m."ModifiedAt",
+                   m."DeletedAt", m."SeriesId"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -138,15 +122,7 @@ public sealed class KoboService : IKoboService
             LIMIT 1;
             """;
 
-        var rows = await conn.QueryAsync<Media, MediaMetadata?, Series?, Media>(
-            new CommandDefinition(selectSql, parameters, cancellationToken: ct),
-            (m, mm, s) =>
-            {
-                m.Metadata = mm;
-                m.Series = s;
-                return m;
-            },
-            splitOn: "Id,Id");
+        var rows = await conn.QueryAsync<Media>(selectSql, parameters).WithMetadataAsync(conn).WithSeriesAsync(conn);
 
         var media = rows.FirstOrDefault();
         if (media == null) return null;
@@ -175,7 +151,7 @@ public sealed class KoboService : IKoboService
             """;
 
         var media = await conn.QueryFirstOrDefaultAsync<Media>(
-            new CommandDefinition(selectSql, parameters, cancellationToken: ct));
+            selectSql, parameters);
 
         if (media == null || !File.Exists(media.Path))
         {

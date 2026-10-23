@@ -3,6 +3,7 @@ using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Infrastructure.Data;
 using DiarSpeicher.Infrastructure.Data.Extensions;
+using HotChocolate.Execution.Configuration;
 
 namespace DiarSpeicher.Api.GraphQL;
 
@@ -97,7 +98,7 @@ public sealed class MediaBySeriesDataLoader : GroupedDataLoader<string, Media>
             WHERE m."SeriesId" IN @SeriesKeys AND {where};
             """;
 
-        var media = await conn.QueryAsync<Media>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
+        var media = await conn.QueryAsync<Media>(sql, parameters);
         return media.ToLookup(m => m.SeriesId!);
     }
 }
@@ -136,7 +137,7 @@ public sealed class SeriesByLibraryDataLoader : GroupedDataLoader<string, Series
             WHERE s."LibraryId" IN @LibraryKeys AND {where};
             """;
 
-        var series = await conn.QueryAsync<Series>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
+        var series = await conn.QueryAsync<Series>(sql, parameters);
         return series.ToLookup(s => s.LibraryId!);
     }
 }
@@ -175,7 +176,7 @@ public sealed class SeriesByIdDataLoader : BatchDataLoader<string, Series>
             WHERE s."Id" IN @SeriesKeys AND {where};
             """;
 
-        var series = await conn.QueryAsync<Series>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
+        var series = await conn.QueryAsync<Series>(sql, parameters);
         return series.ToDictionary(s => s.Id);
     }
 }
@@ -213,9 +214,32 @@ public sealed class LibraryByIdDataLoader : BatchDataLoader<string, Library>
             WHERE l."Id" IN @LibraryKeys AND {where};
             """;
 
-        var libraries = await conn.QueryAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
+        var libraries = await conn.QueryAsync<Library>(sql, parameters);
         return libraries.ToDictionary(l => l.Id);
     }
+}
+
+/// <summary>
+/// AddDataLoader&lt;T&gt;() construye el loader con ActivatorUtilities, que busca el constructor por
+/// reflexion; en Native AOT ese constructor no se conserva y el arranque falla. La fabrica explicita
+/// deja la construccion en codigo compilado.
+/// </summary>
+internal static class CatalogDataLoaderRegistration
+{
+    public static IRequestExecutorBuilder AddCatalogDataLoaders(this IRequestExecutorBuilder builder) => builder
+        .AddDataLoader(sp => Create(sp, (db, http, scheduler, options) => new MediaBySeriesDataLoader(db, http, scheduler, options)))
+        .AddDataLoader(sp => Create(sp, (db, http, scheduler, options) => new SeriesByLibraryDataLoader(db, http, scheduler, options)))
+        .AddDataLoader(sp => Create(sp, (db, http, scheduler, options) => new SeriesByIdDataLoader(db, http, scheduler, options)))
+        .AddDataLoader(sp => Create(sp, (db, http, scheduler, options) => new LibraryByIdDataLoader(db, http, scheduler, options)));
+
+    private static T Create<T>(
+        IServiceProvider sp,
+        Func<ISqliteConnectionFactory, IHttpContextAccessor, IBatchScheduler, DataLoaderOptions, T> create) =>
+        create(
+            sp.GetRequiredService<ISqliteConnectionFactory>(),
+            sp.GetRequiredService<IHttpContextAccessor>(),
+            sp.GetRequiredService<IBatchScheduler>(),
+            sp.GetRequiredService<DataLoaderOptions>());
 }
 
 internal static class AuthUserAccessor

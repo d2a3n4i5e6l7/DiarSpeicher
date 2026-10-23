@@ -131,7 +131,7 @@ public sealed class AgeFilterMatrixTests : IDisposable
             ORDER BY m."Id" ASC;
             """;
 
-        return _db.Connection.Query<string>(sql, parameters).ToList();
+        return _db.Connection.Query<string>(sql, parameters).AsList();
     }
 
     [Fact]

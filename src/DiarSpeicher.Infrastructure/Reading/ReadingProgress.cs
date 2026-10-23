@@ -66,7 +66,7 @@ public class ReadingProgress : IReadingProgress
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
 
         const string checkUserSql = @"SELECT 1 FROM ""Users"" WHERE ""Id"" = @UserId LIMIT 1;";
-        var userExists = await conn.ExecuteScalarAsync<int?>(new CommandDefinition(checkUserSql, new { UserId = user.Id }, cancellationToken: ct));
+        var userExists = await conn.ExecuteScalarAsync<int?>(checkUserSql, new { UserId = user.Id });
         if (userExists is null) return false;
 
         var isEpub = EpubPageMapStore.IsEpub(book);
@@ -86,7 +86,7 @@ public class ReadingProgress : IReadingProgress
             """;
 
         var session = await conn.QueryFirstOrDefaultAsync<ReadingSession>(
-            new CommandDefinition(selectSessionSql, new { UserId = user.Id, MediaId = book.Id }, cancellationToken: ct));
+            selectSessionSql, new { UserId = user.Id, MediaId = book.Id });
 
         var isNew = session == null;
         if (isNew)
@@ -112,7 +112,7 @@ public class ReadingProgress : IReadingProgress
                     @Status, @RenderedPage, @RenderedTotalPages, @RenderedProfileKey, @CreatedAt, @UpdatedAt
                 );
                 """;
-            await conn.ExecuteAsync(new CommandDefinition(insertSessionSql, ToSessionRow(session!), cancellationToken: ct));
+            await conn.ExecuteAsync(insertSessionSql, session!);
         }
         else
         {
@@ -129,29 +129,11 @@ public class ReadingProgress : IReadingProgress
                     "UpdatedAt" = @UpdatedAt
                 WHERE "Id" = @Id;
                 """;
-            await conn.ExecuteAsync(new CommandDefinition(updateSessionSql, ToSessionRow(session!), cancellationToken: ct));
+            await conn.ExecuteAsync(updateSessionSql, session!);
         }
 
         return true;
     }
-
-    private static object ToSessionRow(ReadingSession session) => new
-    {
-        session.Id,
-        session.UserId,
-        session.MediaId,
-        session.SessionDate,
-        session.StartPage,
-        session.EndPage,
-        session.EndPercentage,
-        session.StartPercentage,
-        Status = session.Status.ToString(),
-        session.RenderedPage,
-        session.RenderedTotalPages,
-        session.RenderedProfileKey,
-        session.CreatedAt,
-        session.UpdatedAt
-    };
 
     private static void ApplyProgressUpdate(
         ReadingSession session,
@@ -219,10 +201,7 @@ public class ReadingProgress : IReadingProgress
             WHERE "Id" = @Id;
             """;
 
-        await conn.ExecuteAsync(new CommandDefinition(
-            updateSql,
-            new { Converted = converted, Total = total, ProfileKey = profileKey, Id = session.Id },
-            cancellationToken: ct));
+        await conn.ExecuteAsync(updateSql, new { Converted = converted, Total = total, ProfileKey = profileKey, Id = session.Id });
 
         session.RenderedPage = converted;
         session.RenderedTotalPages = total;
@@ -250,8 +229,8 @@ public class ReadingProgress : IReadingProgress
             WHERE "MediaId" IN @MediaIds AND "ProfileKey" = @ProfileKey AND "TotalPages" > 0;
             """;
 
-        var rows = await conn.QueryAsync<(string MediaId, int TotalPages)>(
-            new CommandDefinition(sql, new { MediaIds = mediaIds, ProfileKey = profileKey }, cancellationToken: ct));
+        var rows = await conn.QueryAsync<MediaTotalPagesRow>(
+            sql, new { MediaIds = mediaIds, ProfileKey = profileKey });
 
         return rows.ToDictionary(r => r.MediaId, r => r.TotalPages, StringComparer.Ordinal);
     }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DiarSpeicher.Infrastructure.Metadata;
+using DiarSpeicher.Infrastructure.Serialization;
 using DiarSpeicher.Infrastructure.Storage;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -9,8 +10,6 @@ namespace DiarSpeicher.Infrastructure.Background;
 public sealed class PartialUploadPurgeService : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromHours(6);
-
-    private static readonly JsonSerializerOptions MetaJson = new() { PropertyNameCaseInsensitive = true };
 
     private readonly IOptions<StorageOptions> _storage;
     private readonly IOptions<MangaBakaOptions> _mangaBaka;
@@ -106,7 +105,7 @@ public sealed class PartialUploadPurgeService : BackgroundService
     {
         try
         {
-            var meta = JsonSerializer.Deserialize<UploadMeta>(File.ReadAllText(metaPath), MetaJson);
+            var meta = JsonSerializer.Deserialize(File.ReadAllText(metaPath), InfrastructureJsonContext.Default.UploadMeta);
             return string.IsNullOrWhiteSpace(meta?.PartPath) ? null : meta.PartPath;
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
@@ -130,5 +129,5 @@ public sealed class PartialUploadPurgeService : BackgroundService
         }
     }
 
-    private sealed record UploadMeta(string? PartPath);
+    internal sealed record UploadMeta(string? PartPath);
 }

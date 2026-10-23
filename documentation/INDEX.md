@@ -1,6 +1,6 @@
 # Documentación · DiarSpeicher
 
-Backend de medios en .NET 10: escaneo de bibliotecas, streaming de cómics y EPUB, y
+Backend de medios en .NET 11: escaneo de bibliotecas, streaming de cómics y EPUB, y
 catálogos OPDS sobre SQLite. Se despliega como contenedor propio y se sirve al exterior a
 través del Gateway [tvboxHealth](../../Gateway/README.md), que resuelve la identidad y le
 pasa el usuario ya autenticado en cabeceras.

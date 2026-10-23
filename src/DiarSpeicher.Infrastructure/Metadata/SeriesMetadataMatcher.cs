@@ -53,7 +53,7 @@ public class SeriesMetadataMatcher : ISeriesMetadataMatcher
         await using var conn = await _connectionFactory.CreateConnectionAsync(cancellationToken);
         const string sql = """SELECT "Name" FROM "Series" WHERE "Id" = @SeriesId LIMIT 1;""";
         var name = await conn.QueryFirstOrDefaultAsync<string>(
-            new CommandDefinition(sql, new { SeriesId = seriesId }, cancellationToken: cancellationToken));
+            sql, new { SeriesId = seriesId });
 
         if (string.IsNullOrWhiteSpace(name)) return [];
 
@@ -65,7 +65,7 @@ public class SeriesMetadataMatcher : ISeriesMetadataMatcher
         await using var conn = await _connectionFactory.CreateConnectionAsync(cancellationToken);
         const string checkSql = """SELECT 1 FROM "Series" WHERE "Id" = @SeriesId LIMIT 1;""";
         var exists = await conn.ExecuteScalarAsync<int?>(
-            new CommandDefinition(checkSql, new { SeriesId = seriesId }, cancellationToken: cancellationToken));
+            checkSql, new { SeriesId = seriesId });
 
         if (!exists.HasValue) return false;
 
@@ -119,7 +119,7 @@ public class SeriesMetadataMatcher : ISeriesMetadataMatcher
             UPDATE "Series" SET "UpdatedAt" = @UpdatedAt WHERE "Id" = @SeriesId;
             """;
 
-        await conn.ExecuteAsync(new CommandDefinition(upsertSql, parameters, cancellationToken: cancellationToken));
+        await conn.ExecuteAsync(upsertSql, parameters);
         return true;
     }
 
@@ -128,7 +128,7 @@ public class SeriesMetadataMatcher : ISeriesMetadataMatcher
         await using var conn = await _connectionFactory.CreateConnectionAsync(cancellationToken);
         const string sql = """DELETE FROM "SeriesMetadata" WHERE "SeriesId" = @SeriesId;""";
         var rows = await conn.ExecuteAsync(
-            new CommandDefinition(sql, new { SeriesId = seriesId }, cancellationToken: cancellationToken));
+            sql, new { SeriesId = seriesId });
 
         return rows > 0;
     }

@@ -287,7 +287,9 @@ public static class SqliteDatabaseInitializer
         this System.Data.Common.DbConnection connection,
         CancellationToken cancellationToken = default)
     {
-        await connection.ExecuteAsync(new CommandDefinition(SchemaSql, cancellationToken: cancellationToken));
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await connection.ExecuteAsync(SchemaSql);
     }
 
     public static async Task InitializeDatabaseAsync(
@@ -295,7 +297,7 @@ public static class SqliteDatabaseInitializer
         CancellationToken cancellationToken = default)
     {
         await using var conn = await connectionFactory.CreateConnectionAsync(cancellationToken);
-        await conn.ExecuteAsync(new CommandDefinition(SchemaSql, cancellationToken: cancellationToken));
+        await conn.ExecuteAsync(SchemaSql);
     }
 
     public static async Task<int> BackfillSortNamesAsync(
@@ -304,8 +306,8 @@ public static class SqliteDatabaseInitializer
     {
         await using var conn = await connectionFactory.CreateConnectionAsync(cancellationToken);
         const string selectSql = """SELECT "Id", "Name" FROM "Media" WHERE "SortName" IS NULL;""";
-        var pending = (await conn.QueryAsync<(string Id, string Name)>(
-            new CommandDefinition(selectSql, cancellationToken: cancellationToken))).ToList();
+        var pending = (await conn.QueryAsync<IdNameRow>(
+            selectSql)).ToList();
 
         if (pending.Count == 0) return 0;
 
@@ -316,7 +318,7 @@ public static class SqliteDatabaseInitializer
             SortName = DiarSpeicher.Core.Filesystem.SortKey.From(p.Name)
         });
 
-        await conn.ExecuteAsync(new CommandDefinition(updateSql, updates, cancellationToken: cancellationToken));
+        await conn.ExecuteAsync(updateSql, updates);
         return pending.Count;
     }
 }

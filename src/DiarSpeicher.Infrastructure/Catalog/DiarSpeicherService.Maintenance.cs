@@ -13,7 +13,7 @@ public sealed partial class DiarSpeicherService
 {
     private const string LibraryIdParam = "LibraryId";
 
-    private sealed record MissingSeriesRow(string Id, string Name, string Path, long VolumeCount, long ReadingSessions);
+    internal sealed record MissingSeriesRow(string Id, string Name, string Path, long VolumeCount, long ReadingSessions);
 
     public async Task<DiarSpeicherMissingReportDto> GetMissingAsync(AuthUser user, string libraryId, CancellationToken ct = default)
     {
@@ -33,7 +33,7 @@ public sealed partial class DiarSpeicherService
             """;
 
         var seriesRows = (await conn.QueryAsync<MissingSeriesRow>(
-            new CommandDefinition(seriesSql, seriesParams, cancellationToken: ct)
+            seriesSql, seriesParams
         )).AsList();
 
         var report = new DiarSpeicherMissingReportDto
@@ -67,7 +67,7 @@ public sealed partial class DiarSpeicherService
             """;
 
         var orphanSessions = (await conn.QueryAsync<int>(
-            new CommandDefinition(orphansSql, mediaParams, cancellationToken: ct)
+            orphansSql, mediaParams
         )).AsList();
 
         report.OrphanVolumes = orphanSessions.Count;
@@ -95,8 +95,8 @@ public sealed partial class DiarSpeicherService
             WHERE s."LibraryId" = @LibraryId AND s."Status" = @Status AND {seriesWhere};
             """;
 
-        var seriesList = (await conn.QueryAsync<(string Id, string Path, string? ThumbnailPath)>(
-            new CommandDefinition(seriesSql, seriesParams, cancellationToken: ct)
+        var seriesList = (await conn.QueryAsync<IdPathThumbnailRow>(
+            seriesSql, seriesParams
         )).AsList();
 
         var goneSeries = seriesList.Where(s => !Directory.Exists(s.Path)).ToList();
@@ -114,8 +114,8 @@ public sealed partial class DiarSpeicherService
             WHERE s."LibraryId" = @LibraryId AND m."Status" = @MissingStatus AND {mediaWhere};
             """;
 
-        var mediaList = (await conn.QueryAsync<(string Id, string Path, string? ThumbnailPath)>(
-            new CommandDefinition(mediaSql, mediaParams, cancellationToken: ct)
+        var mediaList = (await conn.QueryAsync<IdPathThumbnailRow>(
+            mediaSql, mediaParams
         )).AsList();
 
         var goneMedia = mediaList.Where(m => !File.Exists(m.Path)).ToList();
@@ -136,12 +136,12 @@ public sealed partial class DiarSpeicherService
             if (goneMedia.Count > 0)
             {
                 const string deleteMediaSql = @"DELETE FROM ""Media"" WHERE ""Id"" IN @Ids;";
-                await conn.ExecuteAsync(new CommandDefinition(deleteMediaSql, new { Ids = goneMedia.Select(m => m.Id) }, tx, cancellationToken: ct));
+                await conn.ExecuteAsync(deleteMediaSql, new { Ids = goneMedia.Select(m => m.Id) }, tx);
             }
             if (goneSeries.Count > 0)
             {
                 const string deleteSeriesSql = @"DELETE FROM ""Series"" WHERE ""Id"" IN @Ids;";
-                await conn.ExecuteAsync(new CommandDefinition(deleteSeriesSql, new { Ids = goneSeries.Select(s => s.Id) }, tx, cancellationToken: ct));
+                await conn.ExecuteAsync(deleteSeriesSql, new { Ids = goneSeries.Select(s => s.Id) }, tx);
             }
             await tx.CommitAsync(ct);
         }
@@ -174,8 +174,8 @@ public sealed partial class DiarSpeicherService
             WHERE (m."Path" = @Root OR substr(m."Path", 1, @PrefixLen) = @Prefix) AND {mediaWhere};
             """;
 
-        var media = (await conn.QueryAsync<(string Id, string Path, string? ThumbnailPath)>(
-            new CommandDefinition(mediaSql, mediaParams, cancellationToken: ct)
+        var media = (await conn.QueryAsync<IdPathThumbnailRow>(
+            mediaSql, mediaParams
         )).AsList();
 
         var (seriesWhere, seriesParams) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
@@ -190,8 +190,8 @@ public sealed partial class DiarSpeicherService
             WHERE (s."Path" = @Root OR substr(s."Path", 1, @PrefixLen) = @Prefix) AND {seriesWhere};
             """;
 
-        var series = (await conn.QueryAsync<(string Id, string Path, string? ThumbnailPath)>(
-            new CommandDefinition(seriesSql, seriesParams, cancellationToken: ct)
+        var series = (await conn.QueryAsync<IdPathThumbnailRow>(
+            seriesSql, seriesParams
         )).AsList();
 
         var thumbs = media.Select(m => m.ThumbnailPath)
@@ -209,12 +209,12 @@ public sealed partial class DiarSpeicherService
             if (media.Count > 0)
             {
                 const string deleteMediaSql = @"DELETE FROM ""Media"" WHERE ""Id"" IN @Ids;";
-                await conn.ExecuteAsync(new CommandDefinition(deleteMediaSql, new { Ids = media.Select(m => m.Id) }, tx, cancellationToken: ct));
+                await conn.ExecuteAsync(deleteMediaSql, new { Ids = media.Select(m => m.Id) }, tx);
             }
             if (series.Count > 0)
             {
                 const string deleteSeriesSql = @"DELETE FROM ""Series"" WHERE ""Id"" IN @Ids;";
-                await conn.ExecuteAsync(new CommandDefinition(deleteSeriesSql, new { Ids = series.Select(s => s.Id) }, tx, cancellationToken: ct));
+                await conn.ExecuteAsync(deleteSeriesSql, new { Ids = series.Select(s => s.Id) }, tx);
             }
             await tx.CommitAsync(ct);
         }

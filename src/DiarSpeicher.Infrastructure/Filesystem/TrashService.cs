@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DiarSpeicher.Infrastructure.Serialization;
 
 namespace DiarSpeicher.Infrastructure.Filesystem;
 
@@ -155,7 +156,7 @@ public sealed class TrashService : ITrashService
                 // Los metadatos primero. Un corte de luz entre el movimiento y el JSON
                 // dejaria el contenido en la papelera sin saber de donde salio: imposible
                 // de restaurar. Al reves solo queda un hueco vacio que el purgado limpia.
-                File.WriteAllText(Path.Combine(slot, MetaName), JsonSerializer.Serialize(moved));
+                File.WriteAllText(Path.Combine(slot, MetaName), JsonSerializer.Serialize(moved, InfrastructureJsonContext.Default.TrashEntry));
 
                 // Renombrado dentro del mismo sistema de ficheros: es atomico, asi que no
                 // existe el estado "a medio mover".
@@ -317,7 +318,7 @@ public sealed class TrashService : ITrashService
         {
             var meta = Path.Combine(slot, MetaName);
 
-            return File.Exists(meta) ? JsonSerializer.Deserialize<TrashEntry>(File.ReadAllText(meta)) : null;
+            return File.Exists(meta) ? JsonSerializer.Deserialize(File.ReadAllText(meta), InfrastructureJsonContext.Default.TrashEntry) : null;
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
         {

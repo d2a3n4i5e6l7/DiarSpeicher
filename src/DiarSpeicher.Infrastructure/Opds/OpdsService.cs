@@ -137,7 +137,7 @@ public class OpdsService : IOpdsService
             ORDER BY l."Name" ASC;
             """;
 
-        var libraries = await conn.QueryAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        var libraries = await conn.QueryAsync<Library>(sql, parameters);
         var entries = libraries.Select(l => ToOpdsEntry(l, apiKey)).ToList();
 
         var links = new List<OpdsLink>
@@ -163,7 +163,7 @@ public class OpdsService : IOpdsService
             LIMIT 1;
             """;
 
-        var library = await conn.QueryFirstOrDefaultAsync<Library>(new CommandDefinition(libSql, libParams, cancellationToken: ct));
+        var library = await conn.QueryFirstOrDefaultAsync<Library>(libSql, libParams);
         if (library == null)
         {
             throw new KeyNotFoundException($"Library {libraryId} not found");
@@ -180,11 +180,11 @@ public class OpdsService : IOpdsService
             WHERE {fullWhere};
             """;
 
-        var totalCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+        var totalCount = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
         var pagedSql = $"""
-            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
-                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year"
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status",
+                   s."UpdatedAt"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
             WHERE {fullWhere}
@@ -195,15 +195,7 @@ public class OpdsService : IOpdsService
         parameters.Add("Take", PageSize);
         parameters.Add("Skip", page * PageSize);
 
-        var seriesList = (await conn.QueryAsync<Series, SeriesMetadata, Series>(
-            pagedSql,
-            (s, sm) =>
-            {
-                s.Metadata = sm;
-                return s;
-            },
-            parameters,
-            splitOn: "SeriesId")).ToList();
+        var seriesList = (await conn.QueryAsync<Series>(pagedSql, parameters).WithMetadataAsync(conn)).ToList();
 
         var entries = seriesList.Select(s => ToOpdsEntry(s, apiKey)).ToList();
         var feed = CreatePaginatedFeed(new PaginatedFeedParams(
@@ -237,11 +229,11 @@ public class OpdsService : IOpdsService
             WHERE {where};
             """;
 
-        var totalCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+        var totalCount = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
         var pagedSql = $"""
-            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
-                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year"
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status",
+                   s."UpdatedAt"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
             WHERE {where}
@@ -252,15 +244,7 @@ public class OpdsService : IOpdsService
         parameters.Add("Take", PageSize);
         parameters.Add("Skip", page * PageSize);
 
-        var seriesList = (await conn.QueryAsync<Series, SeriesMetadata, Series>(
-            pagedSql,
-            (s, sm) =>
-            {
-                s.Metadata = sm;
-                return s;
-            },
-            parameters,
-            splitOn: "SeriesId")).ToList();
+        var seriesList = (await conn.QueryAsync<Series>(pagedSql, parameters).WithMetadataAsync(conn)).ToList();
 
         var entries = seriesList.Select(s => ToOpdsEntry(s, apiKey)).ToList();
         var feed = CreatePaginatedFeed(new PaginatedFeedParams(
@@ -288,11 +272,11 @@ public class OpdsService : IOpdsService
             WHERE {where};
             """;
 
-        var totalCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+        var totalCount = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
         var pagedSql = $"""
-            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
-                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year"
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status",
+                   s."UpdatedAt"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
             WHERE {where}
@@ -303,15 +287,7 @@ public class OpdsService : IOpdsService
         parameters.Add("Take", PageSize);
         parameters.Add("Skip", page * PageSize);
 
-        var seriesList = (await conn.QueryAsync<Series, SeriesMetadata, Series>(
-            pagedSql,
-            (s, sm) =>
-            {
-                s.Metadata = sm;
-                return s;
-            },
-            parameters,
-            splitOn: "SeriesId")).ToList();
+        var seriesList = (await conn.QueryAsync<Series>(pagedSql, parameters).WithMetadataAsync(conn)).ToList();
 
         var entries = seriesList.Select(s => ToOpdsEntry(s, apiKey)).ToList();
         var feed = CreatePaginatedFeed(new PaginatedFeedParams(
@@ -334,23 +310,15 @@ public class OpdsService : IOpdsService
         sParams.Add("SeriesId", seriesId);
 
         var seriesSql = $"""
-            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
-                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year"
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status",
+                   s."UpdatedAt"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
             WHERE s."Id" = @SeriesId AND {sWhere}
             LIMIT 1;
             """;
 
-        var seriesRows = await conn.QueryAsync<Series, SeriesMetadata, Series>(
-            seriesSql,
-            (s, sm) =>
-            {
-                s.Metadata = sm;
-                return s;
-            },
-            sParams,
-            splitOn: "SeriesId");
+        var seriesRows = await conn.QueryAsync<Series>(seriesSql, sParams).WithMetadataAsync(conn);
 
         var series = seriesRows.FirstOrDefault();
         if (series == null)
@@ -371,11 +339,12 @@ public class OpdsService : IOpdsService
             WHERE {fullWhere};
             """;
 
-        var totalCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, mParams, cancellationToken: ct));
+        var totalCount = await conn.ExecuteScalarAsync<int>(countSql, mParams);
 
         var pagedSql = $"""
-            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
-                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year"
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name",
+                   m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta",
+                   m."ModifiedAt", m."UpdatedAt"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -388,15 +357,7 @@ public class OpdsService : IOpdsService
         mParams.Add("Take", PageSize);
         mParams.Add("Skip", page * PageSize);
 
-        var books = (await conn.QueryAsync<Media, MediaMetadata, Media>(
-            pagedSql,
-            (media, meta) =>
-            {
-                media.Metadata = meta;
-                return media;
-            },
-            mParams,
-            splitOn: "MediaId")).ToList();
+        var books = (await conn.QueryAsync<Media>(pagedSql, mParams).WithMetadataAsync(conn)).ToList();
 
         var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
@@ -436,11 +397,12 @@ public class OpdsService : IOpdsService
             WHERE {where};
             """;
 
-        var totalCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+        var totalCount = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
         var pagedSql = $"""
-            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
-                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year"
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name",
+                   m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta",
+                   m."ModifiedAt", m."UpdatedAt"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -453,15 +415,7 @@ public class OpdsService : IOpdsService
         parameters.Add("Take", PageSize);
         parameters.Add("Skip", page * PageSize);
 
-        var books = (await conn.QueryAsync<Media, MediaMetadata, Media>(
-            pagedSql,
-            (media, meta) =>
-            {
-                media.Metadata = meta;
-                return media;
-            },
-            parameters,
-            splitOn: "MediaId")).ToList();
+        var books = (await conn.QueryAsync<Media>(pagedSql, parameters).WithMetadataAsync(conn)).ToList();
 
         var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
@@ -494,11 +448,12 @@ public class OpdsService : IOpdsService
             WHERE {where};
             """;
 
-        var totalCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+        var totalCount = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
         var pagedSql = $"""
-            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
-                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year"
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name",
+                   m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta",
+                   m."ModifiedAt", m."UpdatedAt"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -511,15 +466,7 @@ public class OpdsService : IOpdsService
         parameters.Add("Take", PageSize);
         parameters.Add("Skip", page * PageSize);
 
-        var books = (await conn.QueryAsync<Media, MediaMetadata, Media>(
-            pagedSql,
-            (media, meta) =>
-            {
-                media.Metadata = meta;
-                return media;
-            },
-            parameters,
-            splitOn: "MediaId")).ToList();
+        var books = (await conn.QueryAsync<Media>(pagedSql, parameters).WithMetadataAsync(conn)).ToList();
 
         var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
@@ -548,8 +495,9 @@ public class OpdsService : IOpdsService
         parameters.Add("MediaIds", mediaIds);
 
         var sql = $"""
-            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
-                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year"
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name",
+                   m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta",
+                   m."ModifiedAt", m."UpdatedAt"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -559,15 +507,7 @@ public class OpdsService : IOpdsService
 
         var books = mediaIds.Count == 0
             ? []
-            : (await conn.QueryAsync<Media, MediaMetadata, Media>(
-                sql,
-                (media, meta) =>
-                {
-                    media.Metadata = meta;
-                    return media;
-                },
-                parameters,
-                splitOn: "MediaId")).ToList();
+            : (await conn.QueryAsync<Media>(sql, parameters).WithMetadataAsync(conn)).ToList();
 
         var booksMap = books.ToDictionary(b => b.Id);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
@@ -621,7 +561,7 @@ public class OpdsService : IOpdsService
             ORDER BY l."Name" ASC;
             """;
 
-        var libraries = await conn.QueryAsync<Library>(new CommandDefinition(libSql, lParams, cancellationToken: ct));
+        var libraries = await conn.QueryAsync<Library>(libSql, lParams);
         entries.AddRange(libraries.Select(l => ToOpdsEntry(l, apiKey)));
 
         // 2. Series
@@ -630,23 +570,15 @@ public class OpdsService : IOpdsService
         sParams.Add("SearchPattern", $"%{search}%");
 
         var seriesSql = $"""
-            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
-                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year"
+            SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status",
+                   s."UpdatedAt"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
             WHERE {sWhere}
             ORDER BY s."Name" ASC;
             """;
 
-        var seriesList = await conn.QueryAsync<Series, SeriesMetadata, Series>(
-            seriesSql,
-            (s, sm) =>
-            {
-                s.Metadata = sm;
-                return s;
-            },
-            sParams,
-            splitOn: "SeriesId");
+        var seriesList = await conn.QueryAsync<Series>(seriesSql, sParams).WithMetadataAsync(conn);
         entries.AddRange(seriesList.Select(s => ToOpdsEntry(s, apiKey)));
 
         // 3. Books
@@ -655,8 +587,9 @@ public class OpdsService : IOpdsService
         mParams.Add("SearchPattern", $"%{search}%");
 
         var booksSql = $"""
-            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
-                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year"
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name",
+                   m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta",
+                   m."ModifiedAt", m."UpdatedAt"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -665,15 +598,7 @@ public class OpdsService : IOpdsService
             ORDER BY m."SortName" ASC, m."Name" ASC;
             """;
 
-        var books = (await conn.QueryAsync<Media, MediaMetadata, Media>(
-            booksSql,
-            (media, meta) =>
-            {
-                media.Metadata = meta;
-                return media;
-            },
-            mParams,
-            splitOn: "MediaId")).ToList();
+        var books = (await conn.QueryAsync<Media>(booksSql, mParams).WithMetadataAsync(conn)).ToList();
 
         var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
@@ -704,7 +629,7 @@ public class OpdsService : IOpdsService
             LIMIT 1;
             """;
 
-        var book = await conn.QueryFirstOrDefaultAsync<Media>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        var book = await conn.QueryFirstOrDefaultAsync<Media>(sql, parameters);
 
         if (book == null) return (null, null);
 
@@ -752,7 +677,7 @@ public class OpdsService : IOpdsService
             LIMIT 1;
             """;
 
-        return await conn.QueryFirstOrDefaultAsync<Media>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        return await conn.QueryFirstOrDefaultAsync<Media>(sql, parameters);
     }
 
     public async Task<(byte[]? Data, string ContentType)> GetBookThumbnailAsync(AuthUser user, string bookId, CancellationToken ct = default)

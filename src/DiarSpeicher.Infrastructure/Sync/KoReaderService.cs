@@ -42,7 +42,7 @@ public sealed class KoReaderService : IKoReaderService
             """;
 
         var mediaId = await conn.QueryFirstOrDefaultAsync<string>(
-            new CommandDefinition(mediaSql, parameters, cancellationToken: ct));
+            mediaSql, parameters);
 
         if (mediaId == null)
         {
@@ -59,7 +59,7 @@ public sealed class KoReaderService : IKoReaderService
             """;
 
         var session = await conn.QueryFirstOrDefaultAsync<ReadingSession>(
-            new CommandDefinition(sessionSql, new { UserId = user.Id, MediaId = mediaId }, cancellationToken: ct));
+            sessionSql, new { UserId = user.Id, MediaId = mediaId });
 
         if (session == null)
         {
@@ -99,7 +99,7 @@ public sealed class KoReaderService : IKoReaderService
             """;
 
         var mediaId = await conn.QueryFirstOrDefaultAsync<string>(
-            new CommandDefinition(mediaSql, parameters, cancellationToken: ct));
+            mediaSql, parameters);
 
         if (mediaId == null)
         {
@@ -108,7 +108,7 @@ public sealed class KoReaderService : IKoReaderService
 
         const string checkUserSql = @"SELECT 1 FROM ""Users"" WHERE ""Id"" = @UserId LIMIT 1;";
         var userExists = await conn.ExecuteScalarAsync<int?>(
-            new CommandDefinition(checkUserSql, new { UserId = user.Id }, cancellationToken: ct));
+            checkUserSql, new { UserId = user.Id });
 
         if (userExists is null)
         {
@@ -124,10 +124,10 @@ public sealed class KoReaderService : IKoReaderService
             """;
 
         var session = await conn.QueryFirstOrDefaultAsync<ReadingSession>(
-            new CommandDefinition(sessionSql, new { UserId = user.Id, MediaId = mediaId }, cancellationToken: ct));
+            sessionSql, new { UserId = user.Id, MediaId = mediaId });
 
         var now = DateTimeOffset.UtcNow;
-        var endPercentage = (decimal)input.Percentage;
+        var endPercentage = ToStoredPercentage(input.Percentage);
         var koreaderProgress = input.Progress;
         int? endPage = int.TryParse(input.Progress, out var p) ? p : session?.EndPage;
         var status = input.Percentage >= 1.0f ? ReadingStatus.Finished : ReadingStatus.Reading;
@@ -144,7 +144,7 @@ public sealed class KoReaderService : IKoReaderService
                 );
                 """;
 
-            await conn.ExecuteAsync(new CommandDefinition(insertSessionSql, new
+            await conn.ExecuteAsync(insertSessionSql, new
             {
                 UserId = user.Id,
                 MediaId = mediaId,
@@ -155,7 +155,7 @@ public sealed class KoReaderService : IKoReaderService
                 Status = status.ToString(),
                 CreatedAt = now,
                 UpdatedAt = now
-            }, cancellationToken: ct));
+            });
         }
         else
         {
@@ -169,7 +169,7 @@ public sealed class KoReaderService : IKoReaderService
                 WHERE "Id" = @Id;
                 """;
 
-            await conn.ExecuteAsync(new CommandDefinition(updateSessionSql, new
+            await conn.ExecuteAsync(updateSessionSql, new
             {
                 EndPercentage = endPercentage,
                 KoreaderProgress = koreaderProgress,
@@ -177,7 +177,7 @@ public sealed class KoReaderService : IKoReaderService
                 Status = status.ToString(),
                 UpdatedAt = now,
                 Id = session.Id
-            }, cancellationToken: ct));
+            });
         }
 
         return new KoReaderPutProgressResponse
@@ -186,4 +186,12 @@ public sealed class KoReaderService : IKoReaderService
             Timestamp = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
     }
+
+    /// <summary>
+    /// En .NET 11 la conversion directa de float a decimal conserva la expansion binaria completa
+    /// (0.225f pasa a 0.2249999940395355224609375). Se guarda la forma corta del float, que es el
+    /// numero que KOReader envio.
+    /// </summary>
+    private static decimal ToStoredPercentage(float percentage) =>
+        decimal.Parse(percentage.ToString(CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture);
 }

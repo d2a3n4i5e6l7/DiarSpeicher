@@ -46,7 +46,7 @@ public class KomgaService : IKomgaService
             ORDER BY l."Name" ASC;
             """;
 
-        var libraries = await conn.QueryAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        var libraries = await conn.QueryAsync<Library>(sql, parameters);
         return libraries.Select(KomgaDtoMapper.ToLibraryDto).ToList();
     }
 
@@ -63,7 +63,7 @@ public class KomgaService : IKomgaService
             LIMIT 1;
             """;
 
-        var lib = await conn.QueryFirstOrDefaultAsync<Library>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        var lib = await conn.QueryFirstOrDefaultAsync<Library>(sql, parameters);
         return lib == null ? null : KomgaDtoMapper.ToLibraryDto(lib);
     }
 
@@ -100,12 +100,11 @@ public class KomgaService : IKomgaService
             WHERE {fullWhere};
             """;
 
-        var totalElements = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+        var totalElements = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
         var pagedSql = $"""
             SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
-                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year",
-                   (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "BooksCount"
+                   (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "MediaCount"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
             WHERE {fullWhere}
@@ -116,17 +115,9 @@ public class KomgaService : IKomgaService
         parameters.Add("Take", size);
         parameters.Add("Skip", page * size);
 
-        var seriesRows = await conn.QueryAsync<Series, SeriesMetadata, long, (Series Series, int BooksCount)>(
-            pagedSql,
-            (s, sm, count) =>
-            {
-                s.Metadata = sm;
-                return (s, (int)count);
-            },
-            parameters,
-            splitOn: "SeriesId,BooksCount");
+        var seriesRows = await conn.QueryAsync<CountedSeries>(pagedSql, parameters).WithMetadataAsync(conn);
 
-        var seriesDtos = seriesRows.Select(row => KomgaDtoMapper.ToSeriesDto(row.Series, row.BooksCount)).ToList();
+        var seriesDtos = seriesRows.Select(row => KomgaDtoMapper.ToSeriesDto(row, (int)row.MediaCount)).ToList();
         return KomgaPageResponse<KomgaSeriesDto>.Create(seriesDtos, page, size, totalElements);
     }
 
@@ -138,26 +129,17 @@ public class KomgaService : IKomgaService
 
         var sql = $"""
             SELECT s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt",
-                   sm."SeriesId", sm."AgeRating", sm."Booktype", sm."Comicid", sm."ComicImage", sm."Genres", sm."Links", sm."MetaType", sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues", sm."Volume", sm."Writers", sm."Year",
-                   (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "BooksCount"
+                   (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "MediaCount"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
             WHERE s."Id" = @Id AND {where}
             LIMIT 1;
             """;
 
-        var rows = await conn.QueryAsync<Series, SeriesMetadata, int, (Series Series, int BooksCount)>(
-            sql,
-            (s, sm, count) =>
-            {
-                s.Metadata = sm;
-                return (s, count);
-            },
-            parameters,
-            splitOn: "SeriesId,BooksCount");
+        var rows = await conn.QueryAsync<CountedSeries>(sql, parameters).WithMetadataAsync(conn);
 
         var first = rows.FirstOrDefault();
-        return first.Series == null ? null : KomgaDtoMapper.ToSeriesDto(first.Series, first.BooksCount);
+        return first == null ? null : KomgaDtoMapper.ToSeriesDto(first, (int)first.MediaCount);
     }
 
     public async Task<KomgaPageResponse<KomgaBookDto>> GetBooksAsync(
@@ -185,12 +167,12 @@ public class KomgaService : IKomgaService
             WHERE {where};
             """;
 
-        var totalElements = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+        var totalElements = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
         var pagedSql = $"""
-            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
-                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year",
-                   s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt"
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name",
+                   m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta",
+                   m."ModifiedAt", m."UpdatedAt"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -203,16 +185,7 @@ public class KomgaService : IKomgaService
         parameters.Add("Take", size);
         parameters.Add("Skip", page * size);
 
-        var books = (await conn.QueryAsync<Media, MediaMetadata, Series, Media>(
-            pagedSql,
-            (media, meta, series) =>
-            {
-                media.Metadata = meta;
-                media.Series = series;
-                return media;
-            },
-            parameters,
-            splitOn: "MediaId,Id")).ToList();
+        var books = (await conn.QueryAsync<Media>(pagedSql, parameters).WithMetadataAsync(conn).WithSeriesAsync(conn)).ToList();
 
         var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
@@ -239,12 +212,12 @@ public class KomgaService : IKomgaService
             WHERE {where};
             """;
 
-        var totalElements = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+        var totalElements = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
         var pagedSql = $"""
-            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
-                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year",
-                   s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt"
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name",
+                   m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta",
+                   m."ModifiedAt", m."UpdatedAt"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -257,16 +230,7 @@ public class KomgaService : IKomgaService
         parameters.Add("Take", size);
         parameters.Add("Skip", page * size);
 
-        var books = (await conn.QueryAsync<Media, MediaMetadata, Series, Media>(
-            pagedSql,
-            (media, meta, series) =>
-            {
-                media.Metadata = meta;
-                media.Series = series;
-                return media;
-            },
-            parameters,
-            splitOn: "MediaId,Id")).ToList();
+        var books = (await conn.QueryAsync<Media>(pagedSql, parameters).WithMetadataAsync(conn).WithSeriesAsync(conn)).ToList();
 
         var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
@@ -297,12 +261,12 @@ public class KomgaService : IKomgaService
             WHERE {fullWhere};
             """;
 
-        var totalElements = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+        var totalElements = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
         var pagedSql = $"""
-            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
-                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year",
-                   s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt"
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name",
+                   m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta",
+                   m."ModifiedAt", m."UpdatedAt"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -315,16 +279,7 @@ public class KomgaService : IKomgaService
         parameters.Add("Take", size);
         parameters.Add("Skip", page * size);
 
-        var books = (await conn.QueryAsync<Media, MediaMetadata, Series, Media>(
-            pagedSql,
-            (media, meta, series) =>
-            {
-                media.Metadata = meta;
-                media.Series = series;
-                return media;
-            },
-            parameters,
-            splitOn: "MediaId,Id")).ToList();
+        var books = (await conn.QueryAsync<Media>(pagedSql, parameters).WithMetadataAsync(conn).WithSeriesAsync(conn)).ToList();
 
         var sessions = await conn.GetLatestSessionsPerMediaAsync(user.Id, books.Select(b => b.Id).ToList(), ct);
         var epubTotals = await _progress.EpubTotalsAsync(books, ct);
@@ -340,9 +295,9 @@ public class KomgaService : IKomgaService
         parameters.Add("Id", id);
 
         var sql = $"""
-            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name", m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta", m."ModifiedAt", m."UpdatedAt",
-                   mm."MediaId", mm."AgeRating", mm."Genres", mm."Number", mm."Publisher", mm."Summary", mm."Title", mm."Writers", mm."Year",
-                   s."Id", s."CreatedAt", s."DeletedAt", s."Description", s."LibraryId", s."Name", s."Path", s."Status", s."UpdatedAt"
+            SELECT m."Id", m."CreatedAt", m."DeletedAt", m."Extension", m."Status", m."Hash", m."KoreaderHash", m."Name",
+                   m."Pages", m."Path", m."SeriesId", m."Size", m."SortName", m."ThumbnailPath", m."ThumbnailMeta",
+                   m."ModifiedAt", m."UpdatedAt"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -351,16 +306,7 @@ public class KomgaService : IKomgaService
             LIMIT 1;
             """;
 
-        var books = await conn.QueryAsync<Media, MediaMetadata, Series, Media>(
-            sql,
-            (media, meta, series) =>
-            {
-                media.Metadata = meta;
-                media.Series = series;
-                return media;
-            },
-            parameters,
-            splitOn: "MediaId,Id");
+        var books = await conn.QueryAsync<Media>(sql, parameters).WithMetadataAsync(conn).WithSeriesAsync(conn);
 
         var book = books.FirstOrDefault();
         if (book == null) return null;
@@ -369,8 +315,7 @@ public class KomgaService : IKomgaService
         if (!string.IsNullOrWhiteSpace(user.Id))
         {
             session = await conn.QueryFirstOrDefaultAsync<ReadingSession>(
-                new CommandDefinition(
-                    """
+                """
                     SELECT "Id", "CreatedAt", "ElapsedSeconds", "EndPage", "EndPercentage",
                            "KoreaderProgress", "MediaId", "Notes", "ReadthroughNumber", "SessionDate",
                            "StartPage", "StartPercentage", "Status", "UpdatedAt", "UserId",
@@ -379,9 +324,7 @@ public class KomgaService : IKomgaService
                     WHERE "MediaId" = @Id AND "UserId" = @UserId
                     ORDER BY "Id" DESC
                     LIMIT 1;
-                    """,
-                    new { Id = id, UserId = user.Id },
-                    cancellationToken: ct));
+                    """, new { Id = id, UserId = user.Id });
         }
 
         var progress = await _progress.ResolveAsync(book, session, ct);
@@ -404,7 +347,7 @@ public class KomgaService : IKomgaService
             LIMIT 1;
             """;
 
-        var book = await conn.QueryFirstOrDefaultAsync<Media>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        var book = await conn.QueryFirstOrDefaultAsync<Media>(sql, parameters);
         if (book == null || book.Pages <= 0) return [];
 
         if (EpubPageMapStore.IsEpub(book))
@@ -420,7 +363,7 @@ public class KomgaService : IKomgaService
             """;
 
         var measured = (await conn.QueryAsync<MediaPage>(
-            new CommandDefinition(pageSql, new { MediaId = book.Id }, cancellationToken: ct))).ToList();
+            pageSql, new { MediaId = book.Id })).ToList();
 
         if (measured.Count == 0)
         {
@@ -484,7 +427,7 @@ public class KomgaService : IKomgaService
                 ON CONFLICT ("MediaId", "Number") DO NOTHING;
                 """;
 
-            await conn.ExecuteAsync(new CommandDefinition(insertSql, rows, cancellationToken: ct));
+            await conn.ExecuteAsync(insertSql, rows);
 
             const string selectSql = """
                 SELECT "FileName", "Height", "MediaId", "MediaType", "Number", "SizeBytes", "Width"
@@ -494,7 +437,7 @@ public class KomgaService : IKomgaService
                 """;
 
             return (await conn.QueryAsync<MediaPage>(
-                new CommandDefinition(selectSql, new { MediaId = book.Id }, cancellationToken: ct))).ToList();
+                selectSql, new { MediaId = book.Id })).ToList();
         }
 
         return rows;
@@ -521,7 +464,7 @@ public class KomgaService : IKomgaService
             LIMIT 1;
             """;
 
-        var book = await conn.QueryFirstOrDefaultAsync<Media>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        var book = await conn.QueryFirstOrDefaultAsync<Media>(sql, parameters);
         if (book == null) return false;
 
         var ok = await _progress.RecordAsync(user, book, new ReadingProgressUpdate(page, completed), ct);
@@ -542,7 +485,7 @@ public class KomgaService : IKomgaService
             WHERE "MediaId" = @BookId AND "UserId" = @UserId;
             """;
 
-        var rows = await conn.ExecuteAsync(new CommandDefinition(deleteSql, new { BookId = bookId, UserId = user.Id }, cancellationToken: ct));
+        var rows = await conn.ExecuteAsync(deleteSql, new { BookId = bookId, UserId = user.Id });
         if (rows > 0)
         {
             _logger.LogTrace("Deleted Komga read progress for user {UserId}, book {BookId}", user.Id, bookId);
@@ -555,7 +498,7 @@ public class KomgaService : IKomgaService
     {
         await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
         const string sql = """DELETE FROM "MediaPages" WHERE "MediaId" = @MediaId;""";
-        await conn.ExecuteAsync(new CommandDefinition(sql, new { MediaId = mediaId }, cancellationToken: ct));
+        await conn.ExecuteAsync(sql, new { MediaId = mediaId });
     }
 
     private async Task<List<KomgaBookPageDto>> GetEpubBookPagesAsync(Media book, CancellationToken ct)

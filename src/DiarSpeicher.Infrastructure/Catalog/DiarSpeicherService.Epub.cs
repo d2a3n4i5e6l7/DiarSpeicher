@@ -55,8 +55,7 @@ public sealed partial class DiarSpeicherService
         var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "s", "sm");
         parameters.Add("MediaId", mediaId);
         var sql = $"""
-            SELECT m."Id", m."Name", m."Path", m."Extension",
-                   mm."Id", mm."Title"
+            SELECT m."Id", m."Name", m."Path", m."Extension"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -64,10 +63,7 @@ public sealed partial class DiarSpeicherService
             WHERE m."Id" = @MediaId AND {where}
             LIMIT 1;
             """;
-        var rows = await conn.QueryAsync<Media, MediaMetadata?, Media>(
-            new CommandDefinition(sql, parameters, cancellationToken: ct),
-            (m, mm) => { m.Metadata = mm; return m; },
-            splitOn: "Id");
+        var rows = await conn.QueryAsync<Media>(sql, parameters).WithMetadataAsync(conn);
         var media = rows.FirstOrDefault();
 
         if (media == null || !File.Exists(media.Path)) return null;
@@ -105,7 +101,7 @@ public sealed partial class DiarSpeicherService
             WHERE m."Id" = @MediaId AND {where}
             LIMIT 1;
             """;
-        var media = await conn.QueryFirstOrDefaultAsync<Media>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        var media = await conn.QueryFirstOrDefaultAsync<Media>(sql, parameters);
 
         if (media == null || !File.Exists(media.Path)) return null;
 

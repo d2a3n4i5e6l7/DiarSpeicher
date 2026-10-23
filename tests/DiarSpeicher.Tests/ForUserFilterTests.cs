@@ -118,7 +118,7 @@ public sealed class ForUserFilterTests : IDisposable
                 return media;
             },
             parameters,
-            splitOn: "Id,MediaId").ToList();
+            splitOn: "Id,MediaId").AsList();
     }
 
     [Fact]

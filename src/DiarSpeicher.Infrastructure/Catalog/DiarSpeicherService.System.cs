@@ -8,7 +8,7 @@ public sealed partial class DiarSpeicherService
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
         const string sql = @"SELECT COUNT(*) FROM ""Users"";";
-        var userCount = await conn.ExecuteScalarAsync<int>(new CommandDefinition(sql, cancellationToken: ct));
+        var userCount = await conn.ExecuteScalarAsync<int>(sql);
         return new DiarSpeicherSystemStatusDto
         {
             Status = "OK",

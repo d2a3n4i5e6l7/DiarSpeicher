@@ -72,8 +72,7 @@ public class EpubPageMapStore : IEpubPageMapStore
             WHERE "MediaId" = @MediaId AND "ProfileKey" = @ProfileKey
             LIMIT 1;
             """;
-        return await conn.QueryFirstOrDefaultAsync<EpubPageMap>(
-            new CommandDefinition(sql, new { MediaId = mediaId, ProfileKey = profileKey }, cancellationToken: ct));
+        return await conn.QueryFirstOrDefaultAsync<EpubPageMap>(sql, new { MediaId = mediaId, ProfileKey = profileKey });
     }
 
     private static bool IsUsable(EpubPageMap? stored, DateTimeOffset fileModifiedAt) =>
@@ -98,10 +97,7 @@ public class EpubPageMapStore : IEpubPageMapStore
             """;
 
         var now = DateTimeOffset.UtcNow;
-        await conn.ExecuteAsync(new CommandDefinition(
-            upsertSql,
-            new { MediaId = book.Id, ProfileKey = profileKey, TotalPages = measured, FileModifiedAt = fileModifiedAt, BuiltAt = now },
-            cancellationToken: ct));
+        await conn.ExecuteAsync(upsertSql, new { MediaId = book.Id, ProfileKey = profileKey, TotalPages = measured, FileModifiedAt = fileModifiedAt, BuiltAt = now });
 
         _logger.LogInformation(
             "[EPUB] {Total} paginas para {Name} con el perfil {Profile}",

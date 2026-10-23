@@ -83,7 +83,7 @@ public static class MetadataEndpoints
             if (!IsAllowed(httpContext)) return Forbidden();
 
             var applied = await matcher.ApplyAsync(seriesId, mangaBakaId, ct);
-            return applied ? Results.Ok(new { matched = true }) : Results.NotFound();
+            return applied ? Results.Ok(new MatchedResponse(true)) : Results.NotFound();
         });
 
         group.MapDelete("/series/{seriesId}/match", async (
@@ -129,7 +129,7 @@ public static class MetadataEndpoints
 
         if (!httpContext.Request.HasFormContentType)
         {
-            return Results.BadRequest(new { error = "Se espera multipart/form-data con el volcado." });
+            return Results.BadRequest(new ApiError("Se espera multipart/form-data con el volcado."));
         }
 
         var sizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
@@ -142,7 +142,7 @@ public static class MetadataEndpoints
         var boundary = HeaderUtilities.RemoveQuotes(mediaType.Boundary).Value;
         if (string.IsNullOrEmpty(boundary))
         {
-            return Results.BadRequest(new { error = "Falta el boundary del multipart." });
+            return Results.BadRequest(new ApiError("Falta el boundary del multipart."));
         }
 
         var reader = new MultipartReader(boundary, httpContext.Request.Body);
@@ -154,7 +154,7 @@ public static class MetadataEndpoints
             if (result != null) return result;
         }
 
-        return Results.BadRequest(new { error = "No llegó ningún fichero." });
+        return Results.BadRequest(new ApiError("No llegó ningún fichero."));
     }
 
     private static async Task<IResult?> ProcessDumpSectionAsync(
@@ -170,7 +170,7 @@ public static class MetadataEndpoints
 
         if (!IsAcceptedDumpExtension(name))
         {
-            return Results.BadRequest(new { error = "Solo se aceptan volcados .zst, .tar.gz o .tgz." });
+            return Results.BadRequest(new ApiError("Solo se aceptan volcados .zst, .tar.gz o .tgz."));
         }
 
         return ToResult(await ingest.TryImportAsync(section.Body, name, ct), ingest);
@@ -190,18 +190,18 @@ public static class MetadataEndpoints
 
         if (ingest.GetStatus().Busy)
         {
-            return Results.Conflict(new { error = "Ya hay una ingesta del volcado en curso." });
+            return Results.Conflict(new ApiError("Ya hay una ingesta del volcado en curso."));
         }
 
         var fileName = Path.GetFileName(request.FileName ?? string.Empty);
         if (!IsAcceptedDumpExtension(fileName))
         {
-            return Results.BadRequest(new { error = "Solo se aceptan volcados .zst, .tar.gz o .tgz." });
+            return Results.BadRequest(new ApiError("Solo se aceptan volcados .zst, .tar.gz o .tgz."));
         }
 
         if (request.TotalBytes <= 0 || request.TotalBytes > options.Value.MaxArchiveBytes)
         {
-            return Results.BadRequest(new { error = $"El tamaño ({request.TotalBytes} bytes) supera el máximo configurado ({options.Value.MaxArchiveBytes})." });
+            return Results.BadRequest(new ApiError($"El tamaño ({request.TotalBytes} bytes) supera el máximo configurado ({options.Value.MaxArchiveBytes})."));
         }
 
         var uploadId = Guid.NewGuid().ToString("N");
@@ -212,7 +212,7 @@ public static class MetadataEndpoints
         await File.WriteAllBytesAsync(partPath, [], ct);
 
         const int chunkSize = 50 * 1024 * 1024;
-        return Results.Ok(new { uploadId, chunkSize });
+        return Results.Ok(new ChunkedUploadSessionResponse(uploadId, chunkSize));
     }
 
     private static async Task<IResult> HandleImportChunkAsync(
@@ -226,20 +226,20 @@ public static class MetadataEndpoints
 
         if (string.IsNullOrWhiteSpace(uploadId) || !uploadId.All(char.IsLetterOrDigit))
         {
-            return Results.BadRequest(new { error = "Identificador de subida no válido." });
+            return Results.BadRequest(new ApiError("Identificador de subida no válido."));
         }
 
         var dbDir = options.Value.ResolveDatabasePath();
         var partPath = Path.Combine(dbDir, $"import_{uploadId}.part");
         if (!File.Exists(partPath))
         {
-            return Results.NotFound(new { error = "Sesión de subida no encontrada o expirada." });
+            return Results.NotFound(new ApiError("Sesión de subida no encontrada o expirada."));
         }
 
         var fileInfo = new FileInfo(partPath);
         if (fileInfo.Length != offset)
         {
-            return Results.Conflict(new { error = "Desincronización de offset.", currentOffset = fileInfo.Length });
+            return Results.Conflict(new OffsetConflictError("Desincronización de offset.", fileInfo.Length));
         }
 
         var sizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
@@ -255,7 +255,7 @@ public static class MetadataEndpoints
         }
 
         fileInfo.Refresh();
-        return Results.Ok(new { offset = fileInfo.Length });
+        return Results.Ok(new UploadOffsetResponse(fileInfo.Length));
     }
 
     private static IResult HandleImportCompleteAsync(
@@ -269,7 +269,7 @@ public static class MetadataEndpoints
 
         if (string.IsNullOrWhiteSpace(request.UploadId) || !request.UploadId.All(char.IsLetterOrDigit))
         {
-            return Results.BadRequest(new { error = "Identificador de subida no válido." });
+            return Results.BadRequest(new ApiError("Identificador de subida no válido."));
         }
 
         var fileName = Path.GetFileName(request.FileName ?? string.Empty);
@@ -277,7 +277,7 @@ public static class MetadataEndpoints
         var partPath = Path.Combine(dbDir, $"import_{request.UploadId}.part");
         if (!File.Exists(partPath))
         {
-            return Results.NotFound(new { error = "Fichero de subida no encontrado." });
+            return Results.NotFound(new ApiError("Fichero de subida no encontrado."));
         }
 
         var outcome = ingest.TryStartImportFile(partPath, fileName);
@@ -310,10 +310,8 @@ public static class MetadataEndpoints
     private static IResult ToResult(MangaBakaIngestOutcome outcome, IMangaBakaIngestService ingest) => outcome switch
     {
         MangaBakaIngestOutcome.Started => Results.Accepted("/api/v2/metadata/status"),
-        MangaBakaIngestOutcome.Busy => Results.Conflict(new { error = "Ya hay una ingesta del volcado en curso." }),
-        _ => Results.Json(
-            new { error = ingest.LastMessage ?? "La ingesta del volcado falló." },
-            statusCode: StatusCodes.Status500InternalServerError)
+        MangaBakaIngestOutcome.Busy => Results.Conflict(new ApiError("Ya hay una ingesta del volcado en curso.")),
+        _ => ApiResults.Error(ingest.LastMessage ?? "La ingesta del volcado falló.", StatusCodes.Status500InternalServerError)
     };
 
     /// <summary>
@@ -324,6 +322,5 @@ public static class MetadataEndpoints
         httpContext.Items[AuthUserKey] is AuthUser user && user.HasPermission(Permissions.ManageLibrary);
 
     private static IResult Forbidden() =>
-        Results.Json(new { error = "This account is not allowed to manage library metadata." },
-            statusCode: StatusCodes.Status403Forbidden);
+        ApiResults.Error("This account is not allowed to manage library metadata.", StatusCodes.Status403Forbidden);
 }

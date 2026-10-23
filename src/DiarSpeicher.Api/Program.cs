@@ -1,5 +1,6 @@
 using DiarSpeicher.Api.Endpoints;
 using DiarSpeicher.Api.GraphQL;
+using DiarSpeicher.Api.Serialization;
 using DiarSpeicher.Api.Middleware;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Core.Gateway;
@@ -29,10 +30,10 @@ var connectionString = new SqliteConnectionStringBuilder(configuredConnection)
     ForeignKeys = true
 }.ToString();
 
-SqliteTypeHandlers.Initialize();
 builder.Services.AddSingleton<ISqliteConnectionFactory, SqliteConnectionFactory>();
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.TypeInfoResolverChain.Insert(0, ApiJsonContext.Default));
 
 builder.Services.Configure<GatewayOptions>(builder.Configuration.GetSection(GatewayOptions.SectionName));
 
@@ -110,14 +111,12 @@ builder.Services
     .AddTypeExtension<MediaResolvers>()
     .AddTypeExtension<LibraryResolvers>()
     .AddTypeExtension<MangaBakaQueries>()
-    .AddDataLoader<MediaBySeriesDataLoader>()
-    .AddDataLoader<SeriesByLibraryDataLoader>()
-    .AddDataLoader<SeriesByIdDataLoader>()
-    .AddDataLoader<LibraryByIdDataLoader>()
+    .AddCatalogDataLoaders()
     .AddInMemorySubscriptions()
     .AddFiltering()
     .AddSorting()
     .AddProjections()
+    .ModifyOptions(options => options.UseXmlDocumentation = false)
     .ModifyRequestOptions(options => options.IncludeExceptionDetails = builder.Environment.IsDevelopment());
 
 var app = builder.Build();
@@ -147,13 +146,7 @@ if (!string.IsNullOrWhiteSpace(pathBase))
 app.UseGatewayIdentity();
 app.UseOpdsAuth();
 
-app.MapGet("/health", () => Results.Ok(new
-{
-    status = "healthy",
-    service = "DiarSpeicher",
-    version = "1.0.0",
-    database = "SQLite (WAL)"
-}));
+app.MapGet("/health", () => Results.Ok(new ServiceHealthResponse("healthy", "DiarSpeicher", "1.0.0", "SQLite (WAL)")));
 
 app.UseWebSockets();
 

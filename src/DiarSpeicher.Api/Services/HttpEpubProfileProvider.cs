@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Dapper;
+using DiarSpeicher.Api.Serialization;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Filesystem;
 using DiarSpeicher.Infrastructure.Data;
@@ -65,11 +66,11 @@ public class HttpEpubProfileProvider : IEpubProfileProvider
             await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
             const string sql = """SELECT "EpubProfilesJson" FROM "UserPreferences" WHERE "UserId" = @UserId LIMIT 1;""";
             var json = await conn.QueryFirstOrDefaultAsync<string>(
-                new CommandDefinition(sql, new { UserId = authUser.Id }, cancellationToken: ct));
+                sql, new { UserId = authUser.Id });
 
             if (string.IsNullOrWhiteSpace(json)) return null;
 
-            var profiles = JsonSerializer.Deserialize<List<EpubDeviceProfile>>(json);
+            var profiles = JsonSerializer.Deserialize(json, PersistedJsonContext.Default.ListEpubDeviceProfile);
             if (profiles == null || profiles.Count == 0) return null;
 
             return profiles.FirstOrDefault(p => p.IsDefault) ?? profiles[0];

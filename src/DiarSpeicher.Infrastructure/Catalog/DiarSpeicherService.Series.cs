@@ -9,20 +9,6 @@ namespace DiarSpeicher.Infrastructure.Catalog;
 
 public sealed partial class DiarSpeicherService
 {
-    private sealed record SeriesRow(
-        string Id,
-        string Name,
-        string? Description,
-        string Path,
-        FileStatus Status,
-        string? ThumbnailPath,
-        string? ThumbnailMeta,
-        DateTimeOffset CreatedAt,
-        DateTimeOffset? UpdatedAt,
-        DateTimeOffset? DeletedAt,
-        string? LibraryId,
-        long MediaCount);
-
     public async Task<DiarSpeicherPageResponse<DiarSpeicherSeriesDto>> GetSeriesAsync(AuthUser user, string? libraryId, int page, int pageSize, CancellationToken ct = default)
     {
         pageSize = Math.Clamp(pageSize, 1, 100);
@@ -44,7 +30,7 @@ public sealed partial class DiarSpeicherService
             WHERE {where};
             """;
 
-        var total = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: ct));
+        var total = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
         parameters.Add("PageSize", pageSize);
         parameters.Add("Offset", page * pageSize);
@@ -52,11 +38,7 @@ public sealed partial class DiarSpeicherService
         var selectSql = $"""
             SELECT s."Id", s."Name", s."Description", s."Path", s."Status", s."ThumbnailPath", s."ThumbnailMeta",
                    s."CreatedAt", s."UpdatedAt", s."DeletedAt", s."LibraryId",
-                   (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "MediaCount",
-                   sm."SeriesId", sm."AgeRating", sm."Characters", sm."Booktype", sm."Comicid", sm."ComicImage",
-                   sm."DescriptionFormatted", sm."Genres", sm."Imprint", sm."Links", sm."MetaType",
-                   sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues",
-                   sm."Volume", sm."Writers", sm."Year"
+                   (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "MediaCount"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
             WHERE {where}
@@ -64,30 +46,8 @@ public sealed partial class DiarSpeicherService
             LIMIT @PageSize OFFSET @Offset;
             """;
 
-        var dtos = new List<DiarSpeicherSeriesDto>();
-        await conn.QueryAsync<SeriesRow, SeriesMetadata?, int>(
-            new CommandDefinition(selectSql, parameters, cancellationToken: ct),
-            (s, sm) =>
-            {
-                var seriesEntity = new Series
-                {
-                    Id = s.Id,
-                    Name = s.Name,
-                    Description = s.Description,
-                    Path = s.Path,
-                    Status = s.Status,
-                    ThumbnailPath = s.ThumbnailPath,
-                    ThumbnailMeta = s.ThumbnailMeta,
-                    CreatedAt = s.CreatedAt,
-                    UpdatedAt = s.UpdatedAt,
-                    DeletedAt = s.DeletedAt,
-                    LibraryId = s.LibraryId,
-                    Metadata = sm
-                };
-                dtos.Add(CatalogDtoMapper.ToSeriesDto(seriesEntity, (int)s.MediaCount));
-                return 0;
-            },
-            splitOn: "SeriesId");
+        var rows = await conn.QueryAsync<CountedSeries>(selectSql, parameters).WithMetadataAsync(conn);
+        var dtos = rows.Select(s => CatalogDtoMapper.ToSeriesDto(s, (int)s.MediaCount)).ToList();
 
         return new DiarSpeicherPageResponse<DiarSpeicherSeriesDto>
         {
@@ -108,43 +68,15 @@ public sealed partial class DiarSpeicherService
         var selectSql = $"""
             SELECT s."Id", s."Name", s."Description", s."Path", s."Status", s."ThumbnailPath", s."ThumbnailMeta",
                    s."CreatedAt", s."UpdatedAt", s."DeletedAt", s."LibraryId",
-                   (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "MediaCount",
-                   sm."SeriesId", sm."AgeRating", sm."Characters", sm."Booktype", sm."Comicid", sm."ComicImage",
-                   sm."DescriptionFormatted", sm."Genres", sm."Imprint", sm."Links", sm."MetaType",
-                   sm."PublicationRun", sm."Publisher", sm."Status", sm."Summary", sm."Title", sm."TotalIssues",
-                   sm."Volume", sm."Writers", sm."Year"
+                   (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "MediaCount"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
             WHERE s."Id" = @Id AND {where}
             LIMIT 1;
             """;
 
-        DiarSpeicherSeriesDto? result = null;
-        await conn.QueryAsync<SeriesRow, SeriesMetadata?, int>(
-            new CommandDefinition(selectSql, parameters, cancellationToken: ct),
-            (s, sm) =>
-            {
-                var seriesEntity = new Series
-                {
-                    Id = s.Id,
-                    Name = s.Name,
-                    Description = s.Description,
-                    Path = s.Path,
-                    Status = s.Status,
-                    ThumbnailPath = s.ThumbnailPath,
-                    ThumbnailMeta = s.ThumbnailMeta,
-                    CreatedAt = s.CreatedAt,
-                    UpdatedAt = s.UpdatedAt,
-                    DeletedAt = s.DeletedAt,
-                    LibraryId = s.LibraryId,
-                    Metadata = sm
-                };
-                result = CatalogDtoMapper.ToSeriesDto(seriesEntity, (int)s.MediaCount);
-                return 0;
-            },
-            splitOn: "SeriesId");
-
-        return result;
+        var rows = await conn.QueryAsync<CountedSeries>(selectSql, parameters).WithMetadataAsync(conn);
+        return rows.Select(s => CatalogDtoMapper.ToSeriesDto(s, (int)s.MediaCount)).FirstOrDefault();
     }
 
     public async Task<DiarSpeicherSeriesDto?> UpdateSeriesAsync(AuthUser user, string id, DiarSpeicherUpdateSeriesInput input, CancellationToken ct = default)
@@ -165,10 +97,7 @@ public sealed partial class DiarSpeicherService
             WHERE "Id" = @Id;
             """;
 
-        await conn.ExecuteAsync(new CommandDefinition(
-            updateSql,
-            new { Name = name, Description = description, UpdatedAt = now, Id = id },
-            cancellationToken: ct));
+        await conn.ExecuteAsync(updateSql, new { Name = name, Description = description, UpdatedAt = now, Id = id });
 
         return await GetSeriesByIdAsync(user, id, ct);
     }
@@ -178,7 +107,7 @@ public sealed partial class DiarSpeicherService
         return PageMediaAsync(user, seriesId, newestFirst: false, page: page, pageSize: pageSize, ct: ct);
     }
 
-    private async Task<(string Id, string Path, string? ThumbnailPath)?> FetchSeriesBasicAsync(AuthUser user, string seriesId, CancellationToken ct)
+    private async Task<IdPathThumbnailRow?> FetchSeriesBasicAsync(AuthUser user, string seriesId, CancellationToken ct)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
         var (where, parameters) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
@@ -192,8 +121,8 @@ public sealed partial class DiarSpeicherService
             LIMIT 1;
             """;
 
-        return await conn.QueryFirstOrDefaultAsync<(string Id, string Path, string? ThumbnailPath)?>(
-            new CommandDefinition(selectSql, parameters, cancellationToken: ct));
+        return await conn.QueryFirstOrDefaultAsync<IdPathThumbnailRow>(
+            selectSql, parameters);
     }
 
     public async Task<bool> DeleteSeriesAsync(AuthUser user, string id, bool deleteFiles = false, CancellationToken ct = default)
@@ -201,7 +130,7 @@ public sealed partial class DiarSpeicherService
         var series = await FetchSeriesBasicAsync(user, id, ct);
         if (series == null) return false;
 
-        var seriesPath = series.Value.Path;
+        var seriesPath = series.Path;
 
         if (deleteFiles)
         {
@@ -212,16 +141,16 @@ public sealed partial class DiarSpeicherService
         var remaining = await FetchSeriesBasicAsync(user, id, ct);
         if (remaining == null) return true;
 
-        if (!string.IsNullOrWhiteSpace(remaining.Value.ThumbnailPath))
+        if (!string.IsNullOrWhiteSpace(remaining.ThumbnailPath))
         {
-            TryDeleteFile(remaining.Value.ThumbnailPath);
+            TryDeleteFile(remaining.ThumbnailPath);
         }
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
 
         const string selectMediaThumbs = @"SELECT ""ThumbnailPath"" FROM ""Media"" WHERE ""SeriesId"" = @SeriesId AND ""ThumbnailPath"" IS NOT NULL;";
         var thumbs = (await conn.QueryAsync<string>(
-            new CommandDefinition(selectMediaThumbs, new { SeriesId = id }, cancellationToken: ct)
+            selectMediaThumbs, new { SeriesId = id }
         )).AsList();
 
         foreach (var thumb in thumbs)
@@ -231,10 +160,10 @@ public sealed partial class DiarSpeicherService
 
         await using var tx = await conn.BeginTransactionAsync(ct);
         const string deleteMediaSql = @"DELETE FROM ""Media"" WHERE ""SeriesId"" = @SeriesId;";
-        await conn.ExecuteAsync(new CommandDefinition(deleteMediaSql, new { SeriesId = id }, tx, cancellationToken: ct));
+        await conn.ExecuteAsync(deleteMediaSql, new { SeriesId = id }, tx);
 
         const string deleteSeriesSql = @"DELETE FROM ""Series"" WHERE ""Id"" = @Id;";
-        await conn.ExecuteAsync(new CommandDefinition(deleteSeriesSql, new { Id = id }, tx, cancellationToken: ct));
+        await conn.ExecuteAsync(deleteSeriesSql, new { Id = id }, tx);
         await tx.CommitAsync(ct);
 
         return true;
@@ -245,9 +174,9 @@ public sealed partial class DiarSpeicherService
         var series = await FetchSeriesBasicAsync(user, seriesId, ct);
         if (series == null) return null;
 
-        if (!string.IsNullOrWhiteSpace(series.Value.ThumbnailPath) && File.Exists(series.Value.ThumbnailPath))
+        if (!string.IsNullOrWhiteSpace(series.ThumbnailPath) && File.Exists(series.ThumbnailPath))
         {
-            return await ReadImageAsync(series.Value.ThumbnailPath, ct);
+            return await ReadImageAsync(series.ThumbnailPath, ct);
         }
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
@@ -266,7 +195,7 @@ public sealed partial class DiarSpeicherService
             """;
 
         var fallback = await conn.QueryFirstOrDefaultAsync<string>(
-            new CommandDefinition(fallbackSql, mediaParams, cancellationToken: ct));
+            fallbackSql, mediaParams);
 
         return string.IsNullOrWhiteSpace(fallback) || !File.Exists(fallback)
             ? null
@@ -289,7 +218,7 @@ public sealed partial class DiarSpeicherService
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
         File.Copy(source, target, overwrite: true);
 
-        await ApplySeriesThumbnailAsync(seriesId, series.Value.ThumbnailPath, target, ct);
+        await ApplySeriesThumbnailAsync(seriesId, series.ThumbnailPath, target, ct);
         return true;
     }
 
@@ -309,7 +238,7 @@ public sealed partial class DiarSpeicherService
             await image.CopyToAsync(output, ct);
         }
 
-        await ApplySeriesThumbnailAsync(seriesId, series.Value.ThumbnailPath, target, ct);
+        await ApplySeriesThumbnailAsync(seriesId, series.ThumbnailPath, target, ct);
         return true;
     }
 
@@ -318,9 +247,9 @@ public sealed partial class DiarSpeicherService
         var series = await FetchSeriesBasicAsync(user, seriesId, ct);
         if (series == null) return false;
 
-        if (!string.IsNullOrWhiteSpace(series.Value.ThumbnailPath) && File.Exists(series.Value.ThumbnailPath))
+        if (!string.IsNullOrWhiteSpace(series.ThumbnailPath) && File.Exists(series.ThumbnailPath))
         {
-            TryDeleteFile(series.Value.ThumbnailPath);
+            TryDeleteFile(series.ThumbnailPath);
         }
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
@@ -330,10 +259,7 @@ public sealed partial class DiarSpeicherService
             WHERE "Id" = @Id;
             """;
 
-        await conn.ExecuteAsync(new CommandDefinition(
-            clearSql,
-            new { UpdatedAt = DateTimeOffset.UtcNow, Id = seriesId },
-            cancellationToken: ct));
+        await conn.ExecuteAsync(clearSql, new { UpdatedAt = DateTimeOffset.UtcNow, Id = seriesId });
 
         return true;
     }
@@ -359,10 +285,7 @@ public sealed partial class DiarSpeicherService
         var now = DateTimeOffset.UtcNow;
         var meta = now.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
 
-        await conn.ExecuteAsync(new CommandDefinition(
-            updateSql,
-            new { ThumbnailPath = newPath, ThumbnailMeta = meta, UpdatedAt = now, Id = seriesId },
-            cancellationToken: ct));
+        await conn.ExecuteAsync(updateSql, new { ThumbnailPath = newPath, ThumbnailMeta = meta, UpdatedAt = now, Id = seriesId });
     }
 
     private string BuildSeriesThumbnailPath(string seriesId, string extension) =>

@@ -49,29 +49,21 @@ public class Mutation
             SELECT last_insert_rowid();
             """;
 
-        library.Config.Id = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-            insertConfigSql,
-            new
+        library.Config.Id = await conn.ExecuteScalarAsync<int>(insertConfigSql, new
             {
                 LibraryPattern = library.Config.LibraryPattern.ToString(),
                 LibraryType = library.Config.LibraryType.ToString(),
                 DefaultReadingDir = library.Config.DefaultReadingDir.ToString(),
                 DefaultReadingMode = library.Config.DefaultReadingMode.ToString(),
                 DefaultLibraryViewMode = library.Config.DefaultLibraryViewMode.ToString()
-            },
-            transaction: tx,
-            cancellationToken: ct));
+            }, tx);
 
         const string insertLibrarySql = """
             INSERT INTO "Libraries" ("Id", "Name", "Path", "Description", "Status", "ConfigId", "CreatedAt")
             VALUES (@Id, @Name, @Path, @Description, @Status, @ConfigId, @CreatedAt);
             """;
 
-        await conn.ExecuteAsync(new CommandDefinition(
-            insertLibrarySql,
-            new { Id = library.Id, Name = library.Name, Path = library.Path, Description = library.Description, Status = library.Status.ToString(), ConfigId = library.Config.Id, CreatedAt = library.CreatedAt },
-            transaction: tx,
-            cancellationToken: ct));
+        await conn.ExecuteAsync(insertLibrarySql, new { Id = library.Id, Name = library.Name, Path = library.Path, Description = library.Description, Status = library.Status.ToString(), ConfigId = library.Config.Id, CreatedAt = library.CreatedAt }, tx);
 
         await tx.CommitAsync(ct);
 
@@ -97,7 +89,7 @@ public class Mutation
             LIMIT 1;
             """;
 
-        var library = await conn.QueryFirstOrDefaultAsync<Library>(new CommandDefinition(selectSql, parameters, cancellationToken: ct))
+        var library = await conn.QueryFirstOrDefaultAsync<Library>(selectSql, parameters)
             ?? throw new GraphQLException($"Library '{input.Id}' not found.");
 
         if (input.Name != null) library.Name = input.Name;
@@ -112,10 +104,7 @@ public class Mutation
             WHERE "Id" = @Id;
             """;
 
-        await conn.ExecuteAsync(new CommandDefinition(
-            updateSql,
-            new { Name = library.Name, Description = library.Description, Emoji = library.Emoji, UpdatedAt = library.UpdatedAt, Id = library.Id },
-            cancellationToken: ct));
+        await conn.ExecuteAsync(updateSql, new { Name = library.Name, Description = library.Description, Emoji = library.Emoji, UpdatedAt = library.UpdatedAt, Id = library.Id });
 
         return library;
     }
@@ -133,11 +122,11 @@ public class Mutation
         parameters.Add("Id", id);
 
         var checkSql = $"""SELECT 1 FROM "Libraries" l WHERE l."Id" = @Id AND {where} LIMIT 1;""";
-        var exists = await conn.ExecuteScalarAsync<int?>(new CommandDefinition(checkSql, parameters, cancellationToken: ct));
+        var exists = await conn.ExecuteScalarAsync<int?>(checkSql, parameters);
         if (!exists.HasValue) return false;
 
         const string deleteSql = """DELETE FROM "Libraries" WHERE "Id" = @Id;""";
-        await conn.ExecuteAsync(new CommandDefinition(deleteSql, new { Id = id }, cancellationToken: ct));
+        await conn.ExecuteAsync(deleteSql, new { Id = id });
 
         return true;
     }
@@ -160,7 +149,7 @@ public class Mutation
         parameters.Add("Id", id);
 
         var checkSql = $"""SELECT 1 FROM "Libraries" l WHERE l."Id" = @Id AND {where} LIMIT 1;""";
-        var exists = await conn.ExecuteScalarAsync<int?>(new CommandDefinition(checkSql, parameters, cancellationToken: ct));
+        var exists = await conn.ExecuteScalarAsync<int?>(checkSql, parameters);
         if (!exists.HasValue)
         {
             throw new GraphQLException($"Library '{id}' not found.");
@@ -193,7 +182,7 @@ public class Mutation
             LIMIT 1;
             """;
 
-        var mediaId = await conn.QueryFirstOrDefaultAsync<string>(new CommandDefinition(mediaSql, parameters, cancellationToken: ct))
+        var mediaId = await conn.QueryFirstOrDefaultAsync<string>(mediaSql, parameters)
             ?? throw new GraphQLException($"Media '{input.MediaId}' not found.");
 
         const string sessionSql = """
@@ -208,7 +197,7 @@ public class Mutation
             """;
 
         var session = await conn.QueryFirstOrDefaultAsync<ReadingSession>(
-            new CommandDefinition(sessionSql, new { UserId = user.Id, MediaId = mediaId }, cancellationToken: ct));
+            sessionSql, new { UserId = user.Id, MediaId = mediaId });
 
         var now = DateTimeOffset.UtcNow;
         if (session == null)
@@ -231,7 +220,7 @@ public class Mutation
                 VALUES (@UserId, @MediaId, @SessionDate, @EndPage, @EndPercentage, @Status, @CreatedAt, @UpdatedAt);
                 """;
 
-            await conn.ExecuteAsync(new CommandDefinition(insertSql, new
+            await conn.ExecuteAsync(insertSql, new
             {
                 session.UserId,
                 session.MediaId,
@@ -241,7 +230,7 @@ public class Mutation
                 Status = session.Status.ToString(),
                 session.CreatedAt,
                 session.UpdatedAt
-            }, cancellationToken: ct));
+            });
         }
         else
         {
@@ -256,14 +245,14 @@ public class Mutation
                 WHERE "Id" = @Id;
                 """;
 
-            await conn.ExecuteAsync(new CommandDefinition(updateSql, new
+            await conn.ExecuteAsync(updateSql, new
             {
                 session.EndPage,
                 session.EndPercentage,
                 Status = session.Status.ToString(),
                 session.UpdatedAt,
                 session.Id
-            }, cancellationToken: ct));
+            });
         }
 
         return session;

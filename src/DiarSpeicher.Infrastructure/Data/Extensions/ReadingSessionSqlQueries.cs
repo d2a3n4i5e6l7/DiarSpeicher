@@ -11,6 +11,8 @@ public static class ReadingSessionSqlQueries
         IReadOnlyCollection<string> mediaIds,
         CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+
         if (string.IsNullOrWhiteSpace(userId) || mediaIds.Count == 0)
         {
             return [];
@@ -29,10 +31,7 @@ public static class ReadingSessionSqlQueries
             WHERE "rn" = 1 AND "MediaId" IN @MediaIds;
             """;
 
-        var sessions = (await Dapper.SqlMapper.QueryAsync<ReadingSession>(
-            conn,
-            new Dapper.CommandDefinition(sql, new { UserId = userId, MediaIds = mediaIds }, cancellationToken: ct)
-        )).AsList();
+        var sessions = (await conn.QueryAsync<ReadingSession>(sql, new { UserId = userId, MediaIds = mediaIds })).AsList();
 
         return sessions.ToDictionary(s => s.MediaId);
     }
@@ -42,6 +41,8 @@ public static class ReadingSessionSqlQueries
         string userId,
         CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+
         const string sql = """
             SELECT "Id", "CreatedAt", "ElapsedSeconds", "EndPage", "EndPercentage",
                    "KoreaderProgress", "MediaId", "Notes", "ReadthroughNumber", "SessionDate",
@@ -58,10 +59,7 @@ public static class ReadingSessionSqlQueries
             ORDER BY COALESCE("UpdatedAt", "CreatedAt") DESC;
             """;
 
-        var sessions = (await Dapper.SqlMapper.QueryAsync<ReadingSession>(
-            conn,
-            new Dapper.CommandDefinition(sql, new { UserId = userId, Status = nameof(ReadingStatus.Reading) }, cancellationToken: ct)
-        )).AsList();
+        var sessions = (await conn.QueryAsync<ReadingSession>(sql, new { UserId = userId, Status = nameof(ReadingStatus.Reading) })).AsList();
 
         return sessions;
     }

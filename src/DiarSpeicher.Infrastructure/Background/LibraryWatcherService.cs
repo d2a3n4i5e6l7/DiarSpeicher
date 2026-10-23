@@ -79,7 +79,7 @@ public class LibraryWatcherService : BackgroundService
             WHERE "Status" != 'Missing' OR "Status" IS NULL;
             """;
 
-        var libraries = await conn.QueryAsync<(string Id, string Path)>(new CommandDefinition(sql, cancellationToken: ct));
+        var libraries = await conn.QueryAsync<IdPathRow>(sql);
 
         foreach (var library in libraries)
         {

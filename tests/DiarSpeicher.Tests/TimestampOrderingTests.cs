@@ -60,10 +60,10 @@ public sealed class TimestampOrderingTests : IDisposable
             VALUES ('diar', 'diar', @CreatedAt);
             """, new { CreatedAt = created });
 
-        var retrieved = _db.Connection.QuerySingle<DateTimeOffset>(
-            """SELECT "CreatedAt" FROM "Users" WHERE "Id" = 'diar'""");
+        var retrieved = _db.Connection.QuerySingle<User>(
+            """SELECT "Id", "Username", "CreatedAt" FROM "Users" WHERE "Id" = 'diar'""");
 
-        Assert.Equal(created, retrieved);
+        Assert.Equal(created, retrieved.CreatedAt);
     }
 
     [Fact]

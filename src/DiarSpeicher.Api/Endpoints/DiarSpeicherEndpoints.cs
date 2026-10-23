@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using DiarSpeicher.Api.Serialization;
 using DiarSpeicher.Infrastructure.Background;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Core.Domain.Catalog;
@@ -25,9 +26,6 @@ public static class DiarSpeicherEndpoints
     private const string AuthUserKey = "AuthUser";
     private const string CacheControlPublicOneDay = "public, max-age=86400";
     private const string SeriesThumbnailRoute = "/series/{id}/thumbnail";
-
-    private static readonly JsonSerializerOptions ScanJson =
-        new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
     /// <summary>
     /// Una linea que empieza por ":" es un comentario de SSE: EventSource la descarta y a
@@ -91,14 +89,14 @@ public static class DiarSpeicherEndpoints
     private static void MapSystemRoutes(RouteGroupBuilder group)
     {
         group.MapGet("/ping", () => Results.Ok("pong"));
-        group.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
-        group.MapGet("/version", () => Results.Ok(new { semver = "0.1.0", rev = "net10" }));
+        group.MapGet("/health", () => Results.Ok(new HealthResponse("healthy")));
+        group.MapGet("/version", () => Results.Ok(new VersionResponse("0.1.0", "net11")));
         group.MapGet("/claim", async (
             [FromServices] IDiarSpeicherService service,
             CancellationToken ct) =>
         {
             var status = await service.GetSystemStatusAsync(ct);
-            return Results.Ok(new { isClaimed = status.IsClaimed });
+            return Results.Ok(new ClaimStatusResponse(status.IsClaimed));
         });
 
         group.MapGet("/auth/me", (HttpContext httpContext) =>
@@ -106,13 +104,7 @@ public static class DiarSpeicherEndpoints
             var user = httpContext.Items[AuthUserKey] as AuthUser;
             if (user == null) return Results.Unauthorized();
 
-            return Results.Ok(new
-            {
-                id = user.Id,
-                username = user.Username,
-                isServerOwner = user.IsServerOwner,
-                ageRestriction = user.AgeRestriction
-            });
+            return Results.Ok(new CurrentUserResponse(user.Id, user.Username, user.IsServerOwner, user.AgeRestriction));
         });
     }
 
@@ -220,7 +212,7 @@ public static class DiarSpeicherEndpoints
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
             var success = await service.UpdateProgressAsync(user, id, input, ct);
-            return success ? Results.Ok(new { updated = true }) : Results.NotFound();
+            return success ? Results.Ok(new UpdatedResponse(true)) : Results.NotFound();
         });
     }
 
@@ -287,7 +279,7 @@ public static class DiarSpeicherEndpoints
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
             var applied = await service.SetSeriesThumbnailFromMediaAsync(user, id, input.MediaId, ct);
-            return applied ? Results.Ok(new { updated = true }) : Results.NotFound();
+            return applied ? Results.Ok(new UpdatedResponse(true)) : Results.NotFound();
         }).RequireManageLibrary();
 
         group.MapPost(SeriesThumbnailRoute, HandleSeriesCoverUpload).DisableAntiforgery().RequireManageLibrary();
@@ -330,22 +322,22 @@ public static class DiarSpeicherEndpoints
         var user = (AuthUser)httpContext.Items[AuthUserKey]!;
         if (!httpContext.Request.HasFormContentType)
         {
-            return Results.BadRequest(new { error = "Se espera multipart/form-data con la imagen." });
+            return Results.BadRequest(new ApiError("Se espera multipart/form-data con la imagen."));
         }
 
         var form = await httpContext.Request.ReadFormAsync(ct);
         var file = form.Files.FirstOrDefault();
         if (file is null || file.Length == 0)
         {
-            return Results.BadRequest(new { error = "No llego ninguna imagen." });
+            return Results.BadRequest(new ApiError("No llego ninguna imagen."));
         }
 
         await using var stream = file.OpenReadStream();
         var applied = await service.SetSeriesThumbnailAsync(user, id, stream, Path.GetFileName(file.FileName), ct);
 
         return applied
-            ? Results.Ok(new { updated = true })
-            : Results.BadRequest(new { error = "Solo se aceptan imagenes JPG, PNG o WebP." });
+            ? Results.Ok(new UpdatedResponse(true))
+            : Results.BadRequest(new ApiError("Solo se aceptan imagenes JPG, PNG o WebP."));
     }
 
     private static void MapLibraryRoutes(RouteGroupBuilder group)
@@ -391,12 +383,12 @@ public static class DiarSpeicherEndpoints
             {
                 var result = await service.CreateLibraryAsync(user, input, ct);
                 return result == null
-                    ? Results.BadRequest(new { error = "Could not create library" })
+                    ? Results.BadRequest(new ApiError("Could not create library"))
                     : Results.Created($"/api/v2/libraries/{result.Id}", result);
             }
             catch (InvalidOperationException e)
             {
-                return Results.BadRequest(new { error = e.Message });
+                return Results.BadRequest(new ApiError(e.Message));
             }
         }).RequireManageLibrary();
 
@@ -415,7 +407,7 @@ public static class DiarSpeicherEndpoints
             }
             catch (InvalidOperationException e)
             {
-                return Results.BadRequest(new { error = e.Message });
+                return Results.BadRequest(new ApiError(e.Message));
             }
         }).RequireManageLibrary();
     }
@@ -440,7 +432,7 @@ public static class DiarSpeicherEndpoints
             CancellationToken ct) =>
         {
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
-            return Results.Ok(new { removed = await service.PurgeMissingAsync(user, id, ct) });
+            return Results.Ok(new RemovedResponse(await service.PurgeMissingAsync(user, id, ct)));
         }).RequireManageLibrary();
     }
 
@@ -476,7 +468,7 @@ public static class DiarSpeicherEndpoints
             {
                 await foreach (var snapshot in hub.SubscribeAsync(id, linked.Token))
                 {
-                    var payload = JsonSerializer.Serialize(ToScanDto(snapshot), ScanJson);
+                    var payload = JsonSerializer.Serialize(ToScanDto(snapshot), ScanEventJsonContext.Default.DiarSpeicherScanStatusDto);
                     await httpContext.Response.WriteAsync($"data: {payload}\n\n", ct);
                     await httpContext.Response.Body.FlushAsync(ct);
 
@@ -513,7 +505,7 @@ public static class DiarSpeicherEndpoints
             }
             catch (InvalidOperationException e)
             {
-                return Results.BadRequest(new { error = e.Message });
+                return Results.BadRequest(new ApiError(e.Message));
             }
         }).RequireManageLibrary();
 
@@ -533,7 +525,7 @@ public static class DiarSpeicherEndpoints
             }
             catch (InvalidOperationException e)
             {
-                return Results.BadRequest(new { error = e.Message });
+                return Results.BadRequest(new ApiError(e.Message));
             }
         }).RequireManageLibrary();
 
@@ -553,7 +545,7 @@ public static class DiarSpeicherEndpoints
             }
             catch (InvalidOperationException e)
             {
-                return Results.BadRequest(new { error = e.Message });
+                return Results.BadRequest(new ApiError(e.Message));
             }
         }).RequireManageLibrary();
     }
@@ -571,7 +563,7 @@ public static class DiarSpeicherEndpoints
             var user = (AuthUser)httpContext.Items[AuthUserKey]!;
             if (!user.HasPermission(Permissions.ScanLibrary))
             {
-                return Results.Json(new { error = "This account is not allowed to scan libraries." }, statusCode: StatusCodes.Status403Forbidden);
+                return ApiResults.Error("This account is not allowed to scan libraries.", StatusCodes.Status403Forbidden);
             }
 
             var success = await service.TriggerLibraryScanAsync(user, id, ct);
@@ -585,7 +577,7 @@ public static class DiarSpeicherEndpoints
             var user = ctx.HttpContext.Items[AuthUserKey] as AuthUser;
             if (user is null || !user.HasPermission(Permissions.ManageLibrary))
             {
-                return Results.Json(new { error = "This account is not allowed to manage libraries." }, statusCode: StatusCodes.Status403Forbidden);
+                return ApiResults.Error("This account is not allowed to manage libraries.", StatusCodes.Status403Forbidden);
             }
 
             return await next(ctx);
@@ -619,7 +611,7 @@ public static class DiarSpeicherEndpoints
 
         if (!uploadOptions.EnableUpload)
         {
-            return (Results.Json(new { error = "Uploads are disabled on this server." }, statusCode: StatusCodes.Status403Forbidden), string.Empty);
+            return (ApiResults.Error("Uploads are disabled on this server.", StatusCodes.Status403Forbidden), string.Empty);
         }
 
         var sizeFeature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
@@ -638,15 +630,19 @@ public static class DiarSpeicherEndpoints
         return (null, boundary);
     }
 
-    private static IResult MapUploadResult(UploadResult result) =>
-        result.Outcome switch
+    private static IResult MapUploadResult(UploadResult result)
+    {
+        if (result.Outcome == UploadOutcome.Success) return Results.Ok(result.Response);
+
+        var message = result.Message ?? result.Outcome.ToString();
+        return result.Outcome switch
         {
-            UploadOutcome.Success => Results.Ok(result.Response),
-            UploadOutcome.UploadDisabled or UploadOutcome.PermissionDenied => Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status403Forbidden),
-            UploadOutcome.LibraryNotFound => Results.NotFound(new { error = result.Message }),
-            UploadOutcome.FileTooLarge => Results.Json(new { error = result.Message }, statusCode: StatusCodes.Status413PayloadTooLarge),
-            _ => Results.BadRequest(new { error = result.Message })
+            UploadOutcome.UploadDisabled or UploadOutcome.PermissionDenied => ApiResults.Error(message, StatusCodes.Status403Forbidden),
+            UploadOutcome.LibraryNotFound => Results.NotFound(new ApiError(message)),
+            UploadOutcome.FileTooLarge => ApiResults.Error(message, StatusCodes.Status413PayloadTooLarge),
+            _ => Results.BadRequest(new ApiError(message))
         };
+    }
 
     private static async Task<(string? Subpath, DiarSpeicherUploadFileInput? FirstFile)> ReadUntilFirstFileAsync(
         MultipartReader reader,
@@ -770,7 +766,7 @@ public static class DiarSpeicherEndpoints
         await using var conn = await connectionFactory.CreateConnectionAsync(ct);
         const string sql = """SELECT "EpubProfilesJson" FROM "UserPreferences" WHERE "UserId" = @UserId LIMIT 1;""";
         var json = await conn.QueryFirstOrDefaultAsync<string>(
-            new CommandDefinition(sql, new { UserId = targetId }, cancellationToken: ct));
+            sql, new { UserId = targetId });
 
         if (json == null)
         {
@@ -779,7 +775,7 @@ public static class DiarSpeicherEndpoints
 
         try
         {
-            var profiles = JsonSerializer.Deserialize<List<EpubDeviceProfile>>(json);
+            var profiles = JsonSerializer.Deserialize(json, PersistedJsonContext.Default.ListEpubDeviceProfile);
             return Results.Ok(profiles ?? EpubDeviceProfile.GetDefaults());
         }
         catch
@@ -807,7 +803,7 @@ public static class DiarSpeicherEndpoints
         var affectedBooks = await CountAffectedBooksAsync(conn, targetId, profiles, ct);
         await SaveUserPreferencesAsync(conn, targetId, profiles, ct);
 
-        return Results.Ok(new { updated = true, count = profiles.Count, affectedBooks });
+        return Results.Ok(new EpubProfilesUpdatedResponse(true, profiles.Count, affectedBooks));
     }
 
     private static async Task<int> CountAffectedBooksAsync(
@@ -816,6 +812,8 @@ public static class DiarSpeicherEndpoints
         List<EpubDeviceProfile> profiles,
         CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         var newProfile = profiles.FirstOrDefault(p => p.IsDefault) ?? profiles.FirstOrDefault();
         if (newProfile == null) return 0;
 
@@ -830,7 +828,7 @@ public static class DiarSpeicherEndpoints
             """;
 
         return await conn.ExecuteScalarAsync<int>(
-            new CommandDefinition(sql, new { UserId = targetId, ProfileKey = profileKey }, cancellationToken: ct));
+            sql, new { UserId = targetId, ProfileKey = profileKey });
     }
 
     private static async Task SaveUserPreferencesAsync(
@@ -839,13 +837,15 @@ public static class DiarSpeicherEndpoints
         List<EpubDeviceProfile> profiles,
         CancellationToken ct)
     {
-        var json = JsonSerializer.Serialize(profiles);
+        ct.ThrowIfCancellationRequested();
+
+        var json = JsonSerializer.Serialize(profiles, PersistedJsonContext.Default.ListEpubDeviceProfile);
         const string sql = """
             INSERT INTO "UserPreferences" ("UserId", "EpubProfilesJson")
             VALUES (@UserId, @Json)
             ON CONFLICT ("UserId") DO UPDATE SET "EpubProfilesJson" = excluded."EpubProfilesJson";
             """;
 
-        await conn.ExecuteAsync(new CommandDefinition(sql, new { UserId = targetId, Json = json }, cancellationToken: ct));
+        await conn.ExecuteAsync(sql, new { UserId = targetId, Json = json });
     }
 }

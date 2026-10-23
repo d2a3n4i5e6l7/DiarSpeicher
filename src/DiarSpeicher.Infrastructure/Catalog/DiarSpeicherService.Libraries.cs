@@ -9,8 +9,8 @@ namespace DiarSpeicher.Infrastructure.Catalog;
 
 public sealed partial class DiarSpeicherService
 {
-    private sealed record LibrarySeriesCountRow(string LibraryId, long SeriesCount, long MissingSeries);
-    private sealed record LibraryMediaCountRow(string LibraryId, long MediaCount, long MissingMedia);
+    internal sealed record LibrarySeriesCountRow(string LibraryId, long SeriesCount, long MissingSeries);
+    internal sealed record LibraryMediaCountRow(string LibraryId, long MediaCount, long MissingMedia);
 
     public async Task<List<DiarSpeicherLibraryDto>> GetLibrariesAsync(AuthUser user, CancellationToken ct = default)
     {
@@ -18,26 +18,15 @@ public sealed partial class DiarSpeicherService
 
         var (libWhere, libParams) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
         var libSql = $"""
-            SELECT l."Id", l."Name", l."Description", l."Path", l."Status", l."Emoji", l."ThumbnailPath",
-                   l."ThumbnailMeta", l."CreatedAt", l."UpdatedAt", l."LastScannedAt", l."ConfigId",
-                   c."Id", c."ConvertRarToZip", c."HardDeleteConversions", c."DefaultReadingDir", c."DefaultReadingMode",
-                   c."GenerateFileHashes", c."GenerateKoreaderHashes", c."ProcessMetadata", c."Watch",
-                   c."LibraryPattern", c."DefaultLibraryViewMode", c."HideSeriesView", c."LibraryType",
-                   c."ThumbnailWidth", c."ThumbnailHeight", c."IgnoreRules"
+            SELECT l."Id", l."Name", l."Description", l."Path", l."Status", l."Emoji", l."ThumbnailPath", l."ThumbnailMeta",
+                   l."CreatedAt", l."UpdatedAt", l."LastScannedAt", l."ConfigId"
             FROM "Libraries" l
             LEFT JOIN "LibraryConfigs" c ON c."Id" = l."ConfigId"
             WHERE {libWhere}
             ORDER BY l."Name" ASC;
             """;
 
-        var libraries = (await conn.QueryAsync<Library, LibraryConfig?, Library>(
-            new CommandDefinition(libSql, libParams, cancellationToken: ct),
-            (lib, cfg) =>
-            {
-                lib.Config = cfg!;
-                return lib;
-            },
-            splitOn: "Id")).AsList();
+        var libraries = (await conn.QueryAsync<Library>(libSql, libParams).WithConfigAsync(conn)).AsList();
 
         if (libraries.Count == 0) return [];
 
@@ -53,7 +42,7 @@ public sealed partial class DiarSpeicherService
             """;
 
         var seriesCounts = (await conn.QueryAsync<LibrarySeriesCountRow>(
-            new CommandDefinition(seriesCountSql, seriesParams, cancellationToken: ct)
+            seriesCountSql, seriesParams
         )).ToDictionary(x => x.LibraryId, StringComparer.Ordinal);
 
         var (mediaWhere, mediaParams) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
@@ -70,7 +59,7 @@ public sealed partial class DiarSpeicherService
             """;
 
         var mediaCounts = (await conn.QueryAsync<LibraryMediaCountRow>(
-            new CommandDefinition(mediaCountSql, mediaParams, cancellationToken: ct)
+            mediaCountSql, mediaParams
         )).ToDictionary(x => x.LibraryId, StringComparer.Ordinal);
 
         return libraries.Select(l =>
@@ -95,26 +84,15 @@ public sealed partial class DiarSpeicherService
         libParams.Add("Id", id);
 
         var libSql = $"""
-            SELECT l."Id", l."Name", l."Description", l."Path", l."Status", l."Emoji", l."ThumbnailPath",
-                   l."ThumbnailMeta", l."CreatedAt", l."UpdatedAt", l."LastScannedAt", l."ConfigId",
-                   c."Id", c."ConvertRarToZip", c."HardDeleteConversions", c."DefaultReadingDir", c."DefaultReadingMode",
-                   c."GenerateFileHashes", c."GenerateKoreaderHashes", c."ProcessMetadata", c."Watch",
-                   c."LibraryPattern", c."DefaultLibraryViewMode", c."HideSeriesView", c."LibraryType",
-                   c."ThumbnailWidth", c."ThumbnailHeight", c."IgnoreRules"
+            SELECT l."Id", l."Name", l."Description", l."Path", l."Status", l."Emoji", l."ThumbnailPath", l."ThumbnailMeta",
+                   l."CreatedAt", l."UpdatedAt", l."LastScannedAt", l."ConfigId"
             FROM "Libraries" l
             LEFT JOIN "LibraryConfigs" c ON c."Id" = l."ConfigId"
             WHERE l."Id" = @Id AND {libWhere}
             LIMIT 1;
             """;
 
-        var rows = await conn.QueryAsync<Library, LibraryConfig?, Library>(
-            new CommandDefinition(libSql, libParams, cancellationToken: ct),
-            (lib, cfg) =>
-            {
-                lib.Config = cfg!;
-                return lib;
-            },
-            splitOn: "Id");
+        var rows = await conn.QueryAsync<Library>(libSql, libParams).WithConfigAsync(conn);
 
         var library = rows.FirstOrDefault();
         if (library == null) return null;
@@ -127,7 +105,7 @@ public sealed partial class DiarSpeicherService
             """;
 
         var mediaCount = await conn.ExecuteScalarAsync<int>(
-            new CommandDefinition(mediaCountSql, new { LibraryId = id }, cancellationToken: ct));
+            mediaCountSql, new { LibraryId = id });
 
         const string seriesCountSql = """
             SELECT COUNT(*)
@@ -136,7 +114,7 @@ public sealed partial class DiarSpeicherService
             """;
 
         var seriesCount = await conn.ExecuteScalarAsync<int>(
-            new CommandDefinition(seriesCountSql, new { LibraryId = id }, cancellationToken: ct));
+            seriesCountSql, new { LibraryId = id });
 
         var dto = ToLibraryDto(library, mediaCount);
         dto.SeriesCount = seriesCount;
@@ -150,7 +128,7 @@ public sealed partial class DiarSpeicherService
         parameters.Add("Id", libraryId);
 
         var checkSql = $@"SELECT 1 FROM ""Libraries"" l WHERE l.""Id"" = @Id AND {where} LIMIT 1;";
-        var exists = await conn.ExecuteScalarAsync<int?>(new CommandDefinition(checkSql, parameters, cancellationToken: ct));
+        var exists = await conn.ExecuteScalarAsync<int?>(checkSql, parameters);
 
         if (exists is null) return false;
 
@@ -210,7 +188,7 @@ public sealed partial class DiarSpeicherService
             SELECT last_insert_rowid();
             """;
 
-        var configId = await conn.ExecuteScalarAsync<int>(new CommandDefinition(insertConfigSql, ToConfigRow(config), tx, cancellationToken: ct));
+        var configId = await conn.ExecuteScalarAsync<int>(insertConfigSql, config, tx);
         library.ConfigId = configId;
         config.Id = configId;
 
@@ -219,12 +197,12 @@ public sealed partial class DiarSpeicherService
             VALUES (@Id, @Name, @Path, @Description, @Emoji, @Status, @CreatedAt, @ConfigId);
             """;
 
-        await conn.ExecuteAsync(new CommandDefinition(insertLibSql, new
+        await conn.ExecuteAsync(insertLibSql, new
         {
             library.Id, library.Name, library.Path, library.Description, library.Emoji,
             Status = library.Status.ToString(),
             library.CreatedAt, library.ConfigId
-        }, tx, cancellationToken: ct));
+        }, tx);
         await tx.CommitAsync(ct);
 
         await _scannerQueue.QueueScanAsync(new ScanRequest(library.Id), ct);
@@ -242,26 +220,15 @@ public sealed partial class DiarSpeicherService
         libParams.Add("Id", id);
 
         var libSql = $"""
-            SELECT l."Id", l."Name", l."Description", l."Path", l."Status", l."Emoji", l."ThumbnailPath",
-                   l."ThumbnailMeta", l."CreatedAt", l."UpdatedAt", l."LastScannedAt", l."ConfigId",
-                   c."Id", c."ConvertRarToZip", c."HardDeleteConversions", c."DefaultReadingDir", c."DefaultReadingMode",
-                   c."GenerateFileHashes", c."GenerateKoreaderHashes", c."ProcessMetadata", c."Watch",
-                   c."LibraryPattern", c."DefaultLibraryViewMode", c."HideSeriesView", c."LibraryType",
-                   c."ThumbnailWidth", c."ThumbnailHeight", c."IgnoreRules"
+            SELECT l."Id", l."Name", l."Description", l."Path", l."Status", l."Emoji", l."ThumbnailPath", l."ThumbnailMeta",
+                   l."CreatedAt", l."UpdatedAt", l."LastScannedAt", l."ConfigId"
             FROM "Libraries" l
             LEFT JOIN "LibraryConfigs" c ON c."Id" = l."ConfigId"
             WHERE l."Id" = @Id AND {libWhere}
             LIMIT 1;
             """;
 
-        var rows = await conn.QueryAsync<Library, LibraryConfig?, Library>(
-            new CommandDefinition(libSql, libParams, cancellationToken: ct),
-            (l, c) =>
-            {
-                l.Config = c!;
-                return l;
-            },
-            splitOn: "Id");
+        var rows = await conn.QueryAsync<Library>(libSql, libParams).WithConfigAsync(conn);
 
         var library = rows.FirstOrDefault();
         if (library == null) return null;
@@ -286,7 +253,7 @@ public sealed partial class DiarSpeicherService
                 WHERE "Id" = @Id;
                 """;
 
-            await conn.ExecuteAsync(new CommandDefinition(updateLibSql, library, tx, cancellationToken: ct));
+            await conn.ExecuteAsync(updateLibSql, library, tx);
 
             if (library.Config != null)
             {
@@ -310,7 +277,7 @@ public sealed partial class DiarSpeicherService
                     WHERE "Id" = @Id;
                     """;
 
-                await conn.ExecuteAsync(new CommandDefinition(updateConfigSql, ToConfigRow(library.Config), tx, cancellationToken: ct));
+                await conn.ExecuteAsync(updateConfigSql, library.Config, tx);
             }
 
             if (newPath != null)
@@ -334,7 +301,7 @@ public sealed partial class DiarSpeicherService
             """;
 
         var mediaCount = await conn.ExecuteScalarAsync<int>(
-            new CommandDefinition(mediaCountSql, new { LibraryId = library.Id }, cancellationToken: ct));
+            mediaCountSql, new { LibraryId = library.Id });
 
         return ToLibraryDto(library, mediaCount);
     }
@@ -371,6 +338,8 @@ public sealed partial class DiarSpeicherService
         string newPath,
         CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         var cut = oldPath.Length + 1;
 
         const string updateMediaSql = """
@@ -378,30 +347,18 @@ public sealed partial class DiarSpeicherService
             WHERE substr("Path", 1, @OldPathLen) = @OldPath
               AND "SeriesId" IN (SELECT "Id" FROM "Series" WHERE "LibraryId" = @LibraryId);
             """;
-        await conn.ExecuteAsync(new CommandDefinition(
-            updateMediaSql,
-            new { NewPath = newPath, Cut = cut, OldPathLen = oldPath.Length, OldPath = oldPath, LibraryId = libraryId },
-            tx,
-            cancellationToken: ct));
+        await conn.ExecuteAsync(updateMediaSql, new { NewPath = newPath, Cut = cut, OldPathLen = oldPath.Length, OldPath = oldPath, LibraryId = libraryId }, tx);
 
         const string updateSeriesSql = """
             UPDATE "Series" SET "Path" = @NewPath || substr("Path", @Cut)
             WHERE substr("Path", 1, @OldPathLen) = @OldPath AND "LibraryId" = @LibraryId;
             """;
-        await conn.ExecuteAsync(new CommandDefinition(
-            updateSeriesSql,
-            new { NewPath = newPath, Cut = cut, OldPathLen = oldPath.Length, OldPath = oldPath, LibraryId = libraryId },
-            tx,
-            cancellationToken: ct));
+        await conn.ExecuteAsync(updateSeriesSql, new { NewPath = newPath, Cut = cut, OldPathLen = oldPath.Length, OldPath = oldPath, LibraryId = libraryId }, tx);
 
         const string deleteScannedDirsSql = """
             DELETE FROM "ScannedDirectories" WHERE substr("Path", 1, @OldPathLen) = @OldPath;
             """;
-        await conn.ExecuteAsync(new CommandDefinition(
-            deleteScannedDirsSql,
-            new { OldPathLen = oldPath.Length, OldPath = oldPath },
-            tx,
-            cancellationToken: ct));
+        await conn.ExecuteAsync(deleteScannedDirsSql, new { OldPathLen = oldPath.Length, OldPath = oldPath }, tx);
     }
 
     public async Task<bool> DeleteLibraryAsync(AuthUser user, string id, bool deleteFiles = false, CancellationToken ct = default)
@@ -411,7 +368,7 @@ public sealed partial class DiarSpeicherService
         libParams.Add("Id", id);
 
         var selectSql = $@"SELECT ""Id"", ""Path"", ""ConfigId"" FROM ""Libraries"" l WHERE l.""Id"" = @Id AND {libWhere} LIMIT 1;";
-        var library = await conn.QueryFirstOrDefaultAsync<Library>(new CommandDefinition(selectSql, libParams, cancellationToken: ct));
+        var library = await conn.QueryFirstOrDefaultAsync<Library>(selectSql, libParams);
         if (library == null) return false;
 
         if (deleteFiles)
@@ -425,13 +382,13 @@ public sealed partial class DiarSpeicherService
 
         await using var tx = await conn.BeginTransactionAsync(ct);
         const string deleteScannedDirsSql = @"DELETE FROM ""ScannedDirectories"" WHERE substr(""Path"", 1, @PathLen) = @Path;";
-        await conn.ExecuteAsync(new CommandDefinition(deleteScannedDirsSql, new { PathLen = libraryPath.Length, Path = libraryPath }, tx, cancellationToken: ct));
+        await conn.ExecuteAsync(deleteScannedDirsSql, new { PathLen = libraryPath.Length, Path = libraryPath }, tx);
 
         const string deleteLibSql = @"DELETE FROM ""Libraries"" WHERE ""Id"" = @Id;";
-        await conn.ExecuteAsync(new CommandDefinition(deleteLibSql, new { Id = library.Id }, tx, cancellationToken: ct));
+        await conn.ExecuteAsync(deleteLibSql, new { Id = library.Id }, tx);
 
         const string deleteConfigSql = @"DELETE FROM ""LibraryConfigs"" WHERE ""Id"" = @ConfigId;";
-        await conn.ExecuteAsync(new CommandDefinition(deleteConfigSql, new { ConfigId = library.ConfigId }, tx, cancellationToken: ct));
+        await conn.ExecuteAsync(deleteConfigSql, new { ConfigId = library.ConfigId }, tx);
 
         await tx.CommitAsync(ct);
         return true;
@@ -448,7 +405,7 @@ public sealed partial class DiarSpeicherService
             """;
 
         var thumbs = (await conn.QueryAsync<string>(
-            new CommandDefinition(selectThumbsSql, new { LibraryId = libraryId }, cancellationToken: ct)
+            selectThumbsSql, new { LibraryId = libraryId }
         )).AsList();
 
         foreach (var thumb in thumbs)
@@ -460,35 +417,15 @@ public sealed partial class DiarSpeicherService
         const string deleteMediaSql = """
             DELETE FROM "Media" WHERE "SeriesId" IN (SELECT "Id" FROM "Series" WHERE "LibraryId" = @LibraryId);
             """;
-        await conn.ExecuteAsync(new CommandDefinition(deleteMediaSql, new { LibraryId = libraryId }, tx, cancellationToken: ct));
+        await conn.ExecuteAsync(deleteMediaSql, new { LibraryId = libraryId }, tx);
 
         const string deleteSeriesSql = @"DELETE FROM ""Series"" WHERE ""LibraryId"" = @LibraryId;";
-        var removedSeries = await conn.ExecuteAsync(new CommandDefinition(deleteSeriesSql, new { LibraryId = libraryId }, tx, cancellationToken: ct));
+        var removedSeries = await conn.ExecuteAsync(deleteSeriesSql, new { LibraryId = libraryId }, tx);
 
         await tx.CommitAsync(ct);
 
         _logger.LogInformation("Purgadas {Series} series de la biblioteca {Library}", removedSeries, libraryId);
     }
-
-    private static object ToConfigRow(LibraryConfig config) => new
-    {
-        config.Id,
-        config.ConvertRarToZip,
-        config.HardDeleteConversions,
-        DefaultReadingDir = config.DefaultReadingDir.ToString(),
-        DefaultReadingMode = config.DefaultReadingMode.ToString(),
-        config.GenerateFileHashes,
-        config.GenerateKoreaderHashes,
-        config.ProcessMetadata,
-        config.Watch,
-        LibraryPattern = config.LibraryPattern.ToString(),
-        DefaultLibraryViewMode = config.DefaultLibraryViewMode.ToString(),
-        config.HideSeriesView,
-        LibraryType = config.LibraryType.ToString(),
-        config.ThumbnailWidth,
-        config.ThumbnailHeight,
-        config.IgnoreRules
-    };
 
     private static LibraryConfig BuildConfig(DiarSpeicherLibraryConfigDto? dto)
     {

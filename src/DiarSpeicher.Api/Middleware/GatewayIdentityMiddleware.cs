@@ -3,6 +3,7 @@ using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Data.Extensions;
 
 namespace DiarSpeicher.Api.Middleware;
 
@@ -59,23 +60,14 @@ public class GatewayIdentityMiddleware
         await using var conn = await connectionFactory.CreateConnectionAsync(ct);
 
         const string selectByIdSql = """
-            SELECT u."Id", u."Username", u."IsServerOwner", u."AvatarPath", u."AvatarMeta", u."AvatarUpdatedAt", u."CreatedAt",
-                   a."Id", a."UserId", a."Age", a."RestrictOnUnset"
+            SELECT u."Id", u."Username", u."IsServerOwner", u."AvatarPath", u."AvatarMeta", u."AvatarUpdatedAt", u."CreatedAt"
             FROM "Users" u
             LEFT JOIN "AgeRestrictions" a ON u."Id" = a."UserId"
             WHERE u."Id" = @Id
             LIMIT 1;
             """;
 
-        var usersById = (await conn.QueryAsync<User, AgeRestriction?, User>(
-            selectByIdSql,
-            (user, age) =>
-            {
-                user.AgeRestriction = age;
-                return user;
-            },
-            new { Id = id },
-            splitOn: "Id")).ToList();
+        var usersById = (await conn.QueryAsync<User>(selectByIdSql, new { Id = id }).WithAgeRestrictionAsync(conn)).ToList();
 
         var existing = usersById.FirstOrDefault();
         if (existing is not null)
@@ -84,7 +76,7 @@ public class GatewayIdentityMiddleware
             {
                 existing.Username = username;
                 const string updateSql = """UPDATE "Users" SET "Username" = @Username WHERE "Id" = @Id;""";
-                await conn.ExecuteAsync(new CommandDefinition(updateSql, new { Username = username, Id = id }, cancellationToken: ct));
+                await conn.ExecuteAsync(updateSql, new { Username = username, Id = id });
             }
 
             await LoadExclusionsAsync(conn, existing, ct);
@@ -92,23 +84,14 @@ public class GatewayIdentityMiddleware
         }
 
         const string selectByNameSql = """
-            SELECT u."Id", u."Username", u."IsServerOwner", u."AvatarPath", u."AvatarMeta", u."AvatarUpdatedAt", u."CreatedAt",
-                   a."Id", a."UserId", a."Age", a."RestrictOnUnset"
+            SELECT u."Id", u."Username", u."IsServerOwner", u."AvatarPath", u."AvatarMeta", u."AvatarUpdatedAt", u."CreatedAt"
             FROM "Users" u
             LEFT JOIN "AgeRestrictions" a ON u."Id" = a."UserId"
             WHERE u."Username" = @Username
             LIMIT 1;
             """;
 
-        var usersByName = (await conn.QueryAsync<User, AgeRestriction?, User>(
-            selectByNameSql,
-            (user, age) =>
-            {
-                user.AgeRestriction = age;
-                return user;
-            },
-            new { Username = username },
-            splitOn: "Id")).ToList();
+        var usersByName = (await conn.QueryAsync<User>(selectByNameSql, new { Username = username }).WithAgeRestrictionAsync(conn)).ToList();
 
         var existingByUsername = usersByName.FirstOrDefault();
         if (existingByUsername is not null)
@@ -123,7 +106,7 @@ public class GatewayIdentityMiddleware
                 UPDATE "Users" SET "Id" = @NewId WHERE "Id" = @OldId;
                 """;
 
-            await conn.ExecuteAsync(new CommandDefinition(remapSql, new { NewId = id, OldId = oldId }, transaction: tx, cancellationToken: ct));
+            await conn.ExecuteAsync(remapSql, new { NewId = id, OldId = oldId }, tx);
             await tx.CommitAsync(ct);
 
             existingByUsername.Id = id;
@@ -132,7 +115,7 @@ public class GatewayIdentityMiddleware
         }
 
         const string countSql = """SELECT COUNT(*) FROM "Users";""";
-        var totalUsers = await conn.ExecuteScalarAsync<int>(new CommandDefinition(countSql, cancellationToken: ct));
+        var totalUsers = await conn.ExecuteScalarAsync<int>(countSql);
         var isFirstUser = totalUsers == 0;
 
         var now = DateTimeOffset.UtcNow;
@@ -149,12 +132,14 @@ public class GatewayIdentityMiddleware
             VALUES (@Id, @Username, @IsServerOwner, @Now);
             """;
 
-        await conn.ExecuteAsync(new CommandDefinition(insertSql, new { Id = id, Username = username, IsServerOwner = isFirstUser, Now = now }, cancellationToken: ct));
+        await conn.ExecuteAsync(insertSql, new { Id = id, Username = username, IsServerOwner = isFirstUser, Now = now });
         return created;
     }
 
     private static async Task LoadExclusionsAsync(System.Data.Common.DbConnection conn, User user, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         const string sql = """
             SELECT "Id", "LibraryId", "UserId"
             FROM "LibraryExclusions"
@@ -162,7 +147,7 @@ public class GatewayIdentityMiddleware
             """;
 
         var exclusions = await conn.QueryAsync<LibraryExclusion>(
-            new CommandDefinition(sql, new { UserId = user.Id }, cancellationToken: ct));
+            sql, new { UserId = user.Id });
 
         user.ExcludedLibraries = exclusions.ToList();
     }

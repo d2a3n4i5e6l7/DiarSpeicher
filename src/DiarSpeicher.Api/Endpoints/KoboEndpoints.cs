@@ -15,9 +15,7 @@ public static class KoboEndpoints
         if (ctx.HttpContext.Items[AuthUserKey] is not AuthUser user ||
             !user.HasPermission(Permissions.AccessKoboSync))
         {
-            return Results.Json(
-                new { error = "This account is not allowed to use Kobo sync." },
-                statusCode: StatusCodes.Status403Forbidden);
+            return ApiResults.Error("This account is not allowed to use Kobo sync.", StatusCodes.Status403Forbidden);
         }
 
         return await next(ctx);
@@ -42,7 +40,7 @@ public static class KoboEndpoints
             var resources = await service.GetInitializationAsync(baseUrl, apiKey, ct);
 
             httpContext.Response.Headers["x-kobo-apitoken"] = "e30=";
-            return Results.Ok(new { Resources = resources });
+            return Results.Ok(new KoboInitializationResponse(resources));
         });
 
         group.MapGet("/v1/library/sync", async (

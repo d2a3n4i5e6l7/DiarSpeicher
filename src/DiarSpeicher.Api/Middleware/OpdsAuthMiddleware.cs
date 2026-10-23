@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using DiarSpeicher.Api.Endpoints;
+using DiarSpeicher.Api.Serialization;
 using DiarSpeicher.Core.Domain.Models;
 using Microsoft.Extensions.Options;
 
@@ -56,8 +58,9 @@ public partial class OpdsAuthMiddleware
 
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
         await context.Response.WriteAsJsonAsync(
-            new { error = "Identity not resolved by the gateway" },
-            context.RequestAborted);
+            new ApiError("Identity not resolved by the gateway"),
+            ApiJsonContext.Default.ApiError,
+            cancellationToken: context.RequestAborted);
     }
 
     /// <summary>

@@ -14,9 +14,7 @@ public static class KoReaderEndpoints
         if (ctx.HttpContext.Items["AuthUser"] is not AuthUser user ||
             !user.HasPermission(Permissions.AccessKoreaderSync))
         {
-            return Results.Json(
-                new { error = "This account is not allowed to use KOReader sync." },
-                statusCode: StatusCodes.Status403Forbidden);
+            return ApiResults.Error("This account is not allowed to use KOReader sync.", StatusCodes.Status403Forbidden);
         }
 
         return await next(ctx);

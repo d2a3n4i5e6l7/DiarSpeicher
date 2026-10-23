@@ -52,8 +52,8 @@ public sealed class ScanRecoveryService : BackgroundService
             await PurgeUnreferencedThumbnailsAsync(conn, stoppingToken);
 
             const string libSql = """SELECT "Id", "Name" FROM "Libraries";""";
-            var libraries = (await conn.QueryAsync<(string Id, string Name)>(
-                new CommandDefinition(libSql, cancellationToken: stoppingToken))).ToList();
+            var libraries = (await conn.QueryAsync<IdNameRow>(
+                libSql)).ToList();
 
             foreach (var library in libraries)
             {
@@ -80,9 +80,11 @@ public sealed class ScanRecoveryService : BackgroundService
     /// </summary>
     private async Task PurgeOrphanMediaAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         const string selectSql = """SELECT "Id", "ThumbnailPath" FROM "Media" WHERE "SeriesId" IS NULL;""";
-        var orphans = (await conn.QueryAsync<(string Id, string? ThumbnailPath)>(
-            new CommandDefinition(selectSql, cancellationToken: ct))).ToList();
+        var orphans = (await conn.QueryAsync<IdThumbnailRow>(
+            selectSql)).ToList();
 
         if (orphans.Count == 0) return;
 
@@ -101,7 +103,7 @@ public sealed class ScanRecoveryService : BackgroundService
         }
 
         const string deleteSql = """DELETE FROM "Media" WHERE "SeriesId" IS NULL;""";
-        await conn.ExecuteAsync(new CommandDefinition(deleteSql, cancellationToken: ct));
+        await conn.ExecuteAsync(deleteSql);
 
         _logger.LogWarning("Limpiados {Count} tomos sin serie", orphans.Count);
     }
@@ -113,6 +115,8 @@ public sealed class ScanRecoveryService : BackgroundService
     /// </summary>
     private async Task PurgeOrphanLibraryConfigsAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         const string sql = """
             DELETE FROM "LibraryConfigs"
             WHERE "Id" NOT IN (
@@ -120,7 +124,7 @@ public sealed class ScanRecoveryService : BackgroundService
             );
             """;
 
-        var count = await conn.ExecuteAsync(new CommandDefinition(sql, cancellationToken: ct));
+        var count = await conn.ExecuteAsync(sql);
         if (count > 0)
         {
             _logger.LogWarning("Limpiadas {Count} configuraciones sin biblioteca", count);
@@ -133,14 +137,16 @@ public sealed class ScanRecoveryService : BackgroundService
     /// </summary>
     private async Task PurgeUnclaimedScannedDirectoriesAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         const string libSql = """SELECT "Path" FROM "Libraries";""";
-        var libraryPaths = await conn.QueryAsync<string>(new CommandDefinition(libSql, cancellationToken: ct));
+        var libraryPaths = await conn.QueryAsync<string>(libSql);
         var roots = libraryPaths
             .Select(p => Path.TrimEndingDirectorySeparator(Path.GetFullPath(p)))
             .ToList();
 
         const string dirSql = """SELECT "Path" FROM "ScannedDirectories";""";
-        var cached = (await conn.QueryAsync<string>(new CommandDefinition(dirSql, cancellationToken: ct))).ToList();
+        var cached = (await conn.QueryAsync<string>(dirSql)).ToList();
 
         var unclaimedPaths = cached
             .Where(path => !roots.Any(root =>
@@ -151,7 +157,7 @@ public sealed class ScanRecoveryService : BackgroundService
         if (unclaimedPaths.Count == 0) return;
 
         const string deleteSql = """DELETE FROM "ScannedDirectories" WHERE "Path" IN @Paths;""";
-        await conn.ExecuteAsync(new CommandDefinition(deleteSql, new { Paths = unclaimedPaths }, cancellationToken: ct));
+        await conn.ExecuteAsync(deleteSql, new { Paths = unclaimedPaths });
 
         _logger.LogWarning("Limpiadas {Count} carpetas cacheadas sin biblioteca", unclaimedPaths.Count);
     }
@@ -169,19 +175,19 @@ public sealed class ScanRecoveryService : BackgroundService
         var referenced = new HashSet<string>(StringComparer.Ordinal);
 
         const string mediaSql = """SELECT "ThumbnailPath" FROM "Media" WHERE "ThumbnailPath" IS NOT NULL;""";
-        foreach (var path in await conn.QueryAsync<string>(new CommandDefinition(mediaSql, cancellationToken: ct)))
+        foreach (var path in await conn.QueryAsync<string>(mediaSql))
         {
             referenced.Add(Path.GetFullPath(path));
         }
 
         const string seriesSql = """SELECT "ThumbnailPath" FROM "Series" WHERE "ThumbnailPath" IS NOT NULL;""";
-        foreach (var path in await conn.QueryAsync<string>(new CommandDefinition(seriesSql, cancellationToken: ct)))
+        foreach (var path in await conn.QueryAsync<string>(seriesSql))
         {
             referenced.Add(Path.GetFullPath(path));
         }
 
         const string libSql = """SELECT "ThumbnailPath" FROM "Libraries" WHERE "ThumbnailPath" IS NOT NULL;""";
-        foreach (var path in await conn.QueryAsync<string>(new CommandDefinition(libSql, cancellationToken: ct)))
+        foreach (var path in await conn.QueryAsync<string>(libSql))
         {
             referenced.Add(Path.GetFullPath(path));
         }

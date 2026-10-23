@@ -197,9 +197,9 @@ public sealed class ScannerScalingTests : IDisposable
             """UPDATE "Libraries" SET "LastScannedAt" = @Now WHERE "Id" = @Id""",
             new { Now = now, Id = libraryId });
 
-        var lastScanned = await _db.Connection.QueryFirstOrDefaultAsync<DateTimeOffset?>(
-            """SELECT "LastScannedAt" FROM "Libraries" WHERE "Id" = @Id""",
+        var library = await _db.Connection.QueryFirstOrDefaultAsync<Library>(
+            """SELECT "Id", "LastScannedAt" FROM "Libraries" WHERE "Id" = @Id""",
             new { Id = libraryId });
-        Assert.NotNull(lastScanned);
+        Assert.NotNull(library?.LastScannedAt);
     }
 }

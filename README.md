@@ -29,7 +29,7 @@ Esa restricción es el criterio de diseño de todo el proyecto, no una nota al p
 
 Porque **C# es mi lenguaje favorito**, sin más vueltas.
 
-Que además .NET 10 rinda muy bien y consuma poco en ARM fue lo que confirmó que la
+Que además .NET 11 rinda muy bien y consuma poco en ARM fue lo que confirmó que la
 decisión era sensata, pero el orden real fue ese: primero el gusto, después la
 justificación técnica.
 
@@ -53,7 +53,7 @@ fuentes no genera portada: el procesador no rasteriza.
 
 ## Stack
 
-- **.NET 10** / C# 13
+- **.NET 11** / C# 15
 - **EF Core 10** sobre SQLite (WAL)
 - **SharpCompress** para RAR/CBR
 - `System.IO.Compression` para ZIP/CBZ y EPUB

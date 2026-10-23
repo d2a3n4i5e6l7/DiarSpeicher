@@ -36,7 +36,7 @@ public static class TrashEndpoints
 
             return trash.Restore(id)
                 ? Results.NoContent()
-                : Results.BadRequest(new { error = "No se pudo restaurar: caduco, o ya existe algo con ese nombre." });
+                : Results.BadRequest(new ApiError("No se pudo restaurar: caduco, o ya existe algo con ese nombre."));
         });
 
         group.MapDelete("/{id}", (
@@ -56,6 +56,5 @@ public static class TrashEndpoints
         httpContext.Items[AuthUserKey] is AuthUser user && user.HasPermission(Permissions.ManageLibrary);
 
     private static IResult Forbidden() =>
-        Results.Json(new { error = "This account is not allowed to manage libraries." },
-            statusCode: StatusCodes.Status403Forbidden);
+        ApiResults.Error("This account is not allowed to manage libraries.", StatusCodes.Status403Forbidden);
 }

@@ -196,25 +196,14 @@ public class LibraryScannerService : ILibraryScannerService
         const string sql = """
             SELECT 
                 l."Id", l."Name", l."Description", l."Path", l."Status", l."Emoji", 
-                l."ThumbnailPath", l."ThumbnailMeta", l."CreatedAt", l."UpdatedAt", l."LastScannedAt", l."ConfigId",
-                c."Id", c."ConvertRarToZip", c."HardDeleteConversions", c."DefaultReadingDir", c."DefaultReadingMode",
-                c."GenerateFileHashes", c."GenerateKoreaderHashes", c."ProcessMetadata", c."Watch",
-                c."LibraryPattern", c."DefaultLibraryViewMode", c."HideSeriesView", c."LibraryType",
-                c."ThumbnailWidth", c."ThumbnailHeight", c."IgnoreRules"
+                l."ThumbnailPath", l."ThumbnailMeta", l."CreatedAt", l."UpdatedAt", l."LastScannedAt", l."ConfigId"
             FROM "Libraries" l
             LEFT JOIN "LibraryConfigs" c ON c."Id" = l."ConfigId"
             WHERE l."Id" = @LibraryId
             LIMIT 1;
             """;
 
-        var rows = await conn.QueryAsync<Library, LibraryConfig?, Library>(
-            new CommandDefinition(sql, new { LibraryId = libraryId }, cancellationToken: cancellationToken),
-            (lib, cfg) =>
-            {
-                if (cfg is not null) lib.Config = cfg;
-                return lib;
-            },
-            splitOn: "Id");
+        var rows = await conn.QueryAsync<Library>(sql, new { LibraryId = libraryId }).WithConfigAsync(conn);
         var library = rows.FirstOrDefault();
 
         if (library is null)
@@ -233,10 +222,7 @@ public class LibraryScannerService : ILibraryScannerService
             _logger.LogWarning("Library path {Path} does not exist on disk", libraryPath);
             library.Status = FileStatus.Missing;
             const string updateMissingSql = @"UPDATE ""Libraries"" SET ""Status"" = @Status, ""UpdatedAt"" = @UpdatedAt WHERE ""Id"" = @Id;";
-            await conn.ExecuteAsync(new CommandDefinition(
-                updateMissingSql,
-                new { Status = nameof(FileStatus.Missing), UpdatedAt = DateTimeOffset.UtcNow, Id = library.Id },
-                cancellationToken: cancellationToken));
+            await conn.ExecuteAsync(updateMissingSql, new { Status = nameof(FileStatus.Missing), UpdatedAt = DateTimeOffset.UtcNow, Id = library.Id });
 
             report.Success = false;
             report.ErrorMessage = $"Library directory {libraryPath} does not exist";
@@ -249,10 +235,7 @@ public class LibraryScannerService : ILibraryScannerService
         {
             library.Status = FileStatus.Ready;
             const string updateReadySql = @"UPDATE ""Libraries"" SET ""Status"" = @Status, ""UpdatedAt"" = @UpdatedAt WHERE ""Id"" = @Id;";
-            await conn.ExecuteAsync(new CommandDefinition(
-                updateReadySql,
-                new { Status = nameof(FileStatus.Ready), UpdatedAt = DateTimeOffset.UtcNow, Id = library.Id },
-                cancellationToken: cancellationToken));
+            await conn.ExecuteAsync(updateReadySql, new { Status = nameof(FileStatus.Ready), UpdatedAt = DateTimeOffset.UtcNow, Id = library.Id });
         }
 
         return library;
@@ -283,7 +266,7 @@ public class LibraryScannerService : ILibraryScannerService
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         const string existingSeriesSql = @"SELECT ""Id"", ""Path"", ""Status"" FROM ""Series"" WHERE ""LibraryId"" = @LibraryId;";
         var existingSeries = (await conn.QueryAsync<ExistingSeriesInfo>(
-            new CommandDefinition(existingSeriesSql, new { LibraryId = libraryId }, cancellationToken: cancellationToken)
+            existingSeriesSql, new { LibraryId = libraryId }
         )).AsList();
 
         await PublishProgressAsync(libraryId, ScanPhase.WalkingLibrary, cancellationToken, new() { Message = "Recorriendo carpetas en el disco" });
@@ -348,7 +331,7 @@ public class LibraryScannerService : ILibraryScannerService
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         const string sql = @"UPDATE ""Libraries"" SET ""LastScannedAt"" = @LastScannedAt WHERE ""Id"" = @Id;";
-        await conn.ExecuteAsync(new CommandDefinition(sql, new { LastScannedAt = now, Id = libraryId }, cancellationToken: cancellationToken));
+        await conn.ExecuteAsync(sql, new { LastScannedAt = now, Id = libraryId });
 
         report.Duration = sw.Elapsed;
         report.Success = true;
@@ -371,7 +354,29 @@ public class LibraryScannerService : ILibraryScannerService
             report.SkippedFiles);
     }
 
-    private sealed record MediaOwnershipItem(string Id, string Path, string? SeriesId, DateTimeOffset CreatedAt, string? ThumbnailPath);
+    internal sealed class MediaPathUpdate
+    {
+        public required string Id { get; init; }
+        public required string Path { get; init; }
+        public required string Extension { get; init; }
+        public required string Status { get; init; }
+        public required DateTimeOffset UpdatedAt { get; init; }
+    }
+
+    internal sealed class MediaRescanUpdate
+    {
+        public required string Id { get; init; }
+        public required long Size { get; init; }
+        public required int Pages { get; init; }
+        public string? Hash { get; init; }
+        public string? KoreaderHash { get; init; }
+        public string? ThumbnailPath { get; init; }
+        public required DateTimeOffset ModifiedAt { get; init; }
+        public required string Status { get; init; }
+        public required DateTimeOffset UpdatedAt { get; init; }
+    }
+
+    internal sealed record MediaOwnershipItem(string Id, string Path, string? SeriesId, DateTimeOffset CreatedAt, string? ThumbnailPath);
 
     private async Task ReconcileMediaOwnershipAsync(
         string libraryId,
@@ -380,8 +385,8 @@ public class LibraryScannerService : ILibraryScannerService
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         const string seriesSql = @"SELECT ""Id"", ""Path"" FROM ""Series"" WHERE ""LibraryId"" = @LibraryId;";
-        var seriesOfLibrary = (await conn.QueryAsync<(string Id, string Path)>(
-            new CommandDefinition(seriesSql, new { LibraryId = libraryId }, cancellationToken: cancellationToken)
+        var seriesOfLibrary = (await conn.QueryAsync<IdPathRow>(
+            seriesSql, new { LibraryId = libraryId }
         )).AsList();
 
         if (seriesOfLibrary.Count == 0) return;
@@ -396,7 +401,7 @@ public class LibraryScannerService : ILibraryScannerService
         var seriesIds = seriesOfLibrary.Select(s => s.Id).ToList();
         const string mediaSql = @"SELECT ""Id"", ""Path"", ""SeriesId"", ""CreatedAt"", ""ThumbnailPath"" FROM ""Media"" WHERE ""SeriesId"" IN @SeriesIds;";
         var mediaList = (await conn.QueryAsync<MediaOwnershipItem>(
-            new CommandDefinition(mediaSql, new { SeriesIds = seriesIds }, cancellationToken: cancellationToken)
+            mediaSql, new { SeriesIds = seriesIds }
         )).AsList();
 
         if (mediaList.Count == 0) return;
@@ -420,11 +425,10 @@ public class LibraryScannerService : ILibraryScannerService
             await using var tx = await conn.BeginTransactionAsync(cancellationToken);
             const string updateSql = @"UPDATE ""Media"" SET ""SeriesId"" = @NewSeriesId, ""UpdatedAt"" = @UpdatedAt WHERE ""Id"" = @MediaId;";
             var now = DateTimeOffset.UtcNow;
-            await conn.ExecuteAsync(new CommandDefinition(
+            await conn.ExecuteAsync(
                 updateSql,
                 toRepoint.Select(x => new { NewSeriesId = x.NewSeriesId, UpdatedAt = now, MediaId = x.MediaId }),
-                tx,
-                cancellationToken: cancellationToken));
+                tx);
             await tx.CommitAsync(cancellationToken);
             report.UpdatedMedia += (ulong)toRepoint.Count;
         }
@@ -453,8 +457,8 @@ public class LibraryScannerService : ILibraryScannerService
 
         var duplicateIds = duplicates.SelectMany(g => g.Select(m => m.Id)).ToList();
         const string sessionsSql = @"SELECT ""MediaId"", COUNT(*) AS ""Count"" FROM ""ReadingSessions"" WHERE ""MediaId"" IN @DuplicateIds GROUP BY ""MediaId"";";
-        var sessionCounts = (await conn.QueryAsync<(string MediaId, int Count)>(
-            new CommandDefinition(sessionsSql, new { DuplicateIds = duplicateIds }, cancellationToken: cancellationToken)
+        var sessionCounts = (await conn.QueryAsync<MediaCountRow>(
+            sessionsSql, new { DuplicateIds = duplicateIds }
         )).ToDictionary(x => x.MediaId, x => x.Count, StringComparer.Ordinal);
 
         var removed = 0;
@@ -480,7 +484,7 @@ public class LibraryScannerService : ILibraryScannerService
         {
             await using var tx = await conn.BeginTransactionAsync(cancellationToken);
             const string deleteSql = @"DELETE FROM ""Media"" WHERE ""Id"" IN @Ids;";
-            await conn.ExecuteAsync(new CommandDefinition(deleteSql, new { Ids = toDeleteIds }, tx, cancellationToken: cancellationToken));
+            await conn.ExecuteAsync(deleteSql, new { Ids = toDeleteIds }, tx);
             await tx.CommitAsync(cancellationToken);
         }
 
@@ -527,25 +531,17 @@ public class LibraryScannerService : ILibraryScannerService
 
         const string selectSeriesSql = @"SELECT ""Id"" FROM ""Series"" WHERE ""LibraryId"" = @LibraryId AND ""Path"" IN @Paths;";
         var missingSeriesIds = (await conn.QueryAsync<string>(
-            new CommandDefinition(selectSeriesSql, new { LibraryId = libraryId, Paths = missingPaths }, tx, cancellationToken: cancellationToken)
+            selectSeriesSql, new { LibraryId = libraryId, Paths = missingPaths }, tx
         )).AsList();
 
         if (missingSeriesIds.Count > 0)
         {
             const string updateSeriesSql = @"UPDATE ""Series"" SET ""Status"" = @Status, ""UpdatedAt"" = @UpdatedAt WHERE ""Id"" IN @Ids;";
-            var updatedSeriesCount = await conn.ExecuteAsync(new CommandDefinition(
-                updateSeriesSql,
-                new { Status = nameof(FileStatus.Missing), UpdatedAt = DateTimeOffset.UtcNow, Ids = missingSeriesIds },
-                tx,
-                cancellationToken: cancellationToken));
+            var updatedSeriesCount = await conn.ExecuteAsync(updateSeriesSql, new { Status = nameof(FileStatus.Missing), UpdatedAt = DateTimeOffset.UtcNow, Ids = missingSeriesIds }, tx);
             report.UpdatedSeries += (ulong)updatedSeriesCount;
 
             const string updateMediaSql = @"UPDATE ""Media"" SET ""Status"" = @Status, ""UpdatedAt"" = @UpdatedAt WHERE ""SeriesId"" IN @SeriesIds AND ""Status"" != @Status;";
-            var updatedMediaCount = await conn.ExecuteAsync(new CommandDefinition(
-                updateMediaSql,
-                new { Status = nameof(FileStatus.Missing), UpdatedAt = DateTimeOffset.UtcNow, SeriesIds = missingSeriesIds },
-                tx,
-                cancellationToken: cancellationToken));
+            var updatedMediaCount = await conn.ExecuteAsync(updateMediaSql, new { Status = nameof(FileStatus.Missing), UpdatedAt = DateTimeOffset.UtcNow, SeriesIds = missingSeriesIds }, tx);
             report.UpdatedMedia += (ulong)updatedMediaCount;
         }
 
@@ -558,10 +554,7 @@ public class LibraryScannerService : ILibraryScannerService
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         const string updateSql = @"UPDATE ""Series"" SET ""Status"" = @Status, ""UpdatedAt"" = @UpdatedAt WHERE ""Id"" IN @Ids;";
-        var updatedCount = await conn.ExecuteAsync(new CommandDefinition(
-            updateSql,
-            new { Status = nameof(FileStatus.Ready), UpdatedAt = DateTimeOffset.UtcNow, Ids = recoveredIds },
-            cancellationToken: cancellationToken));
+        var updatedCount = await conn.ExecuteAsync(updateSql, new { Status = nameof(FileStatus.Ready), UpdatedAt = DateTimeOffset.UtcNow, Ids = recoveredIds });
         report.UpdatedSeries += (ulong)updatedCount;
     }
 
@@ -607,13 +600,7 @@ public class LibraryScannerService : ILibraryScannerService
                 VALUES (@Id, @Name, @Path, @LibraryId, @Status, @CreatedAt, @UpdatedAt);
                 """;
 
-            var seriesRows = newlyCreated.Select(x => new
-            {
-                x.Id, x.Name, x.Path, x.LibraryId,
-                Status = x.Status.ToString(),
-                x.CreatedAt, x.UpdatedAt
-            }).ToList();
-            await conn.ExecuteAsync(new CommandDefinition(insertSql, seriesRows, tx, cancellationToken: cancellationToken));
+            await conn.ExecuteAsync(insertSql, newlyCreated, tx);
             await tx.CommitAsync(cancellationToken);
 
             await PublishProgressAsync(libraryId, ScanPhase.WalkingLibrary, cancellationToken, new()
@@ -642,7 +629,7 @@ public class LibraryScannerService : ILibraryScannerService
             WHERE "LibraryId" = @LibraryId AND "Path" IN @Paths;
             """;
         var seriesEntities = (await conn.QueryAsync<Series>(
-            new CommandDefinition(sql, new { LibraryId = libraryId, Paths = distinctPaths }, cancellationToken: cancellationToken)
+            sql, new { LibraryId = libraryId, Paths = distinctPaths }
         )).AsList();
 
         context.AllSeriesPaths = distinctPaths;
@@ -688,7 +675,7 @@ public class LibraryScannerService : ILibraryScannerService
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         const string mediaSql = @"SELECT ""Id"", ""Path"", ""Status"", ""ModifiedAt"" FROM ""Media"" WHERE ""SeriesId"" = @SeriesId;";
         var existingMedia = (await conn.QueryAsync<ExistingMediaInfo>(
-            new CommandDefinition(mediaSql, new { SeriesId = series.Id }, cancellationToken: cancellationToken)
+            mediaSql, new { SeriesId = series.Id }
         )).AsList();
 
         var walkedSeries = _directoryScanner.WalkSeries(series.Path, storedMtimes, existingMedia, allSeriesPaths);
@@ -734,21 +721,21 @@ public class LibraryScannerService : ILibraryScannerService
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
 
         const string selectSql = @"SELECT ""Id"", ""Path"" FROM ""Media"" WHERE ""SeriesId"" = @SeriesId AND ""Path"" IN @SourcePaths;";
-        var affected = (await conn.QueryAsync<(string Id, string Path)>(
-            new CommandDefinition(selectSql, new { SeriesId = seriesId, SourcePaths = sourcePaths }, cancellationToken: cancellationToken)
+        var affected = (await conn.QueryAsync<IdPathRow>(
+            selectSql, new { SeriesId = seriesId, SourcePaths = sourcePaths }
         )).AsList();
 
         if (affected.Count == 0) return;
 
         var bySource = conversions.ToDictionary(c => c.SourcePath, StringComparer.Ordinal);
-        var toUpdate = new List<object>();
+        var toUpdate = new List<MediaPathUpdate>();
         var now = DateTimeOffset.UtcNow;
 
         foreach (var item in affected)
         {
             if (!bySource.TryGetValue(item.Path, out var conversion)) continue;
 
-            toUpdate.Add(new
+            toUpdate.Add(new MediaPathUpdate
             {
                 Id = item.Id,
                 Path = conversion.TargetPath,
@@ -767,7 +754,7 @@ public class LibraryScannerService : ILibraryScannerService
                 SET "Path" = @Path, "Extension" = @Extension, "Status" = @Status, "UpdatedAt" = @UpdatedAt
                 WHERE "Id" = @Id;
                 """;
-            await conn.ExecuteAsync(new CommandDefinition(updateSql, toUpdate, tx, cancellationToken: cancellationToken));
+            await conn.ExecuteAsync(updateSql, toUpdate, tx);
             await tx.CommitAsync(cancellationToken);
         }
     }
@@ -778,10 +765,7 @@ public class LibraryScannerService : ILibraryScannerService
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         const string updateSql = @"UPDATE ""Media"" SET ""Status"" = @Status, ""UpdatedAt"" = @UpdatedAt WHERE ""SeriesId"" = @SeriesId AND ""Path"" IN @Paths AND ""Status"" != @Status;";
-        var count = await conn.ExecuteAsync(new CommandDefinition(
-            updateSql,
-            new { Status = nameof(FileStatus.Missing), UpdatedAt = DateTimeOffset.UtcNow, SeriesId = seriesId, Paths = missingPaths },
-            cancellationToken: cancellationToken));
+        var count = await conn.ExecuteAsync(updateSql, new { Status = nameof(FileStatus.Missing), UpdatedAt = DateTimeOffset.UtcNow, SeriesId = seriesId, Paths = missingPaths });
         report.UpdatedMedia += (ulong)count;
     }
 
@@ -791,10 +775,7 @@ public class LibraryScannerService : ILibraryScannerService
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         const string updateSql = @"UPDATE ""Media"" SET ""Status"" = @Status, ""UpdatedAt"" = @UpdatedAt WHERE ""Id"" IN @Ids AND ""Status"" != @Status;";
-        var count = await conn.ExecuteAsync(new CommandDefinition(
-            updateSql,
-            new { Status = nameof(FileStatus.Ready), UpdatedAt = DateTimeOffset.UtcNow, Ids = recoveredIds },
-            cancellationToken: cancellationToken));
+        var count = await conn.ExecuteAsync(updateSql, new { Status = nameof(FileStatus.Ready), UpdatedAt = DateTimeOffset.UtcNow, Ids = recoveredIds });
         report.UpdatedMedia += (ulong)count;
     }
 
@@ -981,14 +962,7 @@ public class LibraryScannerService : ILibraryScannerService
                 @Hash, @KoreaderHash, @ThumbnailPath, @ThumbnailMeta, @CreatedAt, @UpdatedAt, @ModifiedAt, @DeletedAt, @SeriesId
             );
             """;
-        var mediaRows = batchCreated.Select(m => new
-        {
-            m.Id, m.Name, m.SortName, m.Size, m.Extension, m.Pages, m.Path,
-            Status = m.Status.ToString(),
-            m.Hash, m.KoreaderHash, m.ThumbnailPath, m.ThumbnailMeta,
-            m.CreatedAt, m.UpdatedAt, m.ModifiedAt, m.DeletedAt, m.SeriesId
-        }).ToList();
-        await conn.ExecuteAsync(new CommandDefinition(insertMediaSql, mediaRows, tx, cancellationToken: cancellationToken));
+        await conn.ExecuteAsync(insertMediaSql, batchCreated, tx);
 
         if (metadataToInsert.Count > 0)
         {
@@ -1001,7 +975,7 @@ public class LibraryScannerService : ILibraryScannerService
                     @Year, @Month, @Day, @Writers, @Pencillers, @Inkers, @Colorists, @Letterers, @CoverArtists, @Editors
                 );
                 """;
-            await conn.ExecuteAsync(new CommandDefinition(insertMetaSql, metadataToInsert, tx, cancellationToken: cancellationToken));
+            await conn.ExecuteAsync(insertMetaSql, metadataToInsert, tx);
         }
 
         if (pagesToInsert.Count > 0)
@@ -1010,7 +984,7 @@ public class LibraryScannerService : ILibraryScannerService
                 INSERT INTO "MediaPages" ("MediaId", "Number", "FileName", "MediaType", "Width", "Height", "SizeBytes")
                 VALUES (@MediaId, @Number, @FileName, @MediaType, @Width, @Height, @SizeBytes);
                 """;
-            await conn.ExecuteAsync(new CommandDefinition(insertPagesSql, pagesToInsert, tx, cancellationToken: cancellationToken));
+            await conn.ExecuteAsync(insertPagesSql, pagesToInsert, tx);
         }
 
         await tx.CommitAsync(cancellationToken);
@@ -1028,8 +1002,8 @@ public class LibraryScannerService : ILibraryScannerService
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         const string selectSql = @"SELECT ""Id"", ""Path"" FROM ""Media"" WHERE ""SeriesId"" = @SeriesId AND ""Path"" IN @Paths;";
-        var mediaToUpdate = (await conn.QueryAsync<(string Id, string Path)>(
-            new CommandDefinition(selectSql, new { SeriesId = seriesId, Paths = toVisitPaths }, cancellationToken: cancellationToken)
+        var mediaToUpdate = (await conn.QueryAsync<IdPathRow>(
+            selectSql, new { SeriesId = seriesId, Paths = toVisitPaths }
         )).AsList();
 
         var existingOnDisk = mediaToUpdate.Where(m => File.Exists(m.Path)).ToList();
@@ -1044,7 +1018,7 @@ public class LibraryScannerService : ILibraryScannerService
         var byId = prepared.ToDictionary(p => p.MediaId, StringComparer.Ordinal);
         var visitedIds = existingOnDisk.Select(m => m.Id).ToList();
 
-        var mediaUpdateList = new List<object>();
+        var mediaUpdateList = new List<MediaRescanUpdate>();
         var newMediaPages = new List<MediaPage>();
         var now = DateTimeOffset.UtcNow;
 
@@ -1058,7 +1032,7 @@ public class LibraryScannerService : ILibraryScannerService
             var analyzed = result.Analysis;
             var thumbPath = result.ThumbnailPath;
 
-            mediaUpdateList.Add(new
+            mediaUpdateList.Add(new MediaRescanUpdate
             {
                 Id = m.Id,
                 Size = fileInfo.Length,
@@ -1104,10 +1078,10 @@ public class LibraryScannerService : ILibraryScannerService
                     "UpdatedAt" = @UpdatedAt
                 WHERE "Id" = @Id;
                 """;
-            await conn.ExecuteAsync(new CommandDefinition(updateMediaSql, mediaUpdateList, tx, cancellationToken: cancellationToken));
+            await conn.ExecuteAsync(updateMediaSql, mediaUpdateList, tx);
 
             const string deletePagesSql = @"DELETE FROM ""MediaPages"" WHERE ""MediaId"" IN @MediaIds;";
-            await conn.ExecuteAsync(new CommandDefinition(deletePagesSql, new { MediaIds = visitedIds }, tx, cancellationToken: cancellationToken));
+            await conn.ExecuteAsync(deletePagesSql, new { MediaIds = visitedIds }, tx);
 
             if (newMediaPages.Count > 0)
             {
@@ -1115,7 +1089,7 @@ public class LibraryScannerService : ILibraryScannerService
                     INSERT INTO "MediaPages" ("MediaId", "Number", "FileName", "MediaType", "Width", "Height", "SizeBytes")
                     VALUES (@MediaId, @Number, @FileName, @MediaType, @Width, @Height, @SizeBytes);
                     """;
-                await conn.ExecuteAsync(new CommandDefinition(insertPagesSql, newMediaPages, tx, cancellationToken: cancellationToken));
+                await conn.ExecuteAsync(insertPagesSql, newMediaPages, tx);
             }
 
             await tx.CommitAsync(cancellationToken);
@@ -1162,7 +1136,7 @@ public class LibraryScannerService : ILibraryScannerService
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         const string selectSql = @"SELECT ""Path"", ""LastMTime"" FROM ""ScannedDirectories"" WHERE substr(""Path"", 1, @Len) = @Prefix;";
         var stored = (await conn.QueryAsync<ScannedDirectory>(
-            new CommandDefinition(selectSql, new { Prefix = libraryPath, Len = libraryPath.Length }, cancellationToken: cancellationToken)
+            selectSql, new { Prefix = libraryPath, Len = libraryPath.Length }
         )).AsList();
 
         var cache = new Dictionary<string, long>(StringComparer.Ordinal);
@@ -1183,7 +1157,7 @@ public class LibraryScannerService : ILibraryScannerService
         if (stalePaths.Count > 0)
         {
             const string deleteSql = @"DELETE FROM ""ScannedDirectories"" WHERE ""Path"" IN @Paths;";
-            await conn.ExecuteAsync(new CommandDefinition(deleteSql, new { Paths = stalePaths }, cancellationToken: cancellationToken));
+            await conn.ExecuteAsync(deleteSql, new { Paths = stalePaths });
 
             _logger.LogInformation(
                 "Dropped {Count} cached directory entries with no folder on disk under {Path}.",
@@ -1208,7 +1182,7 @@ public class LibraryScannerService : ILibraryScannerService
             """;
 
         var parameters = allObservedDirMtimes.Select(kv => new { Path = kv.Key, LastMTime = kv.Value });
-        await conn.ExecuteAsync(new CommandDefinition(upsertSql, parameters, tx, cancellationToken: cancellationToken));
+        await conn.ExecuteAsync(upsertSql, parameters, tx);
 
         await tx.CommitAsync(cancellationToken);
     }
