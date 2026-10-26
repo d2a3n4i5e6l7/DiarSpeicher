@@ -30,6 +30,7 @@ import {
 	formatDuration,
 	mediaTitle,
 	readProgress,
+	renderedLabel,
 } from "../catalog/mediaHelpers";
 import { READABLE_WIDTH } from "../catalog/layout";
 import { DS } from "../theme";
@@ -115,6 +116,7 @@ export default function MediaDetailPage() {
 	}
 
 	const progress = readProgress(media);
+	const imageProgress = renderedLabel(media);
 	const resumePage = media.currentPage && media.currentPage > 1 ? media.currentPage : 1;
 	const summary = media.metadata?.summary?.trim();
 
@@ -175,6 +177,10 @@ export default function MediaDetailPage() {
 						<Chip size="small" variant="outlined" label={formatBytes(media.size)} />
 						<Chip size="small" variant="outlined" label={formatDuration(estimatedMinutes(media.pages))} />
 						{media.isCompleted && <Chip size="small" label="TERMINADO" color="primary" />}
+						{media.readPercent !== undefined && (
+							<Chip size="small" variant="outlined" label={`LEÍDO ${String(Math.round(media.readPercent))}%`} />
+						)}
+						{imageProgress && <Chip size="small" variant="outlined" label={imageProgress} />}
 					</Stack>
 
 					{summary && (

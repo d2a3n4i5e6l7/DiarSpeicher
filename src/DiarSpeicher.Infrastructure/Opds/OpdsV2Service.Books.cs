@@ -156,7 +156,7 @@ public partial class OpdsV2Service
     public async Task<OpdsV2Feed> GetKeepReadingFeedAsync(AuthUser user, string? apiKey, CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
-        var sessions = await conn.GetKeepReadingSessionsAsync(user.Id, ct);
+        var sessions = await conn.GetKeepReadingSessionsAsync(user.Id, imageTrack: true, ct: ct);
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
 
         var parameters = CatalogSqlFilters.ArgsFor(user);
@@ -240,7 +240,7 @@ public partial class OpdsV2Service
                 SELECT "Id", "CreatedAt", "ElapsedSeconds", "EndPage", "EndPercentage",
                        "KoreaderProgress", "MediaId", "Notes", "ReadthroughNumber", "SessionDate",
                        "StartPage", "StartPercentage", "Status", "UpdatedAt", "UserId",
-                       "RenderedPage", "RenderedTotalPages", "RenderedProfileKey"
+                       "RenderedPage", "RenderedTotalPages", "RenderedProfileKey", "RenderedStatus"
                 FROM "ReadingSessions"
                 WHERE "MediaId" = @BookId AND "UserId" = @UserId
                 ORDER BY "Id" DESC
@@ -266,6 +266,8 @@ public partial class OpdsV2Service
         if (book == null) return null;
 
         var progress = await _progress.ResolveAsync(book, session, ct);
+        if (EpubPageMapStore.IsEpub(book) && progress.Page is null) return null;
+
         return new OpdsV2Progression
         {
             Page = progress.Page,

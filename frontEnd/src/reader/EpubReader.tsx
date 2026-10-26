@@ -73,7 +73,9 @@ const EPUB_THEMES = {
 };
 
 interface RelocatedLocation {
+	atEnd?: boolean;
 	start?: {
+		index?: number;
 		displayed?: {
 			page: number;
 			total: number;
@@ -82,19 +84,24 @@ interface RelocatedLocation {
 	};
 }
 
-function parseRelocatedLocation(loc: unknown) {
+/**
+ * epub.js only fills in the book-wide percentage once its locations are generated, which is
+ * slow; without it the position is the spine section plus the page inside that section.
+ */
+function bookFraction(start: NonNullable<RelocatedLocation["start"]>, spineLength: number): number | null {
+	if (typeof start.percentage === "number") return start.percentage;
+	const { displayed, index } = start;
+	if (!displayed || displayed.total <= 0 || typeof index !== "number" || spineLength <= 0) return null;
+	return (index + displayed.page / displayed.total) / spineLength;
+}
+
+function parseRelocatedLocation(loc: unknown, spineLength: number) {
 	const location = loc as RelocatedLocation | null;
 	if (!location?.start) return null;
-	if (location.start.displayed && location.start.displayed.page > 0) {
-		const cur = location.start.displayed.page;
-		const tot = location.start.displayed.total;
-		return { page: cur, total: tot, isCompleted: cur >= tot, percentage: undefined };
-	}
-	if (typeof location.start.percentage === "number") {
-		const pct = Math.max(1, Math.round(location.start.percentage * 100));
-		return { page: pct, total: 100, isCompleted: pct >= 99, percentage: pct };
-	}
-	return null;
+	const fraction = bookFraction(location.start, spineLength);
+	if (fraction === null) return null;
+	const percentage = Math.min(100, Math.max(1, Math.round(fraction * 100)));
+	return { percentage, isCompleted: location.atEnd === true || percentage >= 99 };
 }
 
 export default function EpubReader({ media, onExit }: Readonly<Props>) {
@@ -113,8 +120,7 @@ export default function EpubReader({ media, onExit }: Readonly<Props>) {
 	const [toc, setToc] = useState<NavItem[]>([]);
 	const [fontSize, setFontSize] = useState<number>(100);
 	const [currentTheme, setCurrentTheme] = useState<"ironBlood" | "pureBlack" | "sepia">("ironBlood");
-	const [currentProgress, setCurrentProgress] = useState<number>(media.currentPage ?? 1);
-	const [totalLocations, setTotalLocations] = useState<number>(media.pages > 0 ? media.pages : 1);
+	const [currentProgress, setCurrentProgress] = useState<number>(Math.round(media.readPercent ?? 0));
 	const [settingsOpen, setSettingsOpen] = useState(false);
 
 	const hideTimer = useRef<number | null>(null);
@@ -197,15 +203,11 @@ export default function EpubReader({ media, onExit }: Readonly<Props>) {
 					})
 					.catch(() => undefined);
 
-				const total = media.pages > 0 ? media.pages : 100;
-				setTotalLocations(total);
-
 				const onRelocated = (loc: unknown) => {
-					const parsed = parseRelocatedLocation(loc);
+					const parsed = parseRelocatedLocation(loc, book.spine.length);
 					if (!parsed) return;
-					setCurrentProgress(parsed.page);
-					if (parsed.total > 0) setTotalLocations(parsed.total);
-					scheduleProgress({ page: parsed.page, percentage: parsed.percentage, isCompleted: parsed.isCompleted });
+					setCurrentProgress(parsed.percentage);
+					scheduleProgress({ page: parsed.percentage, percentage: parsed.percentage, isCompleted: parsed.isCompleted });
 				};
 
 				rendition.on("relocated", onRelocated);
@@ -241,7 +243,7 @@ export default function EpubReader({ media, onExit }: Readonly<Props>) {
 				void 0;
 			}
 		};
-	}, [media.id, media.pages, scheduleProgress, wakeUi]);
+	}, [media.id, scheduleProgress, wakeUi]);
 
 	const goNext = useCallback(() => {
 		if (renditionRef.current) {
@@ -377,7 +379,7 @@ export default function EpubReader({ media, onExit }: Readonly<Props>) {
 				</Typography>
 
 				<Box component="span" className="ds-pill-mono">
-					PAG {String(currentProgress)} / {String(totalLocations)}
+					{String(currentProgress)} %
 				</Box>
 
 				<Tooltip title="Ajustes de texto">

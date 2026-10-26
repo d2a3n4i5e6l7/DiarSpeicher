@@ -13,6 +13,8 @@ public interface IKomgaService
     Task<KomgaPageResponse<KomgaBookDto>> GetBooksInSeriesAsync(AuthUser user, string seriesId, int page, int size, CancellationToken ct = default);
     Task<KomgaBookDto?> GetBookByIdAsync(AuthUser user, string id, CancellationToken ct = default);
     Task<List<KomgaBookPageDto>> GetBookPagesAsync(AuthUser user, string id, CancellationToken ct = default);
-    Task<bool> UpdateReadProgressAsync(AuthUser user, string bookId, int page, bool completed, CancellationToken ct = default);
+    Task<bool> UpdateReadProgressAsync(AuthUser user, string bookId, int? page, bool? completed, CancellationToken ct = default);
     Task<bool> DeleteReadProgressAsync(AuthUser user, string bookId, CancellationToken ct = default);
+    Task<KomgaTachiyomiProgressDto?> GetTachiyomiProgressAsync(AuthUser user, string seriesId, CancellationToken ct = default);
+    Task<bool> SetTachiyomiProgressAsync(AuthUser user, string seriesId, float lastReadNumberSort, CancellationToken ct = default);
 }

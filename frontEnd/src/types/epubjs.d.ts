@@ -66,6 +66,9 @@ declare module "epubjs" {
 			spine: Promise<unknown>;
 		};
 		navigation: Navigation;
+		spine: {
+			length: number;
+		};
 		renderTo(element: HTMLElement | string, options?: RenditionOptions): Rendition;
 		destroy(): void;
 		locations: {

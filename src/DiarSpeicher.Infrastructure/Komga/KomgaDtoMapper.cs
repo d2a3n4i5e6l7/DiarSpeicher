@@ -11,7 +11,7 @@ internal static class KomgaDtoMapper
         Root = l.Path
     };
 
-    internal static KomgaSeriesDto ToSeriesDto(Series s, int? bookCountOverride = null)
+    internal static KomgaSeriesDto ToSeriesDto(Series s, int? bookCountOverride = null, SeriesReadCounts? counts = null)
     {
         var booksCount = bookCountOverride ?? s.Media.Count(m => m.DeletedAt == null);
         var lastModified = (s.UpdatedAt ?? s.CreatedAt).ToString("O");
@@ -26,7 +26,9 @@ internal static class KomgaDtoMapper
             LastModified = lastModified,
             FileLastModified = lastModified,
             BooksCount = booksCount,
-            BooksUnreadCount = booksCount,
+            BooksReadCount = counts?.Read ?? 0,
+            BooksInProgressCount = counts?.InProgress ?? 0,
+            BooksUnreadCount = booksCount - (counts?.Read ?? 0) - (counts?.InProgress ?? 0),
             Metadata = BuildSeriesMetadataDto(s)
         };
     }
@@ -70,7 +72,7 @@ internal static class KomgaDtoMapper
         var authors = ExtractAuthors(m.Metadata?.Writers);
         var pagesCount = ResolvePagesCount(m.Id, overridePagesCount, epubTotals);
         var progress = IReadingProgress.FromSession(m, s, pagesCount);
-        var readProgress = BuildReadProgress(s, overrideCurrentPage, progress.Page);
+        var readProgress = BuildReadProgress(m, s, overrideCurrentPage, progress.Page);
         var lastMod = ResolveLastModified(m);
 
         return new KomgaBookDto
@@ -107,14 +109,15 @@ internal static class KomgaDtoMapper
         return epubTotals?.TotalFor(mediaId) ?? 0;
     }
 
-    private static KomgaReadProgressDto? BuildReadProgress(ReadingSession? s, int? overrideCurrentPage, int? progressPage)
+    private static KomgaReadProgressDto? BuildReadProgress(Media m, ReadingSession? s, int? overrideCurrentPage, int? progressPage)
     {
-        if (s is null) return null;
+        var isEpub = EpubPageMapStore.IsEpub(m);
+        if (s is null || (isEpub && s.RenderedPage is null)) return null;
         var dateStr = (s.UpdatedAt ?? s.CreatedAt).ToString("O");
         return new KomgaReadProgressDto
         {
             Page = overrideCurrentPage ?? progressPage ?? 1,
-            Completed = s.Status == ReadingStatus.Finished,
+            Completed = isEpub ? s.IsRenderedFinished() : s.Status == ReadingStatus.Finished,
             ReadDate = dateStr,
             Created = s.CreatedAt.ToString("O"),
             LastModified = dateStr

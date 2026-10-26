@@ -6,7 +6,7 @@ import SectionRow from "../components/SectionRow";
 import MediaCard from "../components/MediaCard";
 import { useLibraryFilter } from "../catalog/LibraryFilterContext";
 import { useLibrarySeriesIds } from "../catalog/useLibrarySeriesIds";
-import { mediaTitle, mediaSubtitle, readProgress } from "../catalog/mediaHelpers";
+import { mediaTitle, mediaSubtitle, readBadge, readProgress } from "../catalog/mediaHelpers";
 import { mediaApi, seriesApi, type MediaItem, type SeriesItem } from "../api/endpoints";
 import { DS } from "../theme";
 
@@ -106,7 +106,7 @@ export default function HomePage() {
 						subtitle={mediaSubtitle(media)}
 						coverUrl={mediaApi.thumbnailUrl(media.id)}
 						progress={readProgress(media)}
-						badge={media.currentPage ? `P${String(media.currentPage)}` : undefined}
+						badge={readBadge(media)}
 					/>
 				))}
 			</SectionRow>

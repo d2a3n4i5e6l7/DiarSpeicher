@@ -637,9 +637,15 @@ export interface MediaItem {
   seriesId?: string;
   createdAt: string;
   metadata?: MediaMetadataItem;
-  /** Última página leída por el usuario actual; ausente si nunca se abrió. */
+  /** Last page read by the current user; absent if never opened. For EPUBs it is the page stored by the e-reader side, if any. */
   currentPage?: number;
   isCompleted: boolean;
+  /** Progress of an EPUB in its reader, from 0 to 100; absent if it was never read that way. */
+  readPercent?: number;
+  /** EPUB page read in image mode (Komga, OPDS); absent if it was never read that way. */
+  renderedPage?: number;
+  renderedTotalPages?: number;
+  renderedCompleted?: boolean;
 }
 
 export interface SeriesMetadataItem {

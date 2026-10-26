@@ -244,6 +244,7 @@ public static class SqliteDatabaseInitializer
             "RenderedPage" INTEGER NULL,
             "RenderedTotalPages" INTEGER NULL,
             "RenderedProfileKey" TEXT NULL,
+            "RenderedStatus" TEXT NULL,
             "ReadthroughNumber" INTEGER NOT NULL DEFAULT 0,
             "Status" TEXT NOT NULL DEFAULT 'Reading',
             "Notes" TEXT NULL,
@@ -281,6 +282,27 @@ public static class SqliteDatabaseInitializer
     public static void InitializeDatabase(this System.Data.Common.DbConnection connection)
     {
         connection.Execute(SchemaSql);
+        UpgradeSchema(connection);
+    }
+
+    /// <summary>
+    /// CREATE TABLE IF NOT EXISTS leaves an existing table as it was, so a column added later has
+    /// to be added to databases that already hold data. Sessions already read as rendered pages
+    /// keep the status they had, which until now was the only one, and get the percentage that
+    /// page represents so the e-reader side starts from the same place.
+    /// </summary>
+    private static void UpgradeSchema(System.Data.Common.DbConnection connection)
+    {
+        const string hasColumnSql = """SELECT COUNT(*) FROM pragma_table_info('ReadingSessions') WHERE name = 'RenderedStatus';""";
+        if (connection.ExecuteScalar<int>(hasColumnSql) > 0) return;
+
+        connection.Execute("""ALTER TABLE "ReadingSessions" ADD COLUMN "RenderedStatus" TEXT NULL;""");
+        connection.Execute("""UPDATE "ReadingSessions" SET "RenderedStatus" = "Status" WHERE "RenderedPage" IS NOT NULL;""");
+        connection.Execute("""
+            UPDATE "ReadingSessions"
+            SET "EndPercentage" = printf('%.4f', 1.0 * "RenderedPage" / "RenderedTotalPages")
+            WHERE "RenderedPage" IS NOT NULL AND "RenderedTotalPages" > 0 AND "EndPercentage" IS NULL;
+            """);
     }
 
     public static async Task InitializeDatabaseAsync(
@@ -290,6 +312,7 @@ public static class SqliteDatabaseInitializer
         cancellationToken.ThrowIfCancellationRequested();
 
         await connection.ExecuteAsync(SchemaSql);
+        UpgradeSchema(connection);
     }
 
     public static async Task InitializeDatabaseAsync(
@@ -298,6 +321,7 @@ public static class SqliteDatabaseInitializer
     {
         await using var conn = await connectionFactory.CreateConnectionAsync(cancellationToken);
         await conn.ExecuteAsync(SchemaSql);
+        UpgradeSchema(conn);
     }
 
     public static async Task<int> BackfillSortNamesAsync(

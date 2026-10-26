@@ -15,4 +15,6 @@ namespace DiarSpeicher.Api.Serialization;
 [JsonSerializable(typeof(KomgaBookDto))]
 [JsonSerializable(typeof(List<KomgaBookPageDto>))]
 [JsonSerializable(typeof(KomgaReadProgressUpdateDto))]
+[JsonSerializable(typeof(KomgaTachiyomiProgressDto))]
+[JsonSerializable(typeof(KomgaTachiyomiProgressUpdateDto))]
 internal sealed partial class KomgaJsonContext : JsonSerializerContext;

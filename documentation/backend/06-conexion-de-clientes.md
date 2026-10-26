@@ -1,197 +1,145 @@
 # 06 · Cómo conectarse — por aplicación
 
-> **Lee esto antes de tocar nada relacionado con autenticación o con probar endpoints.**
->
-> DiarSpeicher **nunca se expone directamente**. Siempre está detrás de un **Gateway**
-> (proyecto aparte, en `/home/diarmund/myprojects/Gateway`) que resuelve la identidad y
-> reenvía la petición con cabeceras `X-Auth-*`.
->
-> El contenedor de DiarSpeicher **no publica ningún puerto**: `docker ps` lo muestra con la
-> columna `PORTS` vacía. Lo único alcanzable es el gateway, en `5050/tcp`, y **solo por
-> HTTPS** —una petición HTTP a ese puerto devuelve
-> `400 The plain HTTP request was sent to HTTPS port`.
->
-> El backend **no tiene login**. No existe `/login`, ni `/api/v2/login`, ni verificación de
-> contraseñas. Buscar un endpoint de login en `src/DiarSpeicher.Api/Endpoints/` y no
-> encontrarlo **no significa que esté roto**: significa que la autenticación vive en el
-> plugin del gateway. Ver [05-autenticacion-actual.md](05-autenticacion-actual.md).
+Cada cliente entra por el Gateway, que valida la credencial y reenvía la petición al servicio
+con cabeceras `X-Auth-*`. El servicio no publica ningún puerto y no tiene endpoints de login.
 
-## Las dos direcciones que hay que distinguir
+Índice de la documentación por cliente: [clients/README.md](clients/README.md).
+Rutas de cada protocolo: [04-apis-y-protocolos.md](04-apis-y-protocolos.md).
+Cómo se resuelve la identidad: [05-autenticacion-actual.md](05-autenticacion-actual.md).
 
-| | Sirve | Ejemplo |
-| --- | --- | --- |
-| `https://<host>:5050/test/` | La **SPA** (interfaz web) | Devuelve el HTML de la aplicación |
-| `https://<host>:5050/diarspeicher/` | El **backend** (todas las APIs) | `/diarspeicher/api/v1/libraries` |
-
-Confundirlas da `404` desde nginx: `/test/api/v1/libraries` no existe.
-
-El prefijo `/diarspeicher` **forma parte de la ruta que recibe el backend**: el montaje tiene
-`strip_prefix` desactivado porque el backend usa `UsePathBase`. No quitarlo al construir URLs.
-
-## Quién emite las credenciales
-
-**El gateway, siempre.** Es el dueño de las tablas `reader_user`, `api_key` y `session`, que
-viven en la base SQLite del plugin —no en la de DiarSpeicher. El backend ni las ve ni las
-valida: recibe la identidad ya resuelta en cabeceras.
-
-Generar una credencial en el backend no serviría de nada: el gateway la validaría contra su
-propia tabla, no la encontraría, y la petición nunca pasaría del proxy.
-
----
-
-## Si uso la interfaz web (SPA) — sesión con cookie
-
-El flujo que usa el frontend, y el único validado de punta a punta.
+## URL base
 
 ```
-POST https://<host>:5050/plugins/diarspeicher/auth/login
-Content-Type: application/json
-
-{"username":"diarmund","password":"<contraseña>"}
+https://<host>[:<puerto>]/diarspeicher
 ```
 
-Responde `200` con un JWT **ES256** y deja la cookie de sesión:
+`/diarspeicher` es el prefijo bajo el que el Gateway monta el servicio y forma parte de la
+ruta que recibe este. Se antepone a todas las rutas de [04](04-apis-y-protocolos.md): por
+ejemplo, `/diarspeicher/api/v1/libraries`. Una petición sin ese prefijo no llega al servicio.
 
-```
-set-cookie: diarspeicher_session=<jwt>; path=/; secure; samesite=lax; httponly
-```
-```json
-{"token":"eyJ...","expires_at":"...","user":{"id":1,"username":"diarmund","role":"admin","is_admin":true}}
-```
+## Credenciales
 
-La cookie dura 7 días. A partir de ahí, cualquier ruta del backend responde con solo enviarla:
+| Credencial            | Cómo se obtiene                                                                  |
+| --------------------- | -------------------------------------------------------------------------------- |
+| Sesión (JWT)          | `POST /plugins/diarspeicher/auth/login` con `{ "username", "password" }`          |
+| Clave de API          | `POST /plugins/diarspeicher/auth/api-keys` con una sesión activa                  |
+| Usuario y contraseña  | Los de la cuenta; HTTP Basic solo funciona si la cuenta tiene `basic_password` habilitado |
+
+El login responde `200` con `{ "token", "expires_at", "user" }` y fija la cookie
+`diarspeicher_session` (7 días). El `token` se envía como `Authorization: Bearer <token>`.
+
+La creación de clave acepta un cuerpo opcional `{ "clientType", "expiresInDays" }` y responde
+con la clave en claro, una sola vez, además de las URL ya construidas: `api_key`, `opds_url`,
+`koreader_url` y `kobo_url`.
+
+Detalle de cada mecanismo: [05-autenticacion-actual.md](05-autenticacion-actual.md#mecanismos-de-credencial).
+
+## Sesión desde un cliente HTTP
 
 ```bash
 curl -k -c ck.txt -H 'Content-Type: application/json' \
-  -d '{"username":"diarmund","password":"<contraseña>"}' \
-  -X POST https://localhost:5050/plugins/diarspeicher/auth/login
+  -d '{"username":"<usuario>","password":"<contraseña>"}' \
+  -X POST https://<host>:<puerto>/plugins/diarspeicher/auth/login
 
-curl -k -b ck.txt https://localhost:5050/diarspeicher/api/v2/libraries
+curl -k -b ck.txt https://<host>:<puerto>/diarspeicher/api/v2/libraries
 ```
 
-La base de la ruta de auth está en `frontEnd/src/api/client.ts` como `AUTH_BASE`.
-
-## Si uso Komga, CDisplayEx o Komelia — Bearer
-
-DiarSpeicher replica la API REST de Komga en `/api/v1`, con el `Page<T>` de Spring
-(`content`, `totalElements`, `totalPages`, `number`, `size`). Los clientes que ya hablan
-Komga funcionan sin adaptadores.
-
-Se autentican con el mismo JWT del login anterior, en la cabecera:
-
-```
-Authorization: Bearer <jwt>
-```
+Con Bearer en lugar de cookie:
 
 ```bash
 TOKEN=$(curl -sk -H 'Content-Type: application/json' \
-  -d '{"username":"diarmund","password":"<contraseña>"}' \
-  -X POST https://localhost:5050/plugins/diarspeicher/auth/login \
+  -d '{"username":"<usuario>","password":"<contraseña>"}' \
+  -X POST https://<host>:<puerto>/plugins/diarspeicher/auth/login \
   | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 
-curl -k -H "Authorization: Bearer $TOKEN" \
-  https://localhost:5050/diarspeicher/api/v1/libraries
+curl -k -H "Authorization: Bearer $TOKEN" https://<host>:<puerto>/diarspeicher/api/v1/libraries
 ```
 
-**URL base a configurar en el cliente:** `https://<host>:5050/diarspeicher`
+## Komga, CDisplayEx, Komelia
 
-Recorrido típico, todo verificado funcionando:
+Detalle: [clients/komga.md](clients/komga.md).
 
-| Paso | Ruta | Devuelve |
-| --- | --- | --- |
-| Bibliotecas | `/api/v1/libraries` | Lista de bibliotecas visibles |
-| Series | `/api/v1/series` | `Page<T>` de series |
-| Libros de una serie | `/api/v1/series/{id}/books` | `Page<T>` de libros |
-| Lista de páginas | `/api/v1/books/{id}/pages` | Número, nombre y tipo de cada página |
-| Una página | `/api/v1/books/{id}/pages/{n}` | `image/jpeg` extraído del CBZ |
-| Miniatura | `/api/v1/books/{id}/thumbnail` | `image/webp` |
-| Guardar progreso | `PATCH /api/v1/books/{id}/read-progress` | `204`, cuerpo `{"page":42,"completed":false}` |
-| Borrar progreso | `DELETE /api/v1/books/{id}/read-progress` | `204` |
+| Campo                   | Valor                                         |
+| ----------------------- | --------------------------------------------- |
+| URL del servidor        | `https://<host>[:<puerto>]/diarspeicher`      |
+| Credencial              | `Authorization: Bearer <token>`, o `X-Auth-Key: <clave>`, o HTTP Basic |
 
-## Si uso la API v2 nativa — cookie o Bearer
+El cliente consulta `/api/v1` y, al conectar, `GET /api/v2/users/me`, `GET /api/v1/claim` y
+`GET /api/v1/login/set-cookie`; las tres existen.
 
-Es lo que consume la SPA. Sirve igual con la cookie de sesión o con `Authorization: Bearer`.
+Recorrido típico:
 
-- `https://<host>:5050/diarspeicher/api/v2/...`
+| Paso                | Ruta                                       | Devuelve                                  |
+| ------------------- | ------------------------------------------ | ----------------------------------------- |
+| Bibliotecas         | `/api/v1/libraries`                        | Bibliotecas visibles                      |
+| Series              | `/api/v1/series`                           | `Page<T>` de series                       |
+| Libros de una serie | `/api/v1/series/{id}/books`                | `Page<T>` de libros                       |
+| Lista de páginas    | `/api/v1/books/{id}/pages`                 | `number`, `fileName`, `mediaType`, `width`, `height`, `sizeBytes` de cada página      |
+| Una página          | `/api/v1/books/{id}/pages/{n}`             | Imagen                                    |
+| Miniatura           | `/api/v1/books/{id}/thumbnail`             | Imagen                                    |
+| Guardar progreso    | `PATCH /api/v1/books/{id}/read-progress`   | `204`, cuerpo `{"page":42,"completed":false}` |
+| Borrar progreso     | `DELETE /api/v1/books/{id}/read-progress`  | `204`                                     |
 
-## Si uso OPDS — Basic auth, o clave en la URL
+## Lectores OPDS (Chunky, Panels, Moon+ Reader, Aldiko, Thorium)
 
-El backend expone los dos feeds y **ambos responden correctamente**:
+Detalle: [clients/opds-v1.md](clients/opds-v1.md) · [clients/opds-v2.md](clients/opds-v2.md).
 
-| Versión | Ruta | Formato |
-| --- | --- | --- |
-| OPDS 1.2 | `/diarspeicher/opds/v1.2/catalog` | Atom XML |
-| OPDS 2.0 | `/diarspeicher/opds/v2.0/catalog` | JSON-LD (Readium / WebPub) |
+| Versión  | URL del catálogo                                          | Formato                   |
+| -------- | --------------------------------------------------------- | ------------------------- |
+| OPDS 1.2 | `https://<host>[:<puerto>]/diarspeicher/opds/v1.2/catalog` | Atom XML                  |
+| OPDS 2.0 | `https://<host>[:<puerto>]/diarspeicher/opds/v2.0/catalog` | JSON (Readium / WebPub)   |
 
-El *authentication document* de OPDS 2.0 es **ruta pública**, no exige credenciales, y
-declara los flujos soportados:
+Hay dos formas de autenticarse, según lo que permita configurar la aplicación:
+
+- **Clave en la URL.** Se inserta la clave tras `/opds`:
+  `https://<host>[:<puerto>]/diarspeicher/opds/<apiKey>/v1.2/catalog`. Los enlaces de los
+  feeds conservan la clave. Es la opción para aplicaciones sin campos de credenciales; la
+  URL lista para pegar la devuelve `opds_url` al crear la clave.
+- **Usuario y contraseña.** La aplicación envía HTTP Basic. El campo contraseña acepta la
+  clave de API; con la contraseña real de la cuenta solo funciona si la cuenta tiene
+  `basic_password` habilitado. Basic transmite la credencial sin cifrar: requiere HTTPS.
+
+El Authentication Document de OPDS 2.0 es público:
 
 ```
 GET /diarspeicher/opds/v2.0/auth   →   application/opds-authentication+json
 ```
 
-### Qué rellena el usuario en el lector
+## KOReader
 
-Las apps OPDS (Chunky, Panels, Moon+ Reader, Aldiko, Thorium) presentan **tres campos**:
+Detalle: [clients/koreader.md](clients/koreader.md).
 
-| Campo | Valor |
-| --- | --- |
-| URL del catálogo | `https://<host>:5050/diarspeicher/opds/v1.2/catalog` |
-| Usuario | `diarmund` |
-| Contraseña | su contraseña |
+| Campo del plugin de sincronización | Valor                                                       |
+| ---------------------------------- | ----------------------------------------------------------- |
+| Servidor                           | `https://<host>[:<puerto>]/diarspeicher/koreader/<apiKey>`  |
 
-No hay campo para token ni para cabeceras. El estándar OPDS 1.2 delega la autenticación en
-HTTP `Basic` sobre TLS —**no define API keys**; OPDS 2.0 añade el authentication document,
-que declara flujos (`auth/basic`, `auth/local`, `oauth/password`), pero tampoco define claves.
+La cuenta necesita el permiso `AccessKoreaderSync`. `koreader_url` devuelve la URL completa al
+crear la clave.
 
-La clave en la ruta (`/opds/{apiKey}/v1.2/...`) es una **convención de Komga y Kavita**, no
-del estándar. Existe para los lectores que no permiten configurar credenciales. Cuando se usa,
-el backend la reinyecta en cada enlace del feed para que la navegación siga bajo la misma URL
-—pero **no la valida**: eso es del gateway.
+## Kobo
 
-### Estado actual
+Detalle: [clients/kobo.md](clients/kobo.md).
 
-**Basic auth y clave en ruta todavía no autentican.** El gateway tiene ambos autenticadores
-implementados, pero validan contra su tabla `api_key`, que hoy está vacía porque **no existe
-aún el endpoint que emita claves**. Además, su `401` no incluye la cabecera
-`WWW-Authenticate`, así que un lector OPDS no llega a pedir credenciales al usuario.
+| Ajuste               | Valor                                                       |
+| -------------------- | ----------------------------------------------------------- |
+| `api_endpoint`       | `https://<host>[:<puerto>]/diarspeicher/kobo/<apiKey>`      |
 
-Mientras tanto, los feeds sí son accesibles con la cookie de sesión o con `Bearer`, que es
-como se han validado.
+La cuenta necesita el permiso `AccessKoboSync`. `kobo_url` devuelve la URL completa al crear
+la clave.
 
-## Si uso KOReader o Kobo — clave en la URL
+## API nativa
 
-- `https://<host>:5050/diarspeicher/koreader/{apiKey}`
-- `https://<host>:5050/diarspeicher/kobo/{apiKey}`
+Detalle: [clients/native-api-v2.md](clients/native-api-v2.md).
 
-Dependen del mismo mecanismo de clave en ruta, así que quedan pendientes hasta que el gateway
-tenga el emisor de claves.
+Base `https://<host>[:<puerto>]/diarspeicher/api/v2`. Credencial: cookie de sesión,
+`Authorization: Bearer`, `X-Auth-Key` o HTTP Basic.
 
----
+## Diagnóstico: de quién es el error
 
-## Diagnóstico: de quién es el 401
-
-Distinguirlo ahorra buscar el problema en el sitio equivocado.
-
-| Respuesta | Origen | Significa |
-| --- | --- | --- |
-| HTML con `<center>nginx/1.31.5</center>` | **Gateway** | La petición no llegó al backend. Credencial no reconocida |
-| JSON `{"error":"Identity not resolved by the gateway"}` | **Backend** | Llegó sin cabeceras `X-Auth-*` |
-| `400 The plain HTTP request was sent to HTTPS port` | **Gateway** | Se usó `http://` en vez de `https://` |
-| `404` de nginx | **Gateway** | Prefijo equivocado (típico: `/test/` en vez de `/diarspeicher/`) |
-
-Los logs del backend (`docker logs diarspeicher`) solo muestran lo que **superó** el gateway.
-Si una petición no aparece ahí, la cortó el proxy.
-
-## Protocolos de autenticación del montaje
-
-Se configuran en la UI del gateway, en *Editar Plugin → Protocolos de Autenticación*:
-
-| Protocolo | Autenticador | Estado |
-| --- | --- | --- |
-| Cookie de sesión JWT (ECDSA aislada) | `session_cookie` | **Funcionando** |
-| Cabecera `X-Auth-Key` / HTTP Basic | `header_basic_key` | Implementado; sin claves emitidas |
-| Clave en URL (OPDS / KOReader / Kobo) | `url_path_key` | Implementado; sin claves emitidas |
-
-Se prueban **en cadena**: el primero que resuelve identidad gana. Por eso la cookie y el
-Bearer funcionan aunque los otros dos no encuentren nada.
+| Respuesta                                                | Origen   | Significa                                                         |
+| -------------------------------------------------------- | -------- | ----------------------------------------------------------------- |
+| `401` generado por nginx (HTML)                          | Gateway  | Credencial no reconocida; la petición no llegó al servicio        |
+| `401` `{"error":"Identity not resolved by the gateway"}` | Servicio | La petición llegó sin `X-Auth-Sub`                                |
+| `403` `{"error":"..."}`                                  | Servicio | La cuenta no tiene el permiso necesario ([05](05-autenticacion-actual.md#permisos)) |
+| `404` de nginx                                           | Gateway  | Prefijo equivocado; falta `/diarspeicher`                         |
+| `400 The plain HTTP request was sent to HTTPS port`      | Gateway  | Se usó `http://` contra un puerto HTTPS                           |

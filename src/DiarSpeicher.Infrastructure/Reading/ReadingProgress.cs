@@ -45,7 +45,7 @@ public class ReadingProgress : IReadingProgress
 
         if (session?.RenderedPage is not int storedPage)
         {
-            return new ReadingProgressView(session?.EndPage, total, false);
+            return new ReadingProgressView(null, total, false);
         }
 
         if (storedTotal <= 0 || storedTotal == total)
@@ -72,14 +72,14 @@ public class ReadingProgress : IReadingProgress
 
         var isEpub = EpubPageMapStore.IsEpub(book);
         var profileKey = isEpub ? await CurrentProfileKeyAsync(ct) : null;
-        var total = await ResolveTotalAsync(book, ct);
-        var page = Math.Clamp(update.Page, 1, Math.Max(1, total));
+        var total = update.Native ? 0 : await ResolveTotalAsync(book, ct);
+        var page = update.Native ? update.Page : Math.Clamp(update.Page, 1, Math.Max(1, total));
 
         const string selectSessionSql = """
             SELECT "Id", "CreatedAt", "ElapsedSeconds", "EndPage", "EndPercentage",
                    "KoreaderProgress", "MediaId", "Notes", "ReadthroughNumber", "SessionDate",
                    "StartPage", "StartPercentage", "Status", "UpdatedAt", "UserId",
-                   "RenderedPage", "RenderedTotalPages", "RenderedProfileKey"
+                   "RenderedPage", "RenderedTotalPages", "RenderedProfileKey", "RenderedStatus"
             FROM "ReadingSessions"
             WHERE "UserId" = @UserId AND "MediaId" = @MediaId
             ORDER BY "Id" DESC
@@ -107,10 +107,10 @@ public class ReadingProgress : IReadingProgress
             const string insertSessionSql = """
                 INSERT INTO "ReadingSessions" (
                     "UserId", "MediaId", "SessionDate", "StartPage", "EndPage", "EndPercentage", "StartPercentage",
-                    "Status", "RenderedPage", "RenderedTotalPages", "RenderedProfileKey", "CreatedAt", "UpdatedAt"
+                    "Status", "RenderedPage", "RenderedTotalPages", "RenderedProfileKey", "RenderedStatus", "CreatedAt", "UpdatedAt"
                 ) VALUES (
                     @UserId, @MediaId, @SessionDate, @StartPage, @EndPage, @EndPercentage, @StartPercentage,
-                    @Status, @RenderedPage, @RenderedTotalPages, @RenderedProfileKey, @CreatedAt, @UpdatedAt
+                    @Status, @RenderedPage, @RenderedTotalPages, @RenderedProfileKey, @RenderedStatus, @CreatedAt, @UpdatedAt
                 );
                 """;
             await conn.ExecuteAsync(insertSessionSql, session!);
@@ -127,6 +127,7 @@ public class ReadingProgress : IReadingProgress
                     "RenderedPage" = @RenderedPage,
                     "RenderedTotalPages" = @RenderedTotalPages,
                     "RenderedProfileKey" = @RenderedProfileKey,
+                    "RenderedStatus" = @RenderedStatus,
                     "UpdatedAt" = @UpdatedAt
                 WHERE "Id" = @Id;
                 """;
@@ -144,24 +145,32 @@ public class ReadingProgress : IReadingProgress
         string? profileKey,
         ReadingProgressUpdate update)
     {
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+
+        if (isEpub && update.Native)
+        {
+            var percentage = Math.Clamp((update.Percentage ?? 0m) / 100m, 0m, 1m);
+            session.EndPercentage = percentage;
+            session.StartPercentage ??= 0m;
+            session.Status = (update.Completed ?? percentage >= 1m) ? ReadingStatus.Finished : ReadingStatus.Reading;
+            return;
+        }
+
+        var status = (update.Completed ?? (total > 0 && page >= total)) ? ReadingStatus.Finished : ReadingStatus.Reading;
         if (isEpub)
         {
             session.RenderedPage = page;
             session.RenderedTotalPages = total;
             session.RenderedProfileKey = profileKey;
-        }
-        else
-        {
-            session.StartPage ??= page;
-            session.EndPage = page;
-            session.EndPercentage = update.Percentage ?? Percentage(page, total);
-            session.StartPercentage ??= 0m;
+            session.RenderedStatus = status.ToString();
+            return;
         }
 
-        session.Status = (update.Completed ?? (total > 0 && page >= total))
-            ? ReadingStatus.Finished
-            : ReadingStatus.Reading;
-        session.UpdatedAt = DateTimeOffset.UtcNow;
+        session.StartPage ??= page;
+        session.EndPage = page;
+        session.EndPercentage = update.Percentage ?? Percentage(page, total);
+        session.StartPercentage ??= 0m;
+        session.Status = status;
     }
 
     public async Task<ReadingProgressView> ResolveAsync(
@@ -180,7 +189,7 @@ public class ReadingProgress : IReadingProgress
 
         if (session?.RenderedPage is not int storedPage)
         {
-            return new ReadingProgressView(session?.EndPage, total, false);
+            return new ReadingProgressView(null, total, false);
         }
 
         var storedTotal = session.RenderedTotalPages ?? 0;

@@ -1,129 +1,151 @@
-# 05 · Resolución de identidad
+# 05 · Autenticación
 
-El backend **no autentica**. Recibe la identidad ya resuelta por el plugin del Gateway en
-cabeceras HTTP y la refleja en su propia tabla de usuarios para poder colgar de ella el
-progreso de lectura, las exclusiones y el control parental.
+El servicio no valida credenciales. La identidad llega ya resuelta en cabeceras `X-Auth-*`
+que inyecta el Gateway, y el servicio la aplica a cada petición. Un cliente nunca envía esas
+cabeceras: envía una credencial al Gateway y este las produce.
 
-La capa de autenticación local —contraseñas PBKDF2, claves de API, login y reclamación del
-servidor— se retiró del backend y vive ahora en el plugin.
-
-## Los dos middlewares
+Documentación por mecanismo y por cliente: [clients/README.md](clients/README.md).
+Rutas de cada protocolo: [04-apis-y-protocolos.md](04-apis-y-protocolos.md).
+Receta por aplicación: [06-conexion-de-clientes.md](06-conexion-de-clientes.md).
 
 ```mermaid
 flowchart TB
-    R["Petición"] --> G["GatewayIdentityMiddleware"]
+    CL["Cliente<br/>credencial"] --> GW["Gateway<br/>valida y emite X-Auth-*"]
+    GW --> G["Resolución de identidad"]
     G --> H{"¿trae X-Auth-Sub?"}
-    H -->|no| N["sigue sin identidad"]
-    H -->|sí| M["Sincroniza la fila espejo<br/>y resuelve el AuthUser"]
-    M --> O["OpdsAuthMiddleware"]
-    N --> O
-    O --> P{"¿ruta bajo un prefijo<br/>protegido?"}
+    H -->|no, o es «anonymous»| N["sin identidad"]
+    H -->|sí| M["AuthUser del usuario"]
+    N --> P{"¿ruta bajo un prefijo<br/>protegido?"}
+    M --> P
     P -->|no| PASS["pasa · /health"]
-    P -->|sí| Q{"¿hay AuthUser?"}
+    P -->|sí| Q{"¿hay identidad?"}
     Q -->|sí| PASS2["pasa al endpoint"]
-    Q -->|no| E["401"]
+    Q -->|no| R{"¿ruta pública?"}
+    R -->|sí| ANON["pasa como anónimo"]
+    R -->|no| E["401"]
 ```
 
-### GatewayIdentityMiddleware
+## Mecanismos de credencial
 
-[GatewayIdentityMiddleware.cs](../../src/DiarSpeicher.Api/Middleware/GatewayIdentityMiddleware.cs)
-traduce cabeceras a un `AuthUser` y mantiene el espejo.
+El Gateway acepta estas credenciales y las traduce a la misma identidad. Las prueba en este
+orden y gana la primera que valida:
 
-| Cabecera                 | Destino                                   |
-| ------------------------ | ----------------------------------------- |
-| `X-Auth-Sub`             | `Id` · sin ella no se resuelve identidad  |
-| `X-Auth-User`            | `Username` · si falta se usa el `Sub`     |
-| `X-Auth-Role`            | `Roles`, separados por coma               |
-| `X-Auth-Age`             | `AgeRestriction`                          |
-| `X-Auth-Perms`           | `Permissions`, separados por coma         |
+| Orden | Mecanismo                    | Dónde va la credencial                                                    | Rutas donde aplica                        |
+| ----- | ---------------------------- | ------------------------------------------------------------------------- | ----------------------------------------- |
+| 1     | Clave de API en la URL       | Segmento de ruta: `/opds/{apiKey}/...`, `/koreader/{apiKey}/...`, `/kobo/{apiKey}/...` | `/opds`, `/koreader`, `/kobo`  |
+| 2     | Clave de API en cabecera, o HTTP Basic | `X-Auth-Key: <clave>`, o `Authorization: Basic base64(usuario:contraseña)` | Cualquier ruta                  |
+| 3     | Sesión                       | Cookie `diarspeicher_session`, o `Authorization: Bearer <jwt>`            | Cualquier ruta                            |
 
-`IsServerOwner` **no sale de ninguna cabecera**: se concede en la base local al primer
-usuario que la instancia ve y desde ahí solo cambia por la base de datos. nginx únicamente
-borra las cabeceras que nombra una a una, así que cualquiera que no nombre llegaría tal cual
-desde el cliente; que la propiedad del servidor no dependa de ninguna es deliberado.
+- En HTTP Basic, el valor del campo contraseña se prueba primero como clave de API; si no es
+  una clave válida se prueba como contraseña de la cuenta. Si la contraseña va vacía, se
+  prueba el campo usuario como clave.
+- La clave de API solo funciona si la cuenta tiene el protocolo `api_key` habilitado
+  (valor por defecto). La contraseña de la cuenta en Basic exige `basic_password`, que se
+  habilita por usuario.
+- La sesión se obtiene con `POST /plugins/diarspeicher/auth/login`, cuerpo
+  `{ "username": "...", "password": "..." }`. Responde `200` con
+  `{ "token", "expires_at", "user": { id, username, role, is_admin } }` y fija la cookie
+  `diarspeicher_session` (`HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`) con vigencia de 7
+  días. El mismo `token` sirve como `Bearer`. Credenciales incorrectas: `401`.
+- Una sesión no transporta restricción de edad.
+- El Gateway blanquea `X-Auth-Key` antes de reenviar la petición.
 
-**El espejo se crea just-in-time.** En la primera petición de un usuario desconocido se
-inserta su fila; en las siguientes se reutiliza, y el nombre y la propiedad del servidor se
-actualizan si el Gateway los cambió.
+Cuando ninguna credencial valida, el Gateway responde `401` sin llegar al servicio. Si
+`header_basic_key` figura entre los autenticadores del montaje, esa respuesta incluye
+`WWW-Authenticate: Basic realm="..."`; si no, no lo incluye.
 
-**El primero que entra queda como propietario del servidor**, aunque la cabecera no lo
-diga: un servidor recién desplegado no tiene administrador hasta que alguien llega.
+## Cabeceras que recibe el servicio
 
-Las bibliotecas excluidas se leen del espejo, no de las cabeceras, porque son datos del
-dominio de medios que el Gateway no administra. La edad sí la administra el Gateway —en la
-columna `age_restriction` de `reader_user`, editable desde la pestaña de usuarios del panel—
-y la cabecera `X-Auth-Age`, si viene, gana sobre el valor del espejo.
+| Cabecera       | Se traduce a                                                                          |
+| -------------- | ------------------------------------------------------------------------------------- |
+| `X-Auth-Sub`   | Identificador del usuario. Sin ella, o con el valor `anonymous`, no hay identidad     |
+| `X-Auth-User`  | Nombre de usuario; si falta se usa el valor de `X-Auth-Sub`                           |
+| `X-Auth-Role`  | Roles, separados por coma                                                             |
+| `X-Auth-Perms` | Permisos, separados por coma                                                          |
+| `X-Auth-Age`   | Restricción de edad (entero); si no es un entero, se usa la guardada localmente       |
 
-### OpdsAuthMiddleware
+Cuando hay varias cabeceras con el mismo nombre se usa la última. `X-Auth-App` y `X-Auth-Jti`
+se ignoran.
 
-[OpdsAuthMiddleware.cs](../../src/DiarSpeicher.Api/Middleware/OpdsAuthMiddleware.cs) ya no
-verifica credenciales. Comprueba que la identidad esté resuelta y extrae la clave de API de
-la ruta para que los endpoints puedan construir los enlaces del feed.
+Con una cabecera `X-Auth-Sub` válida, el servicio:
 
-Protege cinco prefijos: `/opds`, `/api/v1`, `/api/v2`, `/koreader` y `/kobo`.
-Sin `AuthUser`, responde `401`.
+- Mantiene un registro local del usuario, creado en su primera petición y con el nombre
+  actualizado cuando cambia. Si el identificador es nuevo pero ya existe un usuario con ese
+  nombre, ese registro pasa a usar el identificador nuevo conservando su progreso y sus
+  exclusiones.
+- Marca como **propietario del servidor** al primer usuario que ve la instancia. La
+  propiedad no se lee de ninguna cabecera.
+- Carga del registro local las bibliotecas excluidas del usuario. La restricción de edad
+  viene de `X-Auth-Age` si es un entero, y si no, del registro local.
 
-`ExtractApiKey` sigue reconociendo la clave en el segmento de ruta
-(`/opds/{key}/v1.2`, `/koreader/{key}`, `/kobo/{key}`), en `?api_key=` y en `X-Auth-Key`.
-El backend **no la valida** —eso es del plugin—; la conserva en `HttpContext.Items` porque
-los feeds OPDS deben repetirla en cada enlace que generan.
+El servicio no comprueba el origen de las cabeceras `X-Auth-*`: confía en ellas. Por eso solo
+debe ser alcanzable a través del Gateway.
 
-## Confianza en las cabeceras
+## Prefijos protegidos
 
-El backend **no comprueba el origen** de las cabeceras `X-Auth-*`. Es una decisión
-deliberada: el contenedor no publica su puerto y el Gateway es el único que puede
-alcanzarlo, así que la garantía la da la topología del despliegue.
+Exigen identidad las rutas que empiezan por:
 
-La contrapartida hay que tenerla presente: si ese puerto llegara a exponerse, cualquiera
-podría enviar `X-Auth-Sub` con el identificador de otro usuario y suplantarlo. No hay segunda
-barrera.
+`/opds` · `/api/v1` · `/api/v2` · `/koreader` · `/kobo`
 
-## Lo que permanece en el backend
+Sin identidad responden `401` con el cuerpo:
 
-| Pieza                                     | Por qué                                          |
-| ----------------------------------------- | ------------------------------------------------ |
-| Tabla `User`                              | FK de `ReadingSession`, `LibraryExclusion`, `AgeRestriction` |
-| `AgeRestriction` y `LibraryExclusion`     | Reglas de visibilidad del catálogo                |
-| Filtrado `ForUser`                        | Lógica de dominio de medios                       |
+```json
+{ "error": "Identity not resolved by the gateway" }
+```
 
-Ver [MediaSqlFilters](../../src/DiarSpeicher.Infrastructure/Data/Extensions/MediaSqlFilters.cs)
-para la variante en SQL de esas reglas.
+Cualquier otra ruta se sirve sin identidad. La única que existe es `/health`.
+
+## Rutas públicas
+
+En una ruta pública el Gateway valida con `200` y cabeceras `X-Auth-*` vacías; el servicio
+atiende la petición como anónima en lugar de rechazarla. El usuario anónimo no tiene
+identificador, roles ni permisos, no es propietario y tiene restricción de edad activa.
+
+Rutas públicas por defecto (con o sin prefijo `/opds/{apiKey}`):
+
+| Ruta                                          |
+| --------------------------------------------- |
+| `/opds/v2.0/auth`, `/opds/{apiKey}/v2.0/auth` |
+| `/opds/v2/auth`, `/opds/{apiKey}/v2/auth`     |
+
+Se pueden sustituir con `Gateway:PublicPaths`. Cada patrón se compara por segmentos, sin
+distinguir mayúsculas; `*` equivale a exactamente un segmento y `**` al resto de la ruta. Un
+patrón sin `**` exige coincidencia exacta. La ruta se compara sin el prefijo
+`Gateway:PathBase`.
+
+## Clave de API en la ruta
+
+En `/opds/{apiKey}/v1.2|v2.0|v2`, `/koreader/{apiKey}` y `/kobo/{apiKey}` el servicio lee el
+segmento `{apiKey}` solo para repetirlo en los enlaces que genera, de modo que el cliente siga
+navegando bajo la misma URL. No lo valida. No lee la clave de `X-Auth-Key` ni de ningún
+parámetro de consulta.
 
 ## Permisos
 
-El Gateway guarda una lista de permisos por usuario (`reader_user.permissions`, CSV
-editable desde la pestaña de usuarios del panel) y la inyecta en cada petición. El
-middleware la trocea por comas en `AuthUser.Permissions` y `AuthUser.HasPermission`
-decide. El vocabulario lo fijan dos ficheros que **deben decir lo mismo**:
-[Permissions.cs](../../src/DiarSpeicher.Core/Domain/Models/Permissions.cs) y
-`PERMISSION_GROUPS` en [endpoints.ts](../../frontEnd/src/api/endpoints.ts).
+`X-Auth-Perms` es una lista de nombres. El comodín `*` equivale a todos, y el propietario del
+servidor los tiene todos sin necesidad de listarlos.
 
-| Permiso              | Dónde se comprueba                                                    |
-| -------------------- | ----------------------------------------------------------------------- |
-| `FileUpload`         | `TusEndpoints` POST y PATCH · `DiarSpeicherV2Service.UploadToLibraryAsync`, que cubre también la mutación `uploadBooks` |
-| `CreateFolder`       | Los mismos dos, **solo si el subpath no existe todavía**                |
-| `ManageLibrary`      | `POST /api/v2/libraries`                                                |
-| `ScanLibrary`        | `POST /api/v2/libraries/{id}/scan` y la mutación `scanLibrary`          |
-| `AccessKoreaderSync` | Filtro de grupo sobre `/koreader/{apiKey}`                              |
-| `AccessKoboSync`     | Filtro de grupo sobre `/kobo/{apiKey}`                                  |
-| `AccessApiKeys`      | Nada aquí: lo comprueba el propio Gateway antes de emitir identidad     |
+| Permiso              | Qué abre                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| `FileUpload`         | `POST /api/v2/libraries/{id}/upload`, `POST` y `PATCH /api/v2/files`                  |
+| `CreateFolder`       | Los mismos, cuando el subdirectorio de destino no existe                              |
+| `ManageLibrary`      | Crear, editar y borrar bibliotecas, series y medios; portadas de serie; `/api/v2/filesystem`, `/api/v2/trash` y las operaciones de `/api/v2/metadata` que modifican datos |
+| `ScanLibrary`        | `POST /api/v2/libraries/{id}/scan`                                                    |
+| `AccessKoreaderSync` | Todo `/koreader/{apiKey}`                                                             |
+| `AccessKoboSync`     | Todo `/kobo/{apiKey}`                                                                 |
 
-Dos reglas que conviene tener presentes antes de tocar nada:
+Sin el permiso, la respuesta es `403` con `{ "error": "..." }`, salvo `PATCH /api/v2/files/{id}`,
+que responde `403` sin cuerpo.
 
-**El propietario del servidor está exento.** `HasPermission` devuelve `true` para él sin
-mirar la lista, igual que `HasRole`. Sin esa exención una instancia recién desplegada se
-quedaría sin nadie capaz de subir, porque los permisos por defecto del Gateway
-(`AccessApiKeys,AccessKoreaderSync,AccessKoboSync`) **no incluyen `FileUpload`**.
+El rol `admin` o ser propietario permite además acceder a los perfiles EPUB de otro usuario
+(`/api/v2/users/{id}/epub-profiles`) y se refleja como `ADMIN` en `GET /api/v2/users/me`.
 
-**Ese mismo valor por defecto es la trampa de la migración.** Cualquier usuario que ya
-existiera antes de esto y no sea el propietario se queda sin subir, sin crear bibliotecas y
-sin escanear hasta que un administrador le marque las casillas. Las dos sincronizaciones no
-se ven afectadas porque sí están en el valor por defecto. El comodín `*` vale por todos, y
-lo entienden los dos lados.
+## Resumen por protocolo
 
-Las reglas que no pasan por la cabecera son las del dominio de medios y viven en el espejo
-local: `AgeRestriction` y `LibraryExclusion`, ambas a través de `ForUser`.
-
-`X-Auth-App` y `X-Auth-Jti` siguen sin consumidor. `X-Auth-Role` se lee y aterriza en
-`AuthUser.Roles`, pero ningún código de producción lo consulta: la única puerta de
-privilegio que no viene de la cabecera es `IsServerOwner`.
+| Prefijo                 | Credencial habitual                                  | Permiso adicional      |
+| ----------------------- | ---------------------------------------------------- | ---------------------- |
+| `/opds/v1.2`            | Clave en la URL, o Basic                             |                        |
+| `/opds/v2.0`, `/opds/v2`| Clave en la URL, Basic, o sesión; `/auth` es público |                        |
+| `/api/v1`, `/api/v2`    | `X-Auth-Key`, Basic, o sesión (cookie o Bearer)      | Según la ruta          |
+| `/koreader/{apiKey}`    | Clave en la URL                                      | `AccessKoreaderSync`   |
+| `/kobo/{apiKey}`        | Clave en la URL                                      | `AccessKoboSync`       |

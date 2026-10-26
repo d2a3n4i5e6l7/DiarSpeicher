@@ -125,10 +125,12 @@ public partial class KomgaService
     public async Task<bool> UpdateReadProgressAsync(
         AuthUser user,
         string bookId,
-        int page,
-        bool completed,
+        int? page,
+        bool? completed,
         CancellationToken ct = default)
     {
+        if (completed != true && page is null) return false;
+
         await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
         var parameters = CatalogSqlFilters.ArgsFor(user);
         parameters.Id = bookId;
@@ -146,7 +148,10 @@ public partial class KomgaService
         var book = await conn.QueryFirstOrDefaultAsync<Media>(sql, parameters);
         if (book == null) return false;
 
-        var ok = await _progress.RecordAsync(user, book, new ReadingProgressUpdate(page, completed), ct);
+        var update = completed == true
+            ? new ReadingProgressUpdate(int.MaxValue, true)
+            : new ReadingProgressUpdate(page!.Value);
+        var ok = await _progress.RecordAsync(user, book, update, ct);
         if (ok)
         {
             _logger.LogTrace("Updated Komga read progress for user {UserId}, book {BookId}, page {Page}", user.Id, bookId, page);
@@ -159,12 +164,23 @@ public partial class KomgaService
         if (string.IsNullOrWhiteSpace(user.Id)) return false;
 
         await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
+
+        // An EPUB session also holds the percentage the e-reader protocols write, so only the
+        // image side is cleared; the row goes only when nothing else lives in it.
+        const string clearImageSql = """
+            UPDATE "ReadingSessions"
+            SET "RenderedPage" = NULL, "RenderedTotalPages" = NULL, "RenderedProfileKey" = NULL, "RenderedStatus" = NULL
+            WHERE "MediaId" = @BookId AND "UserId" = @UserId AND "RenderedPage" IS NOT NULL;
+            """;
         const string deleteSql = """
             DELETE FROM "ReadingSessions"
-            WHERE "MediaId" = @BookId AND "UserId" = @UserId;
+            WHERE "MediaId" = @BookId AND "UserId" = @UserId
+              AND "MediaId" NOT IN (
+                  SELECT "Id" FROM "Media" WHERE lower(trim("Extension", '.')) = 'epub' OR lower("Path") LIKE '%.epub');
             """;
 
-        var rows = await conn.ExecuteAsync(deleteSql, new { BookId = bookId, UserId = user.Id });
+        var args = new { BookId = bookId, UserId = user.Id };
+        var rows = await conn.ExecuteAsync(clearImageSql, args) + await conn.ExecuteAsync(deleteSql, args);
         if (rows > 0)
         {
             _logger.LogTrace("Deleted Komga read progress for user {UserId}, book {BookId}", user.Id, bookId);

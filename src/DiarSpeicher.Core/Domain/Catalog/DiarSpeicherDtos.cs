@@ -69,6 +69,22 @@ public sealed class DiarSpeicherMediaDto
 
     [JsonPropertyName("isCompleted")]
     public bool IsCompleted { get; set; }
+
+    [JsonPropertyName("readPercent")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? ReadPercent { get; set; }
+
+    [JsonPropertyName("renderedPage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RenderedPage { get; set; }
+
+    [JsonPropertyName("renderedTotalPages")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RenderedTotalPages { get; set; }
+
+    [JsonPropertyName("renderedCompleted")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RenderedCompleted { get; set; }
 }
 
 public sealed class DiarSpeicherMediaMetadataDto

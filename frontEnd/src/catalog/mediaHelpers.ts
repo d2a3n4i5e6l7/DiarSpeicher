@@ -5,8 +5,20 @@ export { formatBytes } from "./bytes";
 
 export function readProgress(media: MediaItem): number {
 	if (media.isCompleted) return 100;
+	if (media.readPercent !== undefined) return Math.min(100, Math.round(media.readPercent));
 	if (!media.pages || media.currentPage === undefined || media.currentPage <= 0) return 0;
 	return Math.min(100, Math.round((media.currentPage / media.pages) * 100));
+}
+
+export function readBadge(media: MediaItem): string | undefined {
+	if (media.readPercent !== undefined) return `${String(Math.round(media.readPercent))}%`;
+	return media.currentPage ? `P${String(media.currentPage)}` : undefined;
+}
+
+export function renderedLabel(media: MediaItem): string | undefined {
+	if (media.renderedPage === undefined) return undefined;
+	const finished = media.renderedCompleted ? " · TERMINADO" : "";
+	return `MODO IMAGEN · PÁG ${String(media.renderedPage)} / ${String(media.renderedTotalPages ?? 0)}${finished}`;
 }
 
 export function estimatedMinutes(pages: number): number {

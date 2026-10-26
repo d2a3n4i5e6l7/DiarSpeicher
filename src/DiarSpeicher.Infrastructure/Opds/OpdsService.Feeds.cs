@@ -282,7 +282,7 @@ public partial class OpdsService
     public async Task<string> GetKeepReadingFeedXmlAsync(AuthUser user, string? apiKey, CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
-        var sessions = await conn.GetKeepReadingSessionsAsync(user.Id, ct);
+        var sessions = await conn.GetKeepReadingSessionsAsync(user.Id, imageTrack: true, ct: ct);
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
 
         var parameters = CatalogSqlFilters.ArgsFor(user);

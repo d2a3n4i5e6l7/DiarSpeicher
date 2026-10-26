@@ -181,7 +181,7 @@ public partial class KomgaService
                     SELECT "Id", "CreatedAt", "ElapsedSeconds", "EndPage", "EndPercentage",
                            "KoreaderProgress", "MediaId", "Notes", "ReadthroughNumber", "SessionDate",
                            "StartPage", "StartPercentage", "Status", "UpdatedAt", "UserId",
-                           "RenderedPage", "RenderedTotalPages", "RenderedProfileKey"
+                           "RenderedPage", "RenderedTotalPages", "RenderedProfileKey", "RenderedStatus"
                     FROM "ReadingSessions"
                     WHERE "MediaId" = @Id AND "UserId" = @UserId
                     ORDER BY "Id" DESC

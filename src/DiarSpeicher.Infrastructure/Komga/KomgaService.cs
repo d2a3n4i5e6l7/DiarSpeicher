@@ -110,7 +110,10 @@ public partial class KomgaService : IKomgaService
 
         var seriesRows = await conn.QueryAsync<CountedSeries>(pagedSql, parameters).WithMetadataAsync(conn);
 
-        var seriesDtos = seriesRows.Select(row => KomgaDtoMapper.ToSeriesDto(row, (int)row.MediaCount)).ToList();
+        var counts = await LoadSeriesReadCountsAsync(conn, user.Id, seriesRows.Select(r => r.Id));
+        var seriesDtos = seriesRows
+            .Select(row => KomgaDtoMapper.ToSeriesDto(row, (int)row.MediaCount, counts.GetValueOrDefault(row.Id)))
+            .ToList();
         return KomgaPageResponse<KomgaSeriesDto>.Create(seriesDtos, page, size, totalElements);
     }
 
@@ -132,6 +135,9 @@ public partial class KomgaService : IKomgaService
         var rows = await conn.QueryAsync<CountedSeries>(sql, parameters).WithMetadataAsync(conn);
 
         var first = rows.FirstOrDefault();
-        return first == null ? null : KomgaDtoMapper.ToSeriesDto(first, (int)first.MediaCount);
+        if (first == null) return null;
+
+        var counts = await LoadSeriesReadCountsAsync(conn, user.Id, [first.Id]);
+        return KomgaDtoMapper.ToSeriesDto(first, (int)first.MediaCount, counts.GetValueOrDefault(first.Id));
     }
 }

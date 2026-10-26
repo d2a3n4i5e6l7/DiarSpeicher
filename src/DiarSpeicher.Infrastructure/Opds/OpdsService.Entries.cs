@@ -58,7 +58,7 @@ public partial class OpdsService
         var links = new List<OpdsLink>
         {
             new(OpdsLinkType.ImageJpeg, OpdsLinkRel.Thumbnail, FormatUrl($"books/{media.Id}/thumbnail", apiKey)),
-            new(OpdsLinkType.ImageJpeg, OpdsLinkRel.Image, FormatUrl($"books/{media.Id}/pages/0?zero_based=true&cover=1", apiKey)),
+            new(OpdsLinkType.ImageJpeg, OpdsLinkRel.Image, FormatUrl($"books/{media.Id}/pages/0?zero_based=true&cover=true", apiKey)),
             new(OpdsLinkType.FromExtension(media.Extension), OpdsLinkRel.Acquisition, FormatUrl($"books/{media.Id}/file/{fileName}", apiKey))
         };
 

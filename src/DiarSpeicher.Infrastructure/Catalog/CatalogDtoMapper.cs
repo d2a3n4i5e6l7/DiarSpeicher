@@ -7,9 +7,15 @@ namespace DiarSpeicher.Infrastructure.Catalog;
 /// </summary>
 public static class CatalogDtoMapper
 {
+    /// <summary>
+    /// An EPUB reports the progress its e-reader wrote, a percentage, and keeps the rendered-page
+    /// progress of the image protocols apart in the <c>rendered*</c> fields.
+    /// </summary>
     public static DiarSpeicherMediaDto ToMediaDto(Media m, ReadingSession? session)
     {
         var progress = IReadingProgress.FromSession(m, session);
+        var isEpub = EpubPageMapStore.IsEpub(m);
+        var hasImageProgress = isEpub && progress.Page is not null;
 
         return new DiarSpeicherMediaDto
         {
@@ -24,8 +30,14 @@ public static class CatalogDtoMapper
             Path = m.Path,
             SeriesId = m.SeriesId,
             CreatedAt = m.CreatedAt,
-            CurrentPage = progress.Page,
-            IsCompleted = session?.Status == ReadingStatus.Finished,
+            CurrentPage = isEpub ? session?.EndPage : progress.Page,
+            IsCompleted = isEpub
+                ? session?.EndPercentage is not null && session.Status == ReadingStatus.Finished
+                : session?.Status == ReadingStatus.Finished,
+            ReadPercent = isEpub && session?.EndPercentage is decimal percentage ? (double)Math.Round(percentage * 100m, 1) : null,
+            RenderedPage = hasImageProgress ? progress.Page : null,
+            RenderedTotalPages = hasImageProgress ? progress.TotalPages : null,
+            RenderedCompleted = hasImageProgress ? session!.IsRenderedFinished() : null,
             Metadata = m.Metadata != null ? new DiarSpeicherMediaMetadataDto
             {
                 Title = m.Metadata.Title,

@@ -1,6 +1,6 @@
 namespace DiarSpeicher.Infrastructure.Reading;
 
-public readonly record struct ReadingProgressUpdate(int Page, bool? Completed = null, decimal? Percentage = null);
+public readonly record struct ReadingProgressUpdate(int Page, bool? Completed = null, decimal? Percentage = null, bool Native = false);
 
 public readonly record struct ReadingProgressView(int? Page, int TotalPages, bool Reconverted);
 

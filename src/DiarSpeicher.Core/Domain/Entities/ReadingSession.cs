@@ -20,6 +20,7 @@ public class ReadingSession
     public int? RenderedPage { get; set; }
     public int? RenderedTotalPages { get; set; }
     public string? RenderedProfileKey { get; set; }
+    public string? RenderedStatus { get; set; }
 
     public int ReadthroughNumber { get; set; } = 1;
     public ReadingStatus Status { get; set; } = ReadingStatus.Reading;
@@ -34,6 +35,8 @@ public class ReadingSession
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
+
+    public bool IsRenderedFinished() => RenderedStatus == nameof(ReadingStatus.Finished);
 
     public bool IsComplete() => Status == ReadingStatus.Finished;
     public bool IsFinalized() => Status is ReadingStatus.Finished or ReadingStatus.Abandoned;

@@ -333,8 +333,35 @@ public class KomgaBookPageDto
 public class KomgaReadProgressUpdateDto
 {
     [JsonPropertyName("page")]
-    public int Page { get; set; }
+    public int? Page { get; set; }
 
     [JsonPropertyName("completed")]
-    public bool Completed { get; set; }
+    public bool? Completed { get; set; }
+}
+
+public class KomgaTachiyomiProgressDto
+{
+    [JsonPropertyName("booksCount")]
+    public int BooksCount { get; set; }
+
+    [JsonPropertyName("booksReadCount")]
+    public int BooksReadCount { get; set; }
+
+    [JsonPropertyName("booksUnreadCount")]
+    public int BooksUnreadCount { get; set; }
+
+    [JsonPropertyName("booksInProgressCount")]
+    public int BooksInProgressCount { get; set; }
+
+    [JsonPropertyName("lastReadContinuousNumberSort")]
+    public float LastReadContinuousNumberSort { get; set; }
+
+    [JsonPropertyName("maxNumberSort")]
+    public float MaxNumberSort { get; set; }
+}
+
+public class KomgaTachiyomiProgressUpdateDto
+{
+    [JsonPropertyName("lastReadContinuousNumberSort")]
+    public float LastReadContinuousNumberSort { get; set; }
 }

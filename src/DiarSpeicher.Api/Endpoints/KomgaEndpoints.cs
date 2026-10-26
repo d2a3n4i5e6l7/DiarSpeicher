@@ -59,6 +59,29 @@ public static class KomgaEndpoints
                 ageRestriction));
         });
 
+        endpoints.MapGet("/api/v2/series/{id}/read-progress/tachiyomi", async (
+            string id,
+            HttpContext context,
+            IKomgaService komga,
+            CancellationToken ct) =>
+        {
+            var user = RequestIdentity.GetAuthUser(context);
+            var progress = await komga.GetTachiyomiProgressAsync(user, id, ct);
+            return progress is null ? Results.NotFound() : Results.Ok(progress);
+        });
+
+        endpoints.MapPut("/api/v2/series/{id}/read-progress/tachiyomi", async (
+            string id,
+            KomgaTachiyomiProgressUpdateDto dto,
+            HttpContext context,
+            IKomgaService komga,
+            CancellationToken ct) =>
+        {
+            var user = RequestIdentity.GetAuthUser(context);
+            var ok = await komga.SetTachiyomiProgressAsync(user, id, dto.LastReadContinuousNumberSort, ct);
+            return ok ? Results.NoContent() : Results.NotFound();
+        });
+
         // The server always has an owner: ownership goes to the first user who arrives, so
         // there is never anything for a client to claim.
         group.MapGet("/claim", () => Results.Ok(new ClaimStatusResponse(true)));

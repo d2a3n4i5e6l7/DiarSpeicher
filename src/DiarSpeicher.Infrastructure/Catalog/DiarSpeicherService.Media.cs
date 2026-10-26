@@ -110,7 +110,7 @@ public sealed partial class DiarSpeicherService
             SELECT "Id", "CreatedAt", "ElapsedSeconds", "EndPage", "EndPercentage",
                    "KoreaderProgress", "MediaId", "Notes", "ReadthroughNumber", "SessionDate",
                    "StartPage", "StartPercentage", "Status", "UpdatedAt", "UserId",
-                   "RenderedPage", "RenderedTotalPages", "RenderedProfileKey"
+                   "RenderedPage", "RenderedTotalPages", "RenderedProfileKey", "RenderedStatus"
             FROM "ReadingSessions"
             WHERE "UserId" = @UserId AND "MediaId" = @MediaId
             ORDER BY "Id" DESC
@@ -126,7 +126,7 @@ public sealed partial class DiarSpeicherService
     public async Task<List<DiarSpeicherMediaDto>> GetKeepReadingAsync(AuthUser user, CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var sessions = await conn.GetKeepReadingSessionsAsync(user.Id, ct);
+        var sessions = await conn.GetKeepReadingSessionsAsync(user.Id, ct: ct);
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
         if (mediaIds.Count == 0) return [];
 
@@ -168,7 +168,9 @@ public sealed partial class DiarSpeicherService
         parameters.Id = mediaId;
 
         const string sql = $"""
-            SELECT m."Id", m."Name", m."Path", m."Extension", m."ThumbnailPath"
+            SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status", m."Hash",
+                   m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt", m."ModifiedAt",
+                   m."DeletedAt", m."SeriesId"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -238,7 +240,7 @@ public sealed partial class DiarSpeicherService
         return await _progress.RecordAsync(
             user,
             media,
-            new ReadingProgressUpdate(input.Page, input.IsCompleted, (decimal?)input.Percentage),
+            new ReadingProgressUpdate(input.Page, input.IsCompleted, (decimal?)input.Percentage, input.Percentage.HasValue && EpubPageMapStore.IsEpub(media)),
             ct);
     }
 
