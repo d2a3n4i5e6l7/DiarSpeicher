@@ -14,16 +14,12 @@ public interface IArchiveConversionService
 }
 
 /// <summary>
-/// Convierte los CBR de una carpeta a CBZ.
-/// <para>
-/// El motivo no es estético: un CBR obliga a descomprimir con RAR en cada petición de
-/// página, mientras que un CBZ se sirve entrada a entrada sin descomprimir el resto. Para
-/// un lector que pide páginas sueltas, esa diferencia se nota en cada salto.
-/// </para>
-/// <para>
-/// Las páginas ya vienen comprimidas (JPEG, PNG, WebP), así que el ZIP se escribe en modo
-/// almacenamiento: volver a comprimirlas gasta CPU para no ganar bytes.
-/// </para>
+/// The reason is not cosmetic: a CBR forces a RAR decompression on every page request, while a
+/// CBZ serves entry by entry without decompressing the rest. For a reader requesting single
+/// pages that difference shows on every jump.
+///
+/// Pages are already compressed (JPEG, PNG, WebP), so the ZIP is written in store mode:
+/// compressing them again costs CPU without saving bytes.
 /// </summary>
 public class ArchiveConversionService : IArchiveConversionService
 {
@@ -60,8 +56,8 @@ public class ArchiveConversionService : IArchiveConversionService
 
             try
             {
-                // Un CBZ ya presente se respeta: puede venir de una conversión anterior o
-                // ser una copia que el usuario dejó ahí. Reconvertir lo pisaría.
+                // An existing CBZ is respected: it may come from an earlier conversion or be a
+                // copy the user left there. Converting again would overwrite it.
                 if (!File.Exists(target) && !await TryConvertAsync(source, target, cancellationToken))
                 {
                     continue;
@@ -85,12 +81,10 @@ public class ArchiveConversionService : IArchiveConversionService
     }
 
     /// <summary>
-    /// Escribe primero a un temporal y renombra al final: un corte a mitad de conversión
-    /// dejaría si no un CBZ truncado que el escáner indexaría como libro válido.
+    /// To the trash, not File.Delete: this runs only inside the scan with nobody confirming
+    /// anything, so a badly converted CBR or a corrupt CBZ would take the original with no way
+    /// back.
     /// </summary>
-    // A la papelera, no a File.Delete: esto corre solo dentro del escaneo, sin que nadie
-    // confirme nada, asi que un CBR convertido mal o un CBZ corrupto se llevaria el
-    // original sin vuelta atras.
     private bool TryRetireSource(string source)
     {
         if (_trash.TryMoveToTrash(source, out _) == TrashOutcome.Moved) return true;
@@ -99,6 +93,10 @@ public class ArchiveConversionService : IArchiveConversionService
         return false;
     }
 
+    /// <summary>
+    /// Writes to a temporary file first and renames at the end: otherwise a cut mid-conversion
+    /// would leave a truncated CBZ that the scanner would index as a valid book.
+    /// </summary>
     private async Task<bool> TryConvertAsync(string source, string target, CancellationToken cancellationToken)
     {
         var temporary = target + ".converting";
@@ -147,7 +145,7 @@ public class ArchiveConversionService : IArchiveConversionService
                 }
                 catch (IOException)
                 {
-                    // El temporal se queda; no vale la pena tumbar el escaneo por él.
+                    // The temp file stays; it is not worth breaking the scan over it.
                 }
             }
             throw;

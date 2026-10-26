@@ -71,7 +71,7 @@ public class PdfBookProcessor : IBookProcessor
                 return Task.FromResult<ExtractedPage?>(image);
             }
 
-            // Fallback: si la página no tiene imágenes incrustadas (novela o texto vectorial), rasterizamos con PDFium
+            // Pages without embedded images (novels, vector text) are rasterized with PDFium.
             return Task.FromResult(RasterizePage(path, pageNumber));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -146,9 +146,9 @@ public class PdfBookProcessor : IBookProcessor
     }
 
     /// <summary>
-    /// PDFium se distribuye como binario nativo y no cubre todas las plataformas que admite
-    /// net11.0. La comprobacion va escrita aqui, y no como [SupportedOSPlatform], porque el
-    /// atributo se propagaria por toda la cadena de llamadas hasta el arranque y los tests.
+    /// PDFium ships as a native binary and does not cover every platform net11.0 supports. The
+    /// check is written here rather than as [SupportedOSPlatform] because the attribute would
+    /// propagate through the whole call chain up to startup and the tests.
     /// </summary>
     private static ExtractedPage? RasterizePage(string path, int pageNumber)
     {

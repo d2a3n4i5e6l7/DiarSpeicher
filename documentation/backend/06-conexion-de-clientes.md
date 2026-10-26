@@ -108,12 +108,11 @@ Recorrido típico, todo verificado funcionando:
 | Guardar progreso | `PATCH /api/v1/books/{id}/read-progress` | `204`, cuerpo `{"page":42,"completed":false}` |
 | Borrar progreso | `DELETE /api/v1/books/{id}/read-progress` | `204` |
 
-## Si uso la API v2 nativa o GraphQL — cookie o Bearer
+## Si uso la API v2 nativa — cookie o Bearer
 
 Es lo que consume la SPA. Sirve igual con la cookie de sesión o con `Authorization: Bearer`.
 
 - `https://<host>:5050/diarspeicher/api/v2/...`
-- `https://<host>:5050/diarspeicher/graphql`
 
 ## Si uso OPDS — Basic auth, o clave en la URL
 

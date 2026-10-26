@@ -22,12 +22,12 @@ public static class KomgaEndpoints
     }
 
     /// <summary>
-    /// Lo que un cliente de Komga pide nada más conectar, antes de tocar el catálogo. Sin
-    /// esto responde 404, el cliente da la conexión por inválida y nunca llega a pedir
-    /// bibliotecas: las rutas del catálogo pueden estar perfectas y aun así no entra.
+    /// What a Komga client requests right after connecting, before touching the catalog. Without
+    /// it the server answers 404, the client deems the connection invalid and never requests
+    /// libraries, however correct the catalog routes are.
     ///
-    /// Komga colgó los usuarios de <c>api/v2/users</c> (UserController.kt) aunque el resto
-    /// de su API siga en v1, de ahí que este registro vaya fuera del grupo.
+    /// Komga hangs users under <c>api/v2/users</c> (UserController.kt) even though the rest of its
+    /// API stays on v1, hence this registration lives outside the group.
     /// </summary>
     private static void MapSessionEndpoints(IEndpointRouteBuilder endpoints, RouteGroupBuilder group)
     {
@@ -35,8 +35,8 @@ public static class KomgaEndpoints
         {
             var user = RequestIdentity.GetAuthUser(context);
 
-            // Komga identifica al usuario por su correo; aquí no hay correos, así que va el
-            // nombre, que es lo que el cliente acaba mostrando.
+            // Komga identifies users by e-mail; there are no e-mails here, so the user name
+            // goes instead, which is what the client ends up displaying.
             var roles = new List<string> { "USER" };
             if (user.IsServerOwner || user.HasRole("admin"))
             {
@@ -59,12 +59,12 @@ public static class KomgaEndpoints
                 ageRestriction));
         });
 
-        // El servidor siempre tiene dueño: la propiedad se concede al primer usuario que
-        // llega, así que nunca hay nada que reclamar desde un cliente.
+        // The server always has an owner: ownership goes to the first user who arrives, so
+        // there is never anything for a client to claim.
         group.MapGet("/claim", () => Results.Ok(new ClaimStatusResponse(true)));
 
-        // En Komga convierte una sesión de cabecera en cookie. Aquí la sesión la administra
-        // el Gateway y no hay nada que escribir, pero el 204 es lo que el cliente espera.
+        // In Komga this turns a header session into a cookie. Here the Gateway manages the
+        // session and there is nothing to write, but the client expects the 204.
         group.MapGet("/login/set-cookie", () => Results.NoContent());
     }
 

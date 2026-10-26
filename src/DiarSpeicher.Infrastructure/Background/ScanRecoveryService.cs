@@ -1,5 +1,6 @@
 using Dapper;
 using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Data.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -9,15 +10,15 @@ namespace DiarSpeicher.Infrastructure.Background;
 public sealed class ScanRecoveryService : BackgroundService
 {
     /// <summary>
-    /// Margen para que la base de datos termine de migrar y el disco deje de pelearse
-    /// consigo mismo en el arranque.
+    /// Gives the database time to finish migrating and the disk to stop fighting itself at
+    /// startup.
     /// </summary>
     private static readonly TimeSpan Delay = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Una miniatura se escribe en disco antes de que se guarde la fila del tomo. Sin este
-    /// margen, un repaso que coincidiera con un escaneo en marcha borraria portadas recien
-    /// creadas por no encontrar todavia quien las referencie.
+    /// A thumbnail is written to disk before the volume row is saved. Without this grace
+    /// period, a pass that overlapped a running scan would delete freshly created covers for
+    /// not yet finding anything that references them.
     /// </summary>
     private static readonly TimeSpan ThumbnailGrace = TimeSpan.FromMinutes(30);
 
@@ -64,7 +65,7 @@ public sealed class ScanRecoveryService : BackgroundService
         }
         catch (OperationCanceledException)
         {
-            // El proceso se esta parando.
+            // The process is shutting down.
         }
         catch (Exception e)
         {
@@ -73,10 +74,10 @@ public sealed class ScanRecoveryService : BackgroundService
     }
 
     /// <summary>
-    /// Tomos sin serie. No deberian existir: el escaner siempre asigna una, y la subida no
-    /// crea filas. Aparecen cuando algo borro la serie y la relacion, declarada SetNull,
-    /// dejo el tomo colgando. Son inalcanzables desde su biblioteca pero salen en "anadido
-    /// reciente", asi que se limpian al arrancar.
+    /// Volumes without a series should not exist: the scanner always assigns one and uploads
+    /// create no rows. They appear when something deleted the series and the SetNull relation
+    /// left the volume dangling. They are unreachable from their library but show up in
+    /// "recently added", so they are cleaned at startup.
     /// </summary>
     private async Task PurgeOrphanMediaAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
     {
@@ -109,9 +110,8 @@ public sealed class ScanRecoveryService : BackgroundService
     }
 
     /// <summary>
-    /// Configuraciones que ya no describen a nadie. La clave ajena va de Libraries hacia
-    /// LibraryConfigs, asi que la cascada nunca actua en este sentido y cada biblioteca
-    /// borrada antes de que esto existiera dejo la suya atras.
+    /// The foreign key goes from Libraries to LibraryConfigs, so the cascade never acts in this
+    /// direction and a deleted library leaves its configuration behind.
     /// </summary>
     private async Task PurgeOrphanLibraryConfigsAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
     {
@@ -132,8 +132,8 @@ public sealed class ScanRecoveryService : BackgroundService
     }
 
     /// <summary>
-    /// Filas de la cache de mtimes que no caen bajo ninguna biblioteca viva. Un escaneo solo
-    /// repasa las de su propia ruta, asi que las de una biblioteca borrada no las visita nadie.
+    /// Rows of the mtime cache that fall under no live library. A scan only revisits the rows
+    /// under its own path, so those of a deleted library are never visited by anyone.
     /// </summary>
     private async Task PurgeUnclaimedScannedDirectoriesAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
     {
@@ -156,16 +156,16 @@ public sealed class ScanRecoveryService : BackgroundService
 
         if (unclaimedPaths.Count == 0) return;
 
-        const string deleteSql = """DELETE FROM "ScannedDirectories" WHERE "Path" IN @Paths;""";
-        await conn.ExecuteAsync(deleteSql, new { Paths = unclaimedPaths });
+        const string deleteSql = """DELETE FROM "ScannedDirectories" WHERE "Path" IN (SELECT value FROM json_each(@Paths));""";
+        await conn.ExecuteAsync(deleteSql, new { Paths = SqlKeys.ToJson(unclaimedPaths) });
 
         _logger.LogWarning("Limpiadas {Count} carpetas cacheadas sin biblioteca", unclaimedPaths.Count);
     }
 
     /// <summary>
-    /// Miniaturas que ya no reclama ninguna fila. Se borran desde varios sitios y basta con
-    /// que uno se olvide para que el fichero sobreviva al tomo: el disco es la unica fuente
-    /// fiable de lo que hay, y la base la de lo que se usa.
+    /// Thumbnails no row claims anymore. They are deleted from several places and it takes only
+    /// one forgetting for the file to outlive the volume: the disk is the only reliable source
+    /// of what exists, and the database of what is used.
     /// </summary>
     private async Task PurgeUnreferencedThumbnailsAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
     {

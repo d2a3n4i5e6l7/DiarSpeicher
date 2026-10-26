@@ -12,7 +12,7 @@ public partial class OpdsAuthMiddleware
 
     private static readonly string[] ProtectedPrefixes =
     [
-        "/opds", "/api/v1", "/api/v2", "/koreader", "/kobo", "/graphql"
+        "/opds", "/api/v1", "/api/v2", "/koreader", "/kobo"
     ];
 
     private readonly RequestDelegate _next;

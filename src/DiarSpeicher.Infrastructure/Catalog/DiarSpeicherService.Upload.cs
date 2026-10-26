@@ -69,9 +69,8 @@ public sealed partial class DiarSpeicherService
     }
 
     /// <summary>
-    /// Escribe un fichero en la carpeta de destino aplicando el limite de tamano. Si lo
-    /// excede se borra lo ya escrito: un fichero a medias en la biblioteca lo recogeria el
-    /// siguiente escaneo como si fuese un libro valido.
+    /// When the size limit is exceeded whatever was written is deleted: a half-written file in
+    /// the library would be picked up by the next scan as a valid book.
     /// </summary>
     private async Task<(UploadResult? Rejected, UploadedFileDto Saved)> SaveUploadedFileAsync(
         DiarSpeicherUploadFileInput file,
@@ -122,9 +121,9 @@ public sealed partial class DiarSpeicherService
         }
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
-        parameters.Add("LibraryId", libraryId);
-        var sql = $@"SELECT ""Id"", ""Path"" FROM ""Libraries"" l WHERE l.""Id"" = @LibraryId AND {where} LIMIT 1;";
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.LibraryId = libraryId;
+        const string sql = $@"SELECT ""Id"", ""Path"" FROM ""Libraries"" l WHERE l.""Id"" = @LibraryId AND {CatalogSqlFilters.LibraryVisible} LIMIT 1;";
         var library = await conn.QueryFirstOrDefaultAsync<Library>(sql, parameters);
 
         if (library == null || !Directory.Exists(library.Path))

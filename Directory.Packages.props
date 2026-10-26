@@ -8,8 +8,6 @@
     <PackageVersion Include="AngleSharp" Version="1.8.2" />
     <PackageVersion Include="Dapper" Version="2.1.89" />
     <PackageVersion Include="Dapper.AOT" Version="1.1.0" />
-    <PackageVersion Include="HotChocolate.AspNetCore" Version="16.6.6" />
-    <PackageVersion Include="HotChocolate.Data" Version="16.6.6" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="11.0.0-rc.2.26504.105" />
     <PackageVersion Include="Microsoft.ICU.ICU4C.Runtime" Version="72.1.0.3" />
     <PackageVersion Include="PdfPig" Version="0.1.16" />

@@ -47,11 +47,11 @@ public sealed class SqlSchemaContractTests : IDisposable
     /// Ficheros que hablan con bases auxiliares propias —el catalogo descargado de MangaBaka y
     /// el indice de carpetas—, con esquema y convencion de nombres aparte del catalogo.
     /// </summary>
-    private static readonly string[] OwnDatabaseFiles = ["MangaBakaCatalog.cs", "FolderIndex.cs"];
+    private static readonly string[] OwnDatabaseClasses = ["MangaBakaCatalog", "FolderIndex"];
 
     private static IEnumerable<string> SourceFiles() =>
         Directory.EnumerateFiles(Path.Combine(RepoRoot(), "src"), "*.cs", SearchOption.AllDirectories)
-                 .Where(f => !OwnDatabaseFiles.Contains(Path.GetFileName(f)));
+                 .Where(f => !OwnDatabaseClasses.Any(c => Path.GetFileName(f).StartsWith(c + ".", StringComparison.Ordinal)));
 
     /// <summary>
     /// Toma el cuerpo de cada literal crudo (""" ... """) que contenga una sentencia SQL.

@@ -7,10 +7,6 @@ public class AuthUser
     public bool IsServerOwner { get; set; }
     public HashSet<string> Roles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Permisos tal y como llegan en <c>X-Auth-Perms</c>. El catálogo de nombres válidos
-    /// está en <see cref="DiarSpeicher.Core.Domain.Models.Permissions"/>.
-    /// </summary>
     public HashSet<string> Permissions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> ExcludedLibraryIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -21,14 +17,14 @@ public class AuthUser
         IsServerOwner || Roles.Contains(role);
 
     /// <summary>
-    /// El propietario del servidor queda exento, igual que en <see cref="HasRole"/>: es la
-    /// única puerta de privilegio local y se concede antes de que exista nadie que pueda
-    /// repartir permisos. El comodín "*" lo reconoce también el Gateway.
+    /// The server owner is exempt, as in <see cref="HasRole"/>: it is the only local privilege
+    /// gate and is granted before anyone exists who could hand out permissions. The Gateway
+    /// also recognizes the "*" wildcard.
     /// </summary>
     public bool HasPermission(string permission) =>
         IsServerOwner || Permissions.Contains(PermissionWildcard) || Permissions.Contains(permission);
 
-    /// <summary>Valor que el Gateway interpreta como "todos los permisos".</summary>
+    /// <summary>Value the Gateway interprets as "all permissions".</summary>
     public const string PermissionWildcard = "*";
 
     /// <summary>

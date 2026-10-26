@@ -5,8 +5,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="HotChocolate.AspNetCore" />
-    <PackageReference Include="HotChocolate.Data" />
     <PackageReference Include="Microsoft.ICU.ICU4C.Runtime" />
   </ItemGroup>
 

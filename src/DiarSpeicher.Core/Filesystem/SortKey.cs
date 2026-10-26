@@ -3,14 +3,12 @@ using System.Text;
 namespace DiarSpeicher.Core.Filesystem;
 
 /// <summary>
-/// Convierte un nombre en una clave que SQLite ordena igual que
-/// <see cref="NaturalSortComparer"/>, rellenando cada tramo numerico a un ancho fijo: "Vol 2"
-/// pasa a "vol 0000000002" y "Vol 10" a "vol 0000000010", de modo que la comparacion de texto
-/// del motor ya coloca el 2 antes del 10.
+/// Turns a name into a key SQLite sorts the same way as <see cref="NaturalSortComparer"/>, padding
+/// every numeric run to a fixed width: "Vol 2" becomes "vol 0000000002" and "Vol 10" becomes
+/// "vol 0000000010", so the engine's plain text comparison already puts 2 before 10.
 ///
-/// Existe porque ordenar en memoria obligaria a traerse la serie entera antes de paginar, y
-/// ORDER BY sobre el nombre crudo devuelve 1, 10, 11, 2. La clave se guarda junto al medio y
-/// se recalcula al renombrar.
+/// Sorting in memory would mean loading the whole series before paginating, and ORDER BY on the
+/// raw name returns 1, 10, 11, 2. The key is stored next to the media and recomputed on rename.
 /// </summary>
 public static class SortKey
 {

@@ -5,10 +5,6 @@ using Microsoft.Extensions.Options;
 
 namespace DiarSpeicher.Api.Endpoints;
 
-/// <summary>
-/// Lo borrado que todavia se puede recuperar. Pasado el plazo se vacia solo y estos
-/// endpoints dejan de verlo.
-/// </summary>
 public static class TrashEndpoints
 {
     private const string AuthUserKey = "AuthUser";

@@ -6,35 +6,30 @@ using Microsoft.Extensions.Logging;
 
 namespace DiarSpeicher.Infrastructure.Catalog;
 
-/// <summary>
-/// Reconciliacion entre lo indexado y lo que queda en disco: que falta y como purgarlo.
-/// </summary>
 public sealed partial class DiarSpeicherService
 {
-    private const string LibraryIdParam = "LibraryId";
-
     internal sealed record MissingSeriesRow(string Id, string Name, string Path, long VolumeCount, long ReadingSessions);
 
     public async Task<DiarSpeicherMissingReportDto> GetMissingAsync(AuthUser user, string libraryId, CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
 
-        var (seriesWhere, seriesParams) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
-        seriesParams.Add(LibraryIdParam, libraryId);
-        seriesParams.Add("Status", FileStatus.Missing.ToString());
+        var seriesParams = CatalogSqlFilters.ArgsFor(user);
+        seriesParams.LibraryId = libraryId;
+        seriesParams.Status = FileStatus.Missing.ToString();
 
-        var seriesSql = $"""
+        const string seriesSql = $"""
             SELECT s."Id", s."Name", s."Path",
                    (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "VolumeCount",
                    (SELECT COUNT(*) FROM "ReadingSessions" rs INNER JOIN "Media" m ON rs."MediaId" = m."Id" WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "ReadingSessions"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE s."LibraryId" = @LibraryId AND s."Status" = @Status AND {seriesWhere};
+            WHERE s."LibraryId" = @LibraryId AND s."Status" = @Status AND {CatalogSqlFilters.SeriesVisible};
             """;
 
         var seriesRows = (await conn.QueryAsync<MissingSeriesRow>(
             seriesSql, seriesParams
-        )).AsList();
+        )).AsRowList();
 
         var report = new DiarSpeicherMissingReportDto
         {
@@ -48,11 +43,11 @@ public sealed partial class DiarSpeicherService
             }).ToList()
         };
 
-        var (mediaWhere, mediaParams) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        mediaParams.Add(LibraryIdParam, libraryId);
-        mediaParams.Add("MissingStatus", FileStatus.Missing.ToString());
+        var mediaParams = CatalogSqlFilters.ArgsFor(user);
+        mediaParams.LibraryId = libraryId;
+        mediaParams.MissingStatus = FileStatus.Missing.ToString();
 
-        var orphansSql = $"""
+        const string orphansSql = $"""
             SELECT COUNT(rs."Id") AS "Sessions"
             FROM "Media" m
             INNER JOIN "Series" s ON m."SeriesId" = s."Id"
@@ -62,13 +57,13 @@ public sealed partial class DiarSpeicherService
             WHERE s."LibraryId" = @LibraryId
               AND m."Status" = @MissingStatus
               AND s."Status" != @MissingStatus
-              AND {mediaWhere}
+              AND {CatalogSqlFilters.MediaVisible}
             GROUP BY m."Id";
             """;
 
         var orphanSessions = (await conn.QueryAsync<int>(
             orphansSql, mediaParams
-        )).AsList();
+        )).AsRowList();
 
         report.OrphanVolumes = orphanSessions.Count;
         report.TotalVolumes = report.Series.Sum(s => s.VolumeCount) + orphanSessions.Count;
@@ -77,46 +72,44 @@ public sealed partial class DiarSpeicherService
         return report;
     }
 
-    /// <summary>
-    /// Quita del indice lo que ya no esta en disco. Nunca toca un fichero.
-    /// </summary>
+    /// <summary>Never touches a file: it only removes index rows whose file is gone.</summary>
     public async Task<int> PurgeMissingAsync(AuthUser user, string libraryId, CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
 
-        var (seriesWhere, seriesParams) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
-        seriesParams.Add(LibraryIdParam, libraryId);
-        seriesParams.Add("Status", FileStatus.Missing.ToString());
+        var seriesParams = CatalogSqlFilters.ArgsFor(user);
+        seriesParams.LibraryId = libraryId;
+        seriesParams.Status = FileStatus.Missing.ToString();
 
-        var seriesSql = $"""
+        const string seriesSql = $"""
             SELECT s."Id", s."Path", s."ThumbnailPath"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE s."LibraryId" = @LibraryId AND s."Status" = @Status AND {seriesWhere};
+            WHERE s."LibraryId" = @LibraryId AND s."Status" = @Status AND {CatalogSqlFilters.SeriesVisible};
             """;
 
         var seriesList = (await conn.QueryAsync<IdPathThumbnailRow>(
             seriesSql, seriesParams
-        )).AsList();
+        )).AsRowList();
 
         var goneSeries = seriesList.Where(s => !Directory.Exists(s.Path)).ToList();
 
-        var (mediaWhere, mediaParams) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        mediaParams.Add(LibraryIdParam, libraryId);
-        mediaParams.Add("MissingStatus", FileStatus.Missing.ToString());
+        var mediaParams = CatalogSqlFilters.ArgsFor(user);
+        mediaParams.LibraryId = libraryId;
+        mediaParams.MissingStatus = FileStatus.Missing.ToString();
 
-        var mediaSql = $"""
+        const string mediaSql = $"""
             SELECT m."Id", m."Path", m."ThumbnailPath"
             FROM "Media" m
             INNER JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE s."LibraryId" = @LibraryId AND m."Status" = @MissingStatus AND {mediaWhere};
+            WHERE s."LibraryId" = @LibraryId AND m."Status" = @MissingStatus AND {CatalogSqlFilters.MediaVisible};
             """;
 
         var mediaList = (await conn.QueryAsync<IdPathThumbnailRow>(
             mediaSql, mediaParams
-        )).AsList();
+        )).AsRowList();
 
         var goneMedia = mediaList.Where(m => !File.Exists(m.Path)).ToList();
 
@@ -135,13 +128,13 @@ public sealed partial class DiarSpeicherService
             await using var tx = await conn.BeginTransactionAsync(ct);
             if (goneMedia.Count > 0)
             {
-                const string deleteMediaSql = @"DELETE FROM ""Media"" WHERE ""Id"" IN @Ids;";
-                await conn.ExecuteAsync(deleteMediaSql, new { Ids = goneMedia.Select(m => m.Id) }, tx);
+                const string deleteMediaSql = @"DELETE FROM ""Media"" WHERE ""Id"" IN (SELECT value FROM json_each(@Ids));";
+                await conn.ExecuteAsync(deleteMediaSql, new { Ids = SqlKeys.ToJson(goneMedia.Select(m => m.Id)) }, tx);
             }
             if (goneSeries.Count > 0)
             {
-                const string deleteSeriesSql = @"DELETE FROM ""Series"" WHERE ""Id"" IN @Ids;";
-                await conn.ExecuteAsync(deleteSeriesSql, new { Ids = goneSeries.Select(s => s.Id) }, tx);
+                const string deleteSeriesSql = @"DELETE FROM ""Series"" WHERE ""Id"" IN (SELECT value FROM json_each(@Ids));";
+                await conn.ExecuteAsync(deleteSeriesSql, new { Ids = SqlKeys.ToJson(goneSeries.Select(s => s.Id)) }, tx);
             }
             await tx.CommitAsync(ct);
         }
@@ -160,39 +153,39 @@ public sealed partial class DiarSpeicherService
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
 
-        var (mediaWhere, mediaParams) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        mediaParams.Add("Root", root);
-        mediaParams.Add("Prefix", prefix);
-        mediaParams.Add("PrefixLen", prefix.Length);
+        var mediaParams = CatalogSqlFilters.ArgsFor(user);
+        mediaParams.Root = root;
+        mediaParams.Prefix = prefix;
+        mediaParams.PrefixLen = prefix.Length;
 
-        var mediaSql = $"""
+        const string mediaSql = $"""
             SELECT m."Id", m."Path", m."ThumbnailPath"
             FROM "Media" m
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE (m."Path" = @Root OR substr(m."Path", 1, @PrefixLen) = @Prefix) AND {mediaWhere};
+            WHERE (m."Path" = @Root OR substr(m."Path", 1, @PrefixLen) = @Prefix) AND {CatalogSqlFilters.MediaVisible};
             """;
 
         var media = (await conn.QueryAsync<IdPathThumbnailRow>(
             mediaSql, mediaParams
-        )).AsList();
+        )).AsRowList();
 
-        var (seriesWhere, seriesParams) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
-        seriesParams.Add("Root", root);
-        seriesParams.Add("Prefix", prefix);
-        seriesParams.Add("PrefixLen", prefix.Length);
+        var seriesParams = CatalogSqlFilters.ArgsFor(user);
+        seriesParams.Root = root;
+        seriesParams.Prefix = prefix;
+        seriesParams.PrefixLen = prefix.Length;
 
-        var seriesSql = $"""
+        const string seriesSql = $"""
             SELECT s."Id", s."Path", s."ThumbnailPath"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE (s."Path" = @Root OR substr(s."Path", 1, @PrefixLen) = @Prefix) AND {seriesWhere};
+            WHERE (s."Path" = @Root OR substr(s."Path", 1, @PrefixLen) = @Prefix) AND {CatalogSqlFilters.SeriesVisible};
             """;
 
         var series = (await conn.QueryAsync<IdPathThumbnailRow>(
             seriesSql, seriesParams
-        )).AsList();
+        )).AsRowList();
 
         var thumbs = media.Select(m => m.ThumbnailPath)
             .Concat(series.Select(s => s.ThumbnailPath))
@@ -208,13 +201,13 @@ public sealed partial class DiarSpeicherService
             await using var tx = await conn.BeginTransactionAsync(ct);
             if (media.Count > 0)
             {
-                const string deleteMediaSql = @"DELETE FROM ""Media"" WHERE ""Id"" IN @Ids;";
-                await conn.ExecuteAsync(deleteMediaSql, new { Ids = media.Select(m => m.Id) }, tx);
+                const string deleteMediaSql = @"DELETE FROM ""Media"" WHERE ""Id"" IN (SELECT value FROM json_each(@Ids));";
+                await conn.ExecuteAsync(deleteMediaSql, new { Ids = SqlKeys.ToJson(media.Select(m => m.Id)) }, tx);
             }
             if (series.Count > 0)
             {
-                const string deleteSeriesSql = @"DELETE FROM ""Series"" WHERE ""Id"" IN @Ids;";
-                await conn.ExecuteAsync(deleteSeriesSql, new { Ids = series.Select(s => s.Id) }, tx);
+                const string deleteSeriesSql = @"DELETE FROM ""Series"" WHERE ""Id"" IN (SELECT value FROM json_each(@Ids));";
+                await conn.ExecuteAsync(deleteSeriesSql, new { Ids = SqlKeys.ToJson(series.Select(s => s.Id)) }, tx);
             }
             await tx.CommitAsync(ct);
         }

@@ -3,22 +3,18 @@ using System.Threading.Channels;
 
 namespace DiarSpeicher.Infrastructure.Background;
 
-/// <summary>
-/// Instantanea del escaneo de una biblioteca, con lo que hace falta para una estimacion.
-/// </summary>
 public sealed record ScanSnapshot(
     ScanProgressEvent Progress,
     DateTimeOffset StartedAt,
     bool Finished)
 {
-    /// <summary>Encolado pero sin empezar: hay otro escaneo delante.</summary>
     public bool Queued { get; init; }
 
     public TimeSpan Elapsed => DateTimeOffset.UtcNow - StartedAt;
 
     /// <summary>
-    /// Lo que falta, extrapolando de lo que ya se tardo. Null mientras no haya al menos una
-    /// serie hecha: dar una estimacion con cero muestras es inventar un numero.
+    /// Null until at least one series is done: estimating with zero samples is making up a
+    /// number.
     /// </summary>
     public TimeSpan? Eta
     {
@@ -40,16 +36,14 @@ public interface IScanProgressHub
 {
     ScanSnapshot? GetSnapshot(string libraryId);
 
-    /// <summary>Lo encolado y lo que esta en marcha, para pintar de gris lo que espera turno.</summary>
     IReadOnlyCollection<ScanSnapshot> GetActive();
 
     /// <summary>
-    /// La cola tiene un solo lector, asi que lo encolado espera a que termine lo anterior.
-    /// Sin esto no habria forma de distinguir "en cola" de "no se ha pedido".
+    /// The queue has a single reader, so queued scans wait for the previous one to finish.
+    /// Without this there would be no way to tell "queued" from "never requested".
     /// </summary>
     void MarkQueued(string libraryId);
 
-    /// <summary>Suscriptor efimero: se cierra al irse el cliente y no deja rastro.</summary>
     IAsyncEnumerable<ScanSnapshot> SubscribeAsync(string libraryId, CancellationToken ct);
 }
 
@@ -66,11 +60,8 @@ public sealed class NullScanProgressHub : IScanProgressHub
 }
 
 /// <summary>
-/// Reparte el progreso del escaner a los clientes conectados por SSE.
-/// <para>
-/// Vive en memoria y no persiste: si el proceso se reinicia a mitad de un escaneo, el
-/// escaneo tambien muere, asi que no hay nada que recuperar.
-/// </para>
+/// Lives in memory and does not persist: if the process restarts mid-scan the scan dies too, so
+/// there is nothing to recover.
 /// </summary>
 public sealed class ScanProgressHub : IScanProgressHub, IScanProgressPublisher
 {
@@ -92,7 +83,6 @@ public sealed class ScanProgressHub : IScanProgressHub, IScanProgressPublisher
             Finished: false)
         { Queued = true };
 
-        // Sobrescribe un escaneo anterior ya terminado, nunca uno en marcha.
         _latest.AddOrUpdate(libraryId, queued, (_, previous) => previous.Finished ? queued : previous);
     }
 
@@ -103,14 +93,15 @@ public sealed class ScanProgressHub : IScanProgressHub, IScanProgressPublisher
         var snapshot = _latest.AddOrUpdate(
             progress.LibraryId,
             _ => new ScanSnapshot(progress, DateTimeOffset.UtcNow, finished),
-            // El arranque se conserva entre eventos: es la unica base para la estimacion.
+            // The start time is kept across events: it is the only basis for the estimate.
             (_, previous) => previous with { Progress = progress, Finished = finished, Queued = false });
 
         if (_subscribers.TryGetValue(progress.LibraryId, out var channels))
         {
             foreach (var channel in channels.Values)
             {
-                // Descartar si el cliente no lee: un navegador lento no puede frenar el escaneo.
+                // Dropped if the client does not read: a slow browser must not slow the scan
+                // down.
                 channel.Writer.TryWrite(snapshot);
             }
         }
@@ -134,8 +125,8 @@ public sealed class ScanProgressHub : IScanProgressHub, IScanProgressPublisher
 
         try
         {
-            // Lo que ya haya, primero: un cliente que llega a mitad del escaneo no puede
-            // quedarse en blanco hasta el siguiente evento.
+            // Whatever already exists goes first: a client arriving mid-scan must not stay
+            // blank until the next event.
             if (_latest.TryGetValue(libraryId, out var current))
             {
                 yield return current;

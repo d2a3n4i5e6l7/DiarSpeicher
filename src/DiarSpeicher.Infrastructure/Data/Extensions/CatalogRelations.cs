@@ -1,14 +1,11 @@
 using System.Data;
-using System.Text.Json;
 using Dapper;
-using DiarSpeicher.Infrastructure.Serialization;
 
 namespace DiarSpeicher.Infrastructure.Data.Extensions;
 
 /// <summary>
-/// Dapper.AOT no genera multi-mapping (splitOn): cada relacion se carga con una segunda consulta
-/// por clave. Las claves viajan como un unico arreglo JSON leido con json_each, porque expandir
-/// IN @lista crea un parametro por elemento y la sincronizacion de Kobo pasa la biblioteca entera.
+/// Dapper.AOT does not generate multi-mapping (splitOn): each relation is loaded with a second
+/// query by key.
 /// </summary>
 public static class CatalogRelations
 {
@@ -40,7 +37,7 @@ public static class CatalogRelations
             WHERE "SeriesId" IN (SELECT value FROM json_each(@Keys));
             """;
 
-        var rows = await conn.QueryAsync<SeriesMetadata>(sql, new { Keys = TextKeys(series.Select(s => s.Id)) }, tx);
+        var rows = await conn.QueryAsync<SeriesMetadata>(sql, new { Keys = SqlKeys.ToJson(series.Select(s => s.Id)) }, tx);
         Attach(series, s => s.Id, rows, m => m.SeriesId, (s, m) => s.Metadata = m);
     }
 
@@ -58,7 +55,7 @@ public static class CatalogRelations
             WHERE "MediaId" IN (SELECT value FROM json_each(@Keys));
             """;
 
-        var rows = await conn.QueryAsync<MediaMetadata>(sql, new { Keys = TextKeys(media.Select(m => m.Id)) }, tx);
+        var rows = await conn.QueryAsync<MediaMetadata>(sql, new { Keys = SqlKeys.ToJson(media.Select(m => m.Id)) }, tx);
         Attach(media, m => m.Id, rows, mm => mm.MediaId, (m, mm) => m.Metadata = mm);
     }
 
@@ -73,7 +70,7 @@ public static class CatalogRelations
             WHERE "Id" IN (SELECT value FROM json_each(@Keys));
             """;
 
-        var rows = await conn.QueryAsync<Series>(sql, new { Keys = TextKeys(media.Select(m => m.SeriesId)) }, tx);
+        var rows = await conn.QueryAsync<Series>(sql, new { Keys = SqlKeys.ToJson(media.Select(m => m.SeriesId)) }, tx);
         Attach(media, m => m.SeriesId, rows, s => s.Id, (m, s) => m.Series = s);
     }
 
@@ -89,8 +86,7 @@ public static class CatalogRelations
             WHERE "Id" IN (SELECT value FROM json_each(@Keys));
             """;
 
-        var keys = JsonSerializer.Serialize(libraries.Select(l => l.ConfigId).Distinct().ToList(), InfrastructureJsonContext.Default.ListInt32);
-        var rows = await conn.QueryAsync<LibraryConfig>(sql, new { Keys = keys }, tx);
+        var rows = await conn.QueryAsync<LibraryConfig>(sql, new { Keys = SqlKeys.ToJson(libraries.Select(l => l.ConfigId)) }, tx);
         Attach(libraries, l => l.ConfigId, rows, c => c.Id, (l, c) => l.Config = c);
     }
 
@@ -104,19 +100,16 @@ public static class CatalogRelations
             WHERE "UserId" IN (SELECT value FROM json_each(@Keys));
             """;
 
-        var rows = await conn.QueryAsync<AgeRestriction>(sql, new { Keys = TextKeys(users.Select(u => u.Id)) }, tx);
+        var rows = await conn.QueryAsync<AgeRestriction>(sql, new { Keys = SqlKeys.ToJson(users.Select(u => u.Id)) }, tx);
         Attach(users, u => u.Id, rows, a => a.UserId, (u, a) => u.AgeRestriction = a);
     }
 
     private static async Task<IEnumerable<T>> LoadAsync<T>(Task<IEnumerable<T>> query, Func<List<T>, Task> attach)
     {
-        var rows = (await query).AsList();
+        var rows = (await query).AsRowList();
         await attach(rows);
         return rows;
     }
-
-    private static string TextKeys(IEnumerable<string?> keys) =>
-        JsonSerializer.Serialize(keys.OfType<string>().Distinct(StringComparer.Ordinal).ToList(), InfrastructureJsonContext.Default.ListString);
 
     private static void Attach<TOwner, TRelated, TKey>(
         IEnumerable<TOwner> owners,

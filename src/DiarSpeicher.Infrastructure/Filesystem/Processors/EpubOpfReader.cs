@@ -173,7 +173,7 @@ internal static class EpubOpfReader
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // OPF corrupto o sin portada declarada
+            // Corrupt OPF or no declared cover.
         }
 
         return null;

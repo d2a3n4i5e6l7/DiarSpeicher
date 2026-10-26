@@ -28,10 +28,10 @@ public static class ReadingSessionSqlQueries
                 FROM "ReadingSessions"
                 WHERE "UserId" = @UserId
             )
-            WHERE "rn" = 1 AND "MediaId" IN @MediaIds;
+            WHERE "rn" = 1 AND "MediaId" IN (SELECT value FROM json_each(@MediaIds));
             """;
 
-        var sessions = (await conn.QueryAsync<ReadingSession>(sql, new { UserId = userId, MediaIds = mediaIds })).AsList();
+        var sessions = (await conn.QueryAsync<ReadingSession>(sql, new { UserId = userId, MediaIds = SqlKeys.ToJson(mediaIds) })).AsRowList();
 
         return sessions.ToDictionary(s => s.MediaId);
     }
@@ -59,7 +59,7 @@ public static class ReadingSessionSqlQueries
             ORDER BY COALESCE("UpdatedAt", "CreatedAt") DESC;
             """;
 
-        var sessions = (await conn.QueryAsync<ReadingSession>(sql, new { UserId = userId, Status = nameof(ReadingStatus.Reading) })).AsList();
+        var sessions = (await conn.QueryAsync<ReadingSession>(sql, new { UserId = userId, Status = nameof(ReadingStatus.Reading) })).AsRowList();
 
         return sessions;
     }

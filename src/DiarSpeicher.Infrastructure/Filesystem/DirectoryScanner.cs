@@ -28,10 +28,10 @@ public class DirectoryScanner : IDirectoryScanner
         var dirsToEvaluate = DiscoverDirectories(normalizedLibPath, isCollectionBased);
         var (validEntries, ignoredEntries) = ClassifyDirectories(dirsToEvaluate, normalizedLibPath, isCollectionBased);
 
-        // Las rutas se comparan byte a byte, igual que el sistema de ficheros: en Linux
-        // "parte 2" y "Parte 2" son dos carpetas distintas y las dos pueden estar indexadas.
-        // Y se monta con el indexador, no con ToDictionary: Series.Path no es unico, y una
-        // clave repetida tumbaba el escaneo entero con ArgumentException.
+        // Paths are compared byte by byte, like the file system: on Linux "parte 2" and "Parte
+        // 2" are two different folders and both may be indexed. Built with the indexer rather
+        // than ToDictionary because Series.Path is not unique, and a repeated key would abort
+        // the whole scan with ArgumentException.
         var existingMap = new Dictionary<string, ExistingSeriesInfo>(StringComparer.Ordinal);
         foreach (var existing in existingSeries)
         {
@@ -103,10 +103,10 @@ public class DirectoryScanner : IDirectoryScanner
         var validFiles = new List<string>();
         var ignoredFiles = 0UL;
 
-        // Una carpeta que ya es serie por si misma no aporta tomos a la de arriba. Sin este
-        // corte, un libro suelto en la raiz la convierte en serie y el recorrido se lleva
-        // ademas cuanto cuelga de las series hijas: el mismo fichero acaba con dos filas
-        // y dos dueños, y los contadores de la biblioteca suman de mas.
+        // A folder that is a series on its own contributes no volumes to the one above. Without
+        // this cut, a loose book at the root turns the root into a series and the walk also
+        // takes everything under the child series: the same file ends up with two rows and two
+        // owners, and the library counters add up too much.
         var boundaries = BuildBoundaries(seriesPath, otherSeriesPaths);
 
         // Custom directory traversal that short-circuits unchanged subdirectories via mtime
@@ -213,8 +213,8 @@ public class DirectoryScanner : IDirectoryScanner
         }
         catch (Exception)
         {
-            // Una carpeta sin permiso o borrada a mitad del recorrido se queda sin
-            // indexar; tumbar el escaneo entero por ella seria peor.
+            // A folder without permission or deleted mid-walk stays unindexed; aborting the
+            // whole scan for it would be worse.
         }
     }
 
@@ -253,7 +253,7 @@ public class DirectoryScanner : IDirectoryScanner
         }
         catch (Exception)
         {
-            // Igual que arriba: lo que no se pueda leer se omite y el resto sigue.
+            // Same as above: whatever cannot be read is skipped and the rest continues.
         }
     }
 
@@ -268,8 +268,8 @@ public class DirectoryScanner : IDirectoryScanner
         }
         catch (Exception)
         {
-            // Se devuelve al menos la raiz: una biblioteca ilegible se marca Missing
-            // mas adelante, aqui no se decide nada.
+            // At least the root is returned: an unreadable library is marked Missing later,
+            // nothing is decided here.
         }
 
         return dirsToEvaluate;

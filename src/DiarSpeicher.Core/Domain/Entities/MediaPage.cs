@@ -1,28 +1,26 @@
 namespace DiarSpeicher.Core.Domain.Entities;
 
 /// <summary>
-/// Dimensiones y tamaño de una página concreta de un libro.
+/// Exists because Komga clients do not show a book whose pages lack <c>width</c> and
+/// <c>height</c>: they request the list, see null dimensions and never request any image.
+/// Computing them means opening the archive and reading every page header, so they are stored
+/// rather than recomputed on each request.
 ///
-/// Existe porque los clientes de Komga no muestran un libro cuyas páginas no traen
-/// <c>width</c> y <c>height</c>: piden la lista, ven las dimensiones a nulo y no llegan a
-/// solicitar ninguna imagen. Calcularlas exige abrir el archivo y leer la cabecera de cada
-/// página, así que se guardan en lugar de recalcularlas en cada petición.
-///
-/// No se asume que todas las páginas midan igual: una doble página mide el doble de ancho
-/// que el resto, y una portada suele diferir. Por eso hay una fila por página.
+/// Pages are not assumed to share a size: a double-page spread is twice as wide and a cover
+/// often differs, hence one row per page.
 /// </summary>
 public class MediaPage
 {
     public string MediaId { get; set; } = null!;
     public Media Media { get; set; } = null!;
 
-    /// <summary>Número de página, empezando en 1, como lo expone la API.</summary>
+    /// <summary>1-based, as the API exposes it.</summary>
     public int Number { get; set; }
 
     public string FileName { get; set; } = null!;
     public string MediaType { get; set; } = "image/jpeg";
 
-    /// <summary>Nulo cuando la imagen no se pudo decodificar; el resto de páginas se guarda igual.</summary>
+    /// <summary>Null when the image could not be decoded; the remaining pages are stored anyway.</summary>
     public int? Width { get; set; }
     public int? Height { get; set; }
     public long? SizeBytes { get; set; }

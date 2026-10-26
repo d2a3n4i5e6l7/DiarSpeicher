@@ -109,8 +109,8 @@ public class ThumbnailService : IThumbnailService
     }
 
     /// <summary>
-    /// La portada tal cual venia, cuando Skia no supo leerla. Vale mas guardar algo que el
-    /// cliente quiza sepa mostrar que dejar al tomo sin portada.
+    /// Stores the cover as it came when Skia could not read it: something the client may be
+    /// able to display beats leaving the volume without a cover.
     /// </summary>
     private async Task<string> WriteUnchangedAsync(
         string mediaId,

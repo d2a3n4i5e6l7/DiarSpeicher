@@ -12,7 +12,7 @@ pasa el usuario ya autenticado en cabeceras.
 | [01-arquitectura.md](backend/01-arquitectura.md)                 | Capas, arranque, flujo de una petición, paquetes                   |
 | [02-modelo-de-datos.md](backend/02-modelo-de-datos.md)           | Entidades, relaciones y mapeo con EF Core sobre SQLite             |
 | [03-escaneo-y-medios.md](backend/03-escaneo-y-medios.md)         | Caché de mtimes, procesadores por formato, orden natural, portadas |
-| [04-apis-y-protocolos.md](backend/04-apis-y-protocolos.md)       | OPDS v1.2 y v2, API Komga, API v2 nativa, KOReader, Kobo, GraphQL  |
+| [04-apis-y-protocolos.md](backend/04-apis-y-protocolos.md)       | OPDS v1.2 y v2, API Komga, API v2 nativa, KOReader, Kobo           |
 | [05-autenticacion-actual.md](backend/05-autenticacion-actual.md) | Resolución de identidad desde cabeceras y espejo de usuario        |
 
 El índice propio del backend está en [backend/README.md](backend/README.md).

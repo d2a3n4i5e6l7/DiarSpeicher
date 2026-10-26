@@ -3,8 +3,7 @@ using Microsoft.Extensions.Hosting;
 namespace DiarSpeicher.Infrastructure.Background;
 
 /// <summary>
-/// Vacia la papelera cuando lo borrado cumple su plazo. Corre cada cinco minutos: la
-/// caducidad es de una hora, asi que afinar mas solo gastaria vueltas al disco.
+/// Runs every five minutes: expiry is one hour, so a finer interval would only spin the disk.
 /// </summary>
 public sealed class TrashPurgeService : BackgroundService
 {
@@ -29,7 +28,7 @@ public sealed class TrashPurgeService : BackgroundService
             }
             catch (Exception e)
             {
-                // Vaciar la papelera no puede tumbar el proceso: en la siguiente vuelta se reintenta.
+                // Emptying the trash must not take the process down: the next round retries.
                 _logger.LogError(e, "Fallo el purgado de la papelera");
             }
 

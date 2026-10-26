@@ -54,13 +54,13 @@ public sealed class KoboService : IKoboService
         var offset = ParseSyncTokenOffset(clientSyncToken);
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        parameters.Add("LimitPlusOne", limit + 1);
-        parameters.Add("Offset", offset);
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.LimitPlusOne = limit + 1;
+        parameters.Offset = offset;
 
         _logger.LogInformation("Kobo sync for user {UserId}, offset {Offset}", user.Id, offset);
 
-        var selectSql = $"""
+        const string selectSql = $"""
             SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status", m."Hash",
                    m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt", m."ModifiedAt",
                    m."DeletedAt", m."SeriesId"
@@ -68,12 +68,12 @@ public sealed class KoboService : IKoboService
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE (m."Extension" = 'epub' OR m."Extension" = '.epub') AND {where}
+            WHERE (m."Extension" = 'epub' OR m."Extension" = '.epub') AND {CatalogSqlFilters.MediaVisible}
             ORDER BY m."Id" ASC
             LIMIT @LimitPlusOne OFFSET @Offset;
             """;
 
-        var mediaList = (await conn.QueryAsync<Media>(selectSql, parameters).WithMetadataAsync(conn).WithSeriesAsync(conn)).AsList();
+        var mediaList = (await conn.QueryAsync<Media>(selectSql, parameters).WithMetadataAsync(conn).WithSeriesAsync(conn)).AsRowList();
 
         var hasMore = mediaList.Count > limit;
         if (hasMore)
@@ -107,10 +107,10 @@ public sealed class KoboService : IKoboService
         CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        parameters.Add("Id", bookId);
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.Id = bookId;
 
-        var selectSql = $"""
+        const string selectSql = $"""
             SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status", m."Hash",
                    m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt", m."ModifiedAt",
                    m."DeletedAt", m."SeriesId"
@@ -118,7 +118,7 @@ public sealed class KoboService : IKoboService
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE m."Id" = @Id AND {where}
+            WHERE m."Id" = @Id AND {CatalogSqlFilters.MediaVisible}
             LIMIT 1;
             """;
 
@@ -137,16 +137,16 @@ public sealed class KoboService : IKoboService
         CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        parameters.Add("Id", bookId);
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.Id = bookId;
 
-        var selectSql = $"""
+        const string selectSql = $"""
             SELECT m."Id", m."Path"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE m."Id" = @Id AND {where}
+            WHERE m."Id" = @Id AND {CatalogSqlFilters.MediaVisible}
             LIMIT 1;
             """;
 

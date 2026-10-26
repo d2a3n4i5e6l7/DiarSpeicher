@@ -24,8 +24,8 @@ public static class KoReaderEndpoints
     {
         var group = app.MapGroup("/koreader/{apiKey}");
 
-        // Incluye /users/auth y /users/create: si el permiso no está, el cliente de KOReader
-        // debe enterarse al configurarse y no al primer intento de sincronizar.
+        // Covers /users/auth and /users/create too: without the permission the KOReader client
+        // has to find out while being configured, not on its first sync attempt.
         group.AddEndpointFilter(RequireKoreaderSyncAsync);
 
         group.MapGet("/users/auth", async (

@@ -1,3 +1,4 @@
+
 namespace DiarSpeicher.Infrastructure.Filesystem;
 
 public sealed record FolderHit(string Path, string Name, string Parent, int Depth);
@@ -12,18 +13,14 @@ public interface IFolderIndex
 }
 
 /// <summary>
-/// Indice de nombres de carpeta para buscarlas sin recorrer el disco en cada tecla.
-/// <para>
-/// Vive en su propio fichero SQLite bajo el almacenamiento, no en la base principal: es
-/// una cache reconstruible desde cero, asi que no merece ni una migracion ni entrar en
-/// las copias de seguridad. Borrarla no pierde nada.
-/// </para>
-/// <para>
-/// Solo sirve para buscar. Navegar carpeta a carpeta va en vivo contra el disco, que es
-/// una llamada al sistema y siempre dice la verdad.
-/// </para>
+/// Lives in its own SQLite file under storage, not in the main database: it is a cache that can
+/// be rebuilt from scratch, so it deserves neither a migration nor a place in the backups.
+/// Deleting it loses nothing.
+///
+/// It is only for searching. Browsing folder by folder goes live against the disk, a system call
+/// that always tells the truth.
 /// </summary>
-public sealed class FolderIndex : IFolderIndex, IDisposable
+public sealed partial class FolderIndex : IFolderIndex, IDisposable
 {
     private const int MaxDepth = 12;
 
@@ -77,12 +74,11 @@ public sealed class FolderIndex : IFolderIndex, IDisposable
     }
 
     /// <summary>
-    /// Busca por trozo de nombre. LIKE y no FTS5 porque FTS casa palabras enteras o prefijos:
-    /// escribir "cel" no encontraria "Accel". Aqui se teclea a mitad de palabra.
-    /// <para>
-    /// El nombre se guarda tal cual esta en disco; name_lower es una columna aparte y solo
-    /// existe para comparar sin mayusculas.
-    /// </para>
+    /// LIKE rather than FTS5 because FTS matches whole words or prefixes: typing "cel" would not
+    /// find "Accel", and here people type mid-word.
+    ///
+    /// The name is stored exactly as on disk; name_lower is a separate column that exists only for
+    /// case-insensitive comparison.
     /// </summary>
     public IReadOnlyList<FolderHit> Search(string term, int limit)
     {
@@ -120,12 +116,8 @@ public sealed class FolderIndex : IFolderIndex, IDisposable
     }
 
     /// <summary>
-    /// Arranca el repaso y vuelve enseguida; false si ya habia uno en marcha. El progreso se
-    /// consulta en <see cref="GetStatus"/>.
-    /// <para>
-    /// Desligado de la peticion que lo lanzo: recorrer un disco externo dura minutos y no
-    /// puede morir cuando el navegador cierre la conexion.
-    /// </para>
+    /// Detached from the request that started it: walking an external disk takes minutes and
+    /// must not die when the browser closes the connection.
     /// </summary>
     public bool TryStartRefresh()
     {
@@ -205,10 +197,10 @@ public sealed class FolderIndex : IFolderIndex, IDisposable
                     seen++;
                     var mtime = ReadMTime(directory);
 
-                    // El recorrido hay que hacerlo entero igual: el mtime de una carpeta solo
-                    // cambia cuando se anade o quita algo dentro de ella, no cuando cambia un
-                    // nieto, asi que no se puede podar el subarbol. Lo que ahorra es la
-                    // escritura, que es la parte cara cuando casi nada ha cambiado.
+                    // The walk still has to be complete: a folder's mtime only changes when
+                    // something is added to or removed from it, not when a grandchild changes,
+                    // so the subtree cannot be pruned. What this saves is the write, which is
+                    // the expensive part when almost nothing changed.
                     if (known.TryGetValue(directory, out var previous) && previous == mtime)
                     {
                         touch.Parameters["$path"].Value = directory;
@@ -231,8 +223,8 @@ public sealed class FolderIndex : IFolderIndex, IDisposable
             }
         }
 
-        // Lo que no se ha vuelto a ver en este repaso ya no esta en disco. Comparar por la
-        // marca del repaso evita tener que llevar una lista de rutas en memoria.
+        // Whatever was not seen again in this pass is no longer on disk. Comparing by the pass
+        // marker avoids keeping a list of paths in memory.
         using (var prune = connection.CreateCommand())
         {
             prune.Transaction = transaction;
@@ -244,67 +236,6 @@ public sealed class FolderIndex : IFolderIndex, IDisposable
         transaction.Commit();
         _logger.LogInformation(
             "Indice de carpetas repasado: {Seen} carpetas, {Written} con cambios", seen, written);
-    }
-
-    private static Dictionary<string, long> LoadKnownMTimes(SqliteConnection connection)
-    {
-        var known = new Dictionary<string, long>(StringComparer.Ordinal);
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT path, mtime FROM folders";
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            known[reader.GetString(0)] = reader.GetInt64(1);
-        }
-
-        return known;
-    }
-
-    /// <summary>
-    /// Recorrido iterativo y con tope de profundidad: un enlace simbolico que apunte hacia
-    /// arriba convierte la recursion en un bucle infinito.
-    /// </summary>
-    private static IEnumerable<(string Path, int Depth)> Walk(string root, CancellationToken ct)
-    {
-        var pending = new Stack<(string Path, int Depth)>();
-        pending.Push((root, 0));
-
-        while (pending.Count > 0)
-        {
-            ct.ThrowIfCancellationRequested();
-            var (current, depth) = pending.Pop();
-
-            if (depth > 0) yield return (current, depth);
-            if (depth >= MaxDepth) continue;
-
-            string[] children;
-            try
-            {
-                children = Directory.GetDirectories(current);
-            }
-            catch (Exception e) when (e is UnauthorizedAccessException or IOException)
-            {
-                continue;
-            }
-
-            foreach (var child in children)
-            {
-                if (Path.GetFileName(child).StartsWith('.')) continue;
-                pending.Push((child, depth + 1));
-            }
-        }
-    }
-
-    private static long ReadMTime(string directory)
-    {
-        try
-        {
-            return new DateTimeOffset(Directory.GetLastWriteTimeUtc(directory)).ToUnixTimeSeconds();
-        }
-        catch (Exception e) when (e is UnauthorizedAccessException or IOException)
-        {
-            return 0;
-        }
     }
 
     private static void EnsureSchema(SqliteConnection connection)
@@ -325,38 +256,5 @@ public sealed class FolderIndex : IFolderIndex, IDisposable
             CREATE INDEX IF NOT EXISTS ix_folders_name ON folders (name_lower);
             """;
         command.ExecuteNonQuery();
-    }
-
-    private SqliteConnection Open(bool readOnly)
-    {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
-        {
-            DataSource = _databasePath,
-            Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate,
-            Pooling = false
-        }.ToString());
-
-        connection.Open();
-        return connection;
-    }
-
-    private static string Escape(string value) =>
-        value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
-
-    public void Dispose()
-    {
-        _lifetime.Cancel();
-
-        var finished = _refreshTask?.Wait(TimeSpan.FromSeconds(5), CancellationToken.None) ?? true;
-
-        _lifetime.Dispose();
-
-        if (finished)
-        {
-            _refreshLock.Dispose();
-            return;
-        }
-
-        _logger.LogWarning("El repaso del indice de carpetas seguia corriendo al apagar; su cerrojo se deja sin liberar");
     }
 }

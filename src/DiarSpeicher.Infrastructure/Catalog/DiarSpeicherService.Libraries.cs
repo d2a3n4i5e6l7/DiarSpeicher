@@ -16,28 +16,28 @@ public sealed partial class DiarSpeicherService
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
 
-        var (libWhere, libParams) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
-        var libSql = $"""
+        var libParams = CatalogSqlFilters.ArgsFor(user);
+        const string libSql = $"""
             SELECT l."Id", l."Name", l."Description", l."Path", l."Status", l."Emoji", l."ThumbnailPath", l."ThumbnailMeta",
                    l."CreatedAt", l."UpdatedAt", l."LastScannedAt", l."ConfigId"
             FROM "Libraries" l
             LEFT JOIN "LibraryConfigs" c ON c."Id" = l."ConfigId"
-            WHERE {libWhere}
+            WHERE {CatalogSqlFilters.LibraryVisible}
             ORDER BY l."Name" ASC;
             """;
 
-        var libraries = (await conn.QueryAsync<Library>(libSql, libParams).WithConfigAsync(conn)).AsList();
+        var libraries = (await conn.QueryAsync<Library>(libSql, libParams).WithConfigAsync(conn)).AsRowList();
 
         if (libraries.Count == 0) return [];
 
-        var (seriesWhere, seriesParams) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
-        var seriesCountSql = $"""
+        var seriesParams = CatalogSqlFilters.ArgsFor(user);
+        const string seriesCountSql = $"""
             SELECT s."LibraryId",
                    COUNT(*) AS "SeriesCount",
                    SUM(CASE WHEN s."Status" = 'Missing' THEN 1 ELSE 0 END) AS "MissingSeries"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE s."LibraryId" IS NOT NULL AND {seriesWhere}
+            WHERE s."LibraryId" IS NOT NULL AND {CatalogSqlFilters.SeriesVisible}
             GROUP BY s."LibraryId";
             """;
 
@@ -45,8 +45,8 @@ public sealed partial class DiarSpeicherService
             seriesCountSql, seriesParams
         )).ToDictionary(x => x.LibraryId, StringComparer.Ordinal);
 
-        var (mediaWhere, mediaParams) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        var mediaCountSql = $"""
+        var mediaParams = CatalogSqlFilters.ArgsFor(user);
+        const string mediaCountSql = $"""
             SELECT s."LibraryId",
                    COUNT(m."Id") AS "MediaCount",
                    SUM(CASE WHEN m."Status" = 'Missing' THEN 1 ELSE 0 END) AS "MissingMedia"
@@ -54,7 +54,7 @@ public sealed partial class DiarSpeicherService
             INNER JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE s."LibraryId" IS NOT NULL AND {mediaWhere}
+            WHERE s."LibraryId" IS NOT NULL AND {CatalogSqlFilters.MediaVisible}
             GROUP BY s."LibraryId";
             """;
 
@@ -80,15 +80,15 @@ public sealed partial class DiarSpeicherService
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
 
-        var (libWhere, libParams) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
-        libParams.Add("Id", id);
+        var libParams = CatalogSqlFilters.ArgsFor(user);
+        libParams.Id = id;
 
-        var libSql = $"""
+        const string libSql = $"""
             SELECT l."Id", l."Name", l."Description", l."Path", l."Status", l."Emoji", l."ThumbnailPath", l."ThumbnailMeta",
                    l."CreatedAt", l."UpdatedAt", l."LastScannedAt", l."ConfigId"
             FROM "Libraries" l
             LEFT JOIN "LibraryConfigs" c ON c."Id" = l."ConfigId"
-            WHERE l."Id" = @Id AND {libWhere}
+            WHERE l."Id" = @Id AND {CatalogSqlFilters.LibraryVisible}
             LIMIT 1;
             """;
 
@@ -124,10 +124,10 @@ public sealed partial class DiarSpeicherService
     public async Task<bool> TriggerLibraryScanAsync(AuthUser user, string libraryId, CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
-        parameters.Add("Id", libraryId);
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.Id = libraryId;
 
-        var checkSql = $@"SELECT 1 FROM ""Libraries"" l WHERE l.""Id"" = @Id AND {where} LIMIT 1;";
+        const string checkSql = $@"SELECT 1 FROM ""Libraries"" l WHERE l.""Id"" = @Id AND {CatalogSqlFilters.LibraryVisible} LIMIT 1;";
         var exists = await conn.ExecuteScalarAsync<int?>(checkSql, parameters);
 
         if (exists is null) return false;
@@ -199,14 +199,27 @@ public sealed partial class DiarSpeicherService
 
         await conn.ExecuteAsync(insertLibSql, new
         {
-            library.Id, library.Name, library.Path, library.Description, library.Emoji,
+            library.Id,
+            library.Name,
+            library.Path,
+            library.Description,
+            library.Emoji,
             Status = library.Status.ToString(),
-            library.CreatedAt, library.ConfigId
+            library.CreatedAt,
+            library.ConfigId
         }, tx);
         await tx.CommitAsync(ct);
 
         await _scannerQueue.QueueScanAsync(new ScanRequest(library.Id), ct);
         return ToLibraryDto(library, 0);
+    }
+
+    private static void ApplyLibraryInput(Library library, DiarSpeicherUpdateLibraryInput input)
+    {
+        if (!string.IsNullOrWhiteSpace(input.Name)) library.Name = input.Name.Trim();
+        if (input.Description != null) library.Description = input.Description.Trim();
+        if (input.Emoji != null) library.Emoji = input.Emoji.Trim();
+        if (input.Config != null && library.Config != null) ApplyConfig(library.Config, input.Config);
     }
 
     public async Task<DiarSpeicherLibraryDto?> UpdateLibraryAsync(AuthUser user, string id, DiarSpeicherUpdateLibraryInput input, CancellationToken ct = default)
@@ -216,15 +229,15 @@ public sealed partial class DiarSpeicherService
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
 
-        var (libWhere, libParams) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
-        libParams.Add("Id", id);
+        var libParams = CatalogSqlFilters.ArgsFor(user);
+        libParams.Id = id;
 
-        var libSql = $"""
+        const string libSql = $"""
             SELECT l."Id", l."Name", l."Description", l."Path", l."Status", l."Emoji", l."ThumbnailPath", l."ThumbnailMeta",
                    l."CreatedAt", l."UpdatedAt", l."LastScannedAt", l."ConfigId"
             FROM "Libraries" l
             LEFT JOIN "LibraryConfigs" c ON c."Id" = l."ConfigId"
-            WHERE l."Id" = @Id AND {libWhere}
+            WHERE l."Id" = @Id AND {CatalogSqlFilters.LibraryVisible}
             LIMIT 1;
             """;
 
@@ -233,10 +246,7 @@ public sealed partial class DiarSpeicherService
         var library = rows.FirstOrDefault();
         if (library == null) return null;
 
-        if (!string.IsNullOrWhiteSpace(input.Name)) library.Name = input.Name.Trim();
-        if (input.Description != null) library.Description = input.Description.Trim();
-        if (input.Emoji != null) library.Emoji = input.Emoji.Trim();
-        if (input.Config != null && library.Config != null) ApplyConfig(library.Config, input.Config);
+        ApplyLibraryInput(library, input);
 
         var oldPath = library.Path;
         var newPath = ResolveLibraryMove(library, input.Path);
@@ -364,10 +374,10 @@ public sealed partial class DiarSpeicherService
     public async Task<bool> DeleteLibraryAsync(AuthUser user, string id, bool deleteFiles = false, CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (libWhere, libParams) = CatalogSqlFilters.BuildLibraryVisibilityFilter(user, "l");
-        libParams.Add("Id", id);
+        var libParams = CatalogSqlFilters.ArgsFor(user);
+        libParams.Id = id;
 
-        var selectSql = $@"SELECT ""Id"", ""Path"", ""ConfigId"" FROM ""Libraries"" l WHERE l.""Id"" = @Id AND {libWhere} LIMIT 1;";
+        const string selectSql = $@"SELECT ""Id"", ""Path"", ""ConfigId"" FROM ""Libraries"" l WHERE l.""Id"" = @Id AND {CatalogSqlFilters.LibraryVisible} LIMIT 1;";
         var library = await conn.QueryFirstOrDefaultAsync<Library>(selectSql, libParams);
         if (library == null) return false;
 
@@ -406,7 +416,7 @@ public sealed partial class DiarSpeicherService
 
         var thumbs = (await conn.QueryAsync<string>(
             selectThumbsSql, new { LibraryId = libraryId }
-        )).AsList();
+        )).AsRowList();
 
         foreach (var thumb in thumbs)
         {

@@ -28,16 +28,16 @@ public sealed class KoReaderService : IKoReaderService
     public async Task<KoReaderProgressResponse> GetProgressAsync(AuthUser user, string koreaderHash, CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        parameters.Add("KoreaderHash", koreaderHash);
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.KoreaderHash = koreaderHash;
 
-        var mediaSql = $"""
+        const string mediaSql = $"""
             SELECT m."Id"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE m."KoreaderHash" = @KoreaderHash AND {where}
+            WHERE m."KoreaderHash" = @KoreaderHash AND {CatalogSqlFilters.MediaVisible}
             LIMIT 1;
             """;
 
@@ -85,16 +85,16 @@ public sealed class KoReaderService : IKoReaderService
         }
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        parameters.Add("Document", input.Document);
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.Document = input.Document;
 
-        var mediaSql = $"""
+        const string mediaSql = $"""
             SELECT m."Id"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE m."KoreaderHash" = @Document AND {where}
+            WHERE m."KoreaderHash" = @Document AND {CatalogSqlFilters.MediaVisible}
             LIMIT 1;
             """;
 
@@ -126,6 +126,22 @@ public sealed class KoReaderService : IKoReaderService
         var session = await conn.QueryFirstOrDefaultAsync<ReadingSession>(
             sessionSql, new { UserId = user.Id, MediaId = mediaId });
 
+        await SaveProgressAsync(conn, user, mediaId, session, input);
+
+        return new KoReaderPutProgressResponse
+        {
+            Document = input.Document,
+            Timestamp = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+    }
+
+    private static async Task SaveProgressAsync(
+        System.Data.Common.DbConnection conn,
+        AuthUser user,
+        string mediaId,
+        ReadingSession? session,
+        KoReaderProgressInput input)
+    {
         var now = DateTimeOffset.UtcNow;
         var endPercentage = ToStoredPercentage(input.Percentage);
         var koreaderProgress = input.Progress;
@@ -179,18 +195,12 @@ public sealed class KoReaderService : IKoReaderService
                 Id = session.Id
             });
         }
-
-        return new KoReaderPutProgressResponse
-        {
-            Document = input.Document,
-            Timestamp = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        };
     }
 
     /// <summary>
-    /// En .NET 11 la conversion directa de float a decimal conserva la expansion binaria completa
-    /// (0.225f pasa a 0.2249999940395355224609375). Se guarda la forma corta del float, que es el
-    /// numero que KOReader envio.
+    /// In .NET 11 a direct float to decimal conversion keeps the full binary expansion (0.225f
+    /// becomes 0.2249999940395355224609375). The short form of the float is stored, which is
+    /// the number KOReader sent.
     /// </summary>
     private static decimal ToStoredPercentage(float percentage) =>
         decimal.Parse(percentage.ToString(CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture);

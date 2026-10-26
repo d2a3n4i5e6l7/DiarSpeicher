@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Aplica formato a las dos mitades del repositorio:
+# Formats both halves of the repository:
 #
-#   backend   dotnet format sobre DiarSpeicher.slnx
-#   frontend  eslint --fix sobre frontEnd/
+#   backend   dotnet format on DiarSpeicher.slnx
+#   frontend  eslint --fix on frontEnd/
 #
-# Escribe en los ficheros. Para comprobar sin tocar nada, usa lint.sh.
+# Writes to the files. To check without touching anything, use lint.sh.
 
 set -euo pipefail
 
@@ -18,8 +18,8 @@ log "Backend: dotnet format"
 dotnet format DiarSpeicher.slnx
 
 log "Frontend: eslint --fix"
-# pnpm resuelve el paquete desde el directorio actual, y el package.json vive en
-# frontEnd/, no en la raiz: sin -C falla con ERR_PNPM_NO_PKG_MANIFEST.
+# pnpm resolves the package from the current directory, and package.json lives in frontEnd/, not
+# at the root: without -C it fails with ERR_PNPM_NO_PKG_MANIFEST.
 pnpm -C frontEnd exec eslint . --fix
 
 log "Formato aplicado"

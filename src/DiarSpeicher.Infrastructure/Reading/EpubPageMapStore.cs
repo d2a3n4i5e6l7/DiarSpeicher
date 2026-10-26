@@ -133,8 +133,8 @@ public class EpubPageMapStore : IEpubPageMapStore
         }
         catch
         {
-            // Sin fecha no se puede saber si el total guardado sigue valiendo: default nunca
-            // casa con la comprobacion, asi que el libro se vuelve a medir.
+            // Without a date there is no way to know whether the stored total is still valid:
+            // default never passes the check, so the book is measured again.
             return default;
         }
     }

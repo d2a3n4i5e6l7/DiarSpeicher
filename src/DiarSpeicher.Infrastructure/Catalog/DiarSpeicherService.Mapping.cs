@@ -1,8 +1,5 @@
 namespace DiarSpeicher.Infrastructure.Catalog;
 
-/// <summary>
-/// Traduccion de entidades a los DTO que publica la API.
-/// </summary>
 public sealed partial class DiarSpeicherService
 {
     private static DiarSpeicherLibraryDto ToLibraryDto(Library library, int mediaCount) => new()
@@ -40,7 +37,4 @@ public sealed partial class DiarSpeicherService
 
     private static DiarSpeicherMediaDto ToMediaDto(Media m, ReadingSession? session)
         => CatalogDtoMapper.ToMediaDto(m, session);
-
-    private static DiarSpeicherSeriesDto ToSeriesDto(Series s)
-        => CatalogDtoMapper.ToSeriesDto(s);
 }

@@ -80,9 +80,6 @@ internal static class EpubFontDeobfuscator
         return fuera;
     }
 
-    /// <summary>
-    /// Deshace el enmascarado de fuentes según la especificación IDPF y Adobe.
-    /// </summary>
     public static byte[] Deobfuscate(byte[] datos, string uid, string algoritmo)
     {
         byte[] clave;
@@ -115,7 +112,7 @@ internal static class EpubFontDeobfuscator
     }
 
     /// <summary>
-    /// Implementación autocontenida de SHA-1 según RFC 3174 para la especificación IDPF EPUB.
+    /// Self-contained SHA-1 per RFC 3174, as required by the IDPF EPUB font obfuscation spec.
     /// </summary>
     private static byte[] ComputeIdpfSha1(byte[] data)
     {

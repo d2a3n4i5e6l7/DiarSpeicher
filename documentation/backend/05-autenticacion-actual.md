@@ -60,7 +60,7 @@ y la cabecera `X-Auth-Age`, si viene, gana sobre el valor del espejo.
 verifica credenciales. Comprueba que la identidad esté resuelta y extrae la clave de API de
 la ruta para que los endpoints puedan construir los enlaces del feed.
 
-Protege seis prefijos: `/opds`, `/api/v1`, `/api/v2`, `/koreader`, `/kobo` y `/graphql`.
+Protege cinco prefijos: `/opds`, `/api/v1`, `/api/v2`, `/koreader` y `/kobo`.
 Sin `AuthUser`, responde `401`.
 
 `ExtractApiKey` sigue reconociendo la clave en el segmento de ruta

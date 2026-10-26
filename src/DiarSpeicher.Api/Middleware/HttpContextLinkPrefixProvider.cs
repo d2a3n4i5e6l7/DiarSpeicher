@@ -17,8 +17,8 @@ public class HttpContextLinkPrefixProvider : ILinkPrefixProvider
     }
 
     /// <summary>
-    /// Empty outside a request —a background service generating links, say— which yields
-    /// root-relative links, the same behaviour as before the prefix existed.
+    /// Empty outside a request (a background service generating links, say), which yields root-
+    /// relative links.
     /// </summary>
     public string Prefix
     {

@@ -1,12 +1,12 @@
 #!/bin/sh
 set -e
 
-# Uid y gid con los que acaba corriendo la aplicacion.
+# Uid and gid the application ends up running as.
 #
-# Son configurables porque hay sistemas donde solo existe root -CoreELEC y LibreELEC entre
-# ellos- y ahi los directorios de los discos montados pertenecen a root con permisos 755. Un
-# proceso desescalado a otro uid solo podria leerlos, y crear una carpeta en una biblioteca
-# fallaria con "Access to the path is denied". PUID=0 deja el proceso como root.
+# Configurable because some systems only have root (CoreELEC and LibreELEC among them), and
+# there the directories of mounted disks belong to root with 755 permissions. A process
+# dropped to another uid could only read them, and creating a folder in a library would fail
+# with "Access to the path is denied". PUID=0 keeps the process as root.
 PUID="${PUID:-1000}"
 PGID="${PGID:-1000}"
 

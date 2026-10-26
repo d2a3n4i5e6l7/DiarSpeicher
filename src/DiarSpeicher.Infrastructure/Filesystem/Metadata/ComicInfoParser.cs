@@ -123,8 +123,8 @@ public static class ComicInfoParser
         return null;
     }
 
-    // Los 15 valores de la enumeracion AgeRating de ComicInfo.xml. Es una lista cerrada: lo
-    // que no este aqui se queda sin clasificar, que con RestrictOnUnset es lo que no se ve.
+    // The 15 values of the ComicInfo.xml AgeRating enumeration. It is a closed list: anything
+    // not here stays unrated, which with RestrictOnUnset means hidden.
     private static readonly Dictionary<string, int> AgeRatings = new(StringComparer.OrdinalIgnoreCase)
     {
         ["Early Childhood"] = 0,
@@ -141,8 +141,8 @@ public static class ComicInfoParser
         ["R18+"] = 18,
         ["X18+"] = 18,
 
-        // Fuera de la enumeracion, pero salen en ficheros reales: MPAA y las etiquetas que
-        // usan las editoriales. Van exactas igual; nunca por contenido.
+        // Outside the enumeration but found in real files: MPAA and publisher labels. They also
+        // match exactly, never by content.
         ["All Ages"] = 0,
         ["PG-13"] = 13,
         ["T"] = 13,

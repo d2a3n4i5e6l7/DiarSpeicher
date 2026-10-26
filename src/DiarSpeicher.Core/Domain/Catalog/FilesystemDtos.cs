@@ -2,7 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace DiarSpeicher.Core.Domain.Catalog;
 
-/// <summary>Una de las carpetas declaradas en el compose donde pueden vivir bibliotecas.</summary>
 public sealed class FolderRootDto
 {
     [JsonPropertyName("path")]
@@ -12,14 +11,13 @@ public sealed class FolderRootDto
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
-    /// Declarada en configuracion pero ausente en disco. Se devuelve igual, con esto en
-    /// false, para poder decir "ese disco no esta montado" en vez de callarlo.
+    /// Declared in configuration but absent on disk. It is still returned, with this set to
+    /// false, so the UI can say "that disk is not mounted" instead of hiding it.
     /// </summary>
     [JsonPropertyName("mounted")]
     public bool Mounted { get; set; }
 }
 
-/// <summary>Una subcarpeta dentro del listado.</summary>
 public sealed class FolderEntryDto
 {
     [JsonPropertyName("name")]
@@ -28,13 +26,12 @@ public sealed class FolderEntryDto
     [JsonPropertyName("path")]
     public string Path { get; set; } = string.Empty;
 
-    /// <summary>Si tiene subcarpetas, para saber si merece la pena entrar.</summary>
     [JsonPropertyName("hasChildren")]
     public bool HasChildren { get; set; }
 
     /// <summary>
-    /// Ficheros sueltos dentro. Es la pista de que una carpeta ya es una biblioteca de
-    /// tomos y no un contenedor mas.
+    /// Loose files inside: the hint that a folder already is a library of volumes rather than
+    /// another container.
     /// </summary>
     [JsonPropertyName("fileCount")]
     public int FileCount { get; set; }
@@ -43,13 +40,12 @@ public sealed class FolderEntryDto
     public bool Readable { get; set; } = true;
 }
 
-/// <summary>Contenido de una carpeta.</summary>
 public sealed class FolderListingDto
 {
     [JsonPropertyName("path")]
     public string Path { get; set; } = string.Empty;
 
-    /// <summary>Null cuando subir saldria de las carpetas permitidas.</summary>
+    /// <summary>Null when going up would leave the allowed folders.</summary>
     [JsonPropertyName("parent")]
     public string? Parent { get; set; }
 
@@ -59,12 +55,10 @@ public sealed class FolderListingDto
     [JsonPropertyName("entries")]
     public List<FolderEntryDto> Entries { get; set; } = [];
 
-    /// <summary>Habia mas entradas de las que cabe devolver.</summary>
     [JsonPropertyName("truncated")]
     public bool Truncated { get; set; }
 }
 
-/// <summary>Espacio del sistema de ficheros que respalda una carpeta.</summary>
 public sealed class DiskUsageDto
 {
     [JsonPropertyName("path")]
@@ -76,7 +70,7 @@ public sealed class DiskUsageDto
     [JsonPropertyName("freeBytes")]
     public long FreeBytes { get; set; }
 
-    /// <summary>El montaje no reporta cifras: ocurre en algunos sistemas de ficheros de red.</summary>
+    /// <summary>The mount reports no figures, which happens on some network file systems.</summary>
     [JsonPropertyName("available")]
     public bool Available { get; set; }
 }
@@ -90,7 +84,6 @@ public sealed class CreateFolderInput
     public string Name { get; set; } = string.Empty;
 }
 
-/// <summary>Una serie tal y como la crearia el escaner con la estructura elegida.</summary>
 public sealed class PreviewSeriesDto
 {
     [JsonPropertyName("name")]
@@ -102,7 +95,6 @@ public sealed class PreviewSeriesDto
     [JsonPropertyName("volumeCount")]
     public int VolumeCount { get; set; }
 
-    /// <summary>La carpeta es la raiz de la biblioteca, no una subcarpeta.</summary>
     [JsonPropertyName("isRoot")]
     public bool IsRoot { get; set; }
 }
@@ -122,7 +114,6 @@ public sealed class ScanPreviewDto
     public int TotalVolumes { get; set; }
 }
 
-/// <summary>Lo que se va a destruir, contado antes de tocarlo.</summary>
 public sealed class DeletionPreviewDto
 {
     [JsonPropertyName("path")]
@@ -164,7 +155,6 @@ public sealed class TrashEntryDto
     [JsonPropertyName("deletedAt")]
     public DateTimeOffset DeletedAt { get; set; }
 
-    /// <summary>Segundos que le quedan antes de que se vacie de verdad.</summary>
     [JsonPropertyName("expiresInSeconds")]
     public int ExpiresInSeconds { get; set; }
 }

@@ -1,9 +1,5 @@
 namespace DiarSpeicher.Api.Middleware;
 
-/// <summary>
-/// The contract with the gateway that fronts this backend. Bound from the "Gateway"
-/// configuration section.
-/// </summary>
 public class GatewayOptions
 {
     public const string SectionName = "Gateway";
@@ -42,8 +38,8 @@ public class GatewayOptions
         PublicPaths.Count > 0 ? PublicPaths : DefaultPublicPaths;
 
     /// <summary>
-    /// True when the path is declared public. Expects the path as ASP.NET exposes it in
-    /// <c>Request.Path</c>, which already has the PathBase stripped off.
+    /// Expects the path as ASP.NET exposes it in <c>Request.Path</c>, which already has the
+    /// PathBase stripped off.
     /// </summary>
     public bool IsPublicPath(string path)
     {

@@ -1,6 +1,6 @@
 # 04 · APIs y protocolos
 
-Seis superficies HTTP más GraphQL, todas sobre las mismas tablas. La razón de que haya tantas
+Seis superficies HTTP, todas sobre las mismas tablas. La razón de que haya tantas
 no es indecisión: cada lector de e-books habla el protocolo que habla, y el objetivo del
 proyecto es que funcionen sin adaptadores.
 
@@ -20,7 +20,7 @@ flowchart LR
     C3 --> D["/api/v1 · Komga"]
     C4 --> E["/koreader/{apiKey}"]
     C5 --> F["/kobo/{apiKey}"]
-    C6 --> G["/api/v2 + /graphql"]
+    C6 --> G["/api/v2"]
 
     A --> S["Servicios de Infrastructure"]
     B --> S
@@ -254,44 +254,6 @@ resolvió el middleware con la clave de la ruta.
 Las dos rutas de miniatura existen porque el firmware de Kobo usa una u otra según la versión;
 ambas apuntan al mismo handler.
 
-## GraphQL — `/graphql`
-
-[Queries.cs](../../src/DiarSpeicher.Api/GraphQL/Queries.cs) ·
-[Mutations.cs](../../src/DiarSpeicher.Api/GraphQL/Mutations.cs) ·
-[Subscriptions.cs](../../src/DiarSpeicher.Api/GraphQL/Subscriptions.cs) ·
-[NodeResolvers.cs](../../src/DiarSpeicher.Api/GraphQL/NodeResolvers.cs)
-
-HotChocolate 16.6.4, con `AddFiltering`, `AddSorting` y `AddProjections` sobre los
-`IQueryable` ya filtrados por `ForUser`.
-
-| Tipo         | Miembros                                                                        |
-| ------------ | --------------------------------------------------------------------------------- |
-| Query        | `libraries`, `series`, `media`, `readingSessions` (todos con `UsePaging`), `serverConfig` |
-| Mutation     | `createLibrary`, `editLibrary`, `deleteLibrary`, `scanLibrary`, `updateReadingProgress`, `uploadBooks` |
-| Subscription | `jobProgress(jobId)`                                                            |
-
-### DataLoaders
-
-Cuatro, registrados en `Program.cs`: `MediaBySeriesDataLoader`, `SeriesByLibraryDataLoader`,
-`SeriesByIdDataLoader` y `LibraryByIdDataLoader`. Son la diferencia entre una consulta
-razonable y N+1: **14 series con sus medios anidados se resuelven en 3 consultas SQL**.
-
-Cada DataLoader toma un `DbContext` corto de la factoría, porque los lotes se resuelven en
-paralelo y un contexto compartido no lo soportaría. Es la razón de que `Program.cs` registre
-el contexto dos veces.
-
-### Subscriptions
-
-El escáner publica `ScanProgressEvent` a través de `IScanProgressPublisher`, y
-`GraphQLScanProgressPublisher` los envía al pub/sub en memoria de HotChocolate. El topic es
-`jobProgress:{jobId}` y el `jobId` **es el id de la biblioteca**, de modo que un cliente que
-acaba de lanzar un escaneo ya conoce el identificador al que suscribirse sin esperar respuesta.
-
-Publicar no puede tumbar un escaneo: `PublishAsync` traga la excepción tras registrarla en el
-log. Un cliente que se desconecta no interrumpe la indexación.
-
-`app.UseWebSockets()` está antes de `MapGraphQL()` porque las subscriptions lo necesitan.
-
 ## Endpoints fuera de todo grupo
 
 Declarados directamente en [Program.cs](../../src/DiarSpeicher.Api/Program.cs):
@@ -301,7 +263,7 @@ Declarados directamente en [Program.cs](../../src/DiarSpeicher.Api/Program.cs):
 | `/health` | GET    | Estado, versión y modo de la base  |
 
 `/health` es la única ruta declarada fuera de los prefijos que `OpdsAuthMiddleware`
-protege (`/opds`, `/api/v1`, `/api/v2`, `/koreader`, `/kobo`, `/graphql`), y no devuelve
+protege (`/opds`, `/api/v1`, `/api/v2`, `/koreader`, `/kobo`), y no devuelve
 nada sensible.
 
 Existía además un `POST /api/libraries/{id}/scan` declarado a mano que caía fuera de esos
@@ -349,8 +311,7 @@ El middleware `GatewayAuthMiddleware` (`UseGatewayAuth`) controla el acceso a la
   `DPoP`. Esta restricción aplica únicamente a las rutas de gestión `/auth/*`; el tráfico hacia
   los plugins no evalúa DPoP.
 - **Conexión a DiarSpeicher**: para consumir el catálogo, lectura o escaneo, el frontend o lector
-  invoca las rutas con el prefijo `/diarspeicher/` (por ejemplo, `/diarspeicher/api/v2/...`,
-  `/diarspeicher/graphql`). La credencial se transmite en la cabecera `X-Auth-Key`, o en el
+  invoca las rutas con el prefijo `/diarspeicher/` (por ejemplo, `/diarspeicher/api/v2/...`). La credencial se transmite en la cabecera `X-Auth-Key`, o en el
   segmento de ruta para los protocolos que lo requieren (`/diarspeicher/opds/{apiKey}/v1.2/...`,
   `/diarspeicher/koreader/{apiKey}/...`, `/diarspeicher/kobo/{apiKey}/...`).
 

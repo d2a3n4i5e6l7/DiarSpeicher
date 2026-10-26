@@ -58,7 +58,6 @@ fuentes no genera portada: el procesador no rasteriza.
 - **SharpCompress** para RAR/CBR
 - `System.IO.Compression` para ZIP/CBZ y EPUB
 - **SkiaSharp** para miniaturas, **PdfPig** para PDF; EPUB con `System.Xml.Linq` sobre el `.opf`
-- **HotChocolate** para GraphQL
 - Minimal APIs, sin MVC
 
 Tres proyectos: `Core` (dominio y utilidades sin dependencias de infraestructura),

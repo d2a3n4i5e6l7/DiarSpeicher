@@ -1,12 +1,9 @@
 namespace DiarSpeicher.Infrastructure.Catalog;
 
 /// <summary>
-/// Traduccion de entidades del catalogo a los DTO que publica la API.
-/// <para>
-/// Vive fuera de <see cref="DiarSpeicherService"/> porque el escaner tambien publica estos
-/// mismos DTO por el flujo de progreso: si el mapeo siguiera encerrado en el servicio, el
-/// tomo que llega por SSE y el que devuelve la API acabarian divergiendo.
-/// </para>
+/// Lives outside <see cref="DiarSpeicherService"/> because the scanner publishes these same
+/// DTOs through the progress stream: if the mapping stayed inside the service, the volume
+/// arriving over SSE and the one returned by the API would drift apart.
 /// </summary>
 public static class CatalogDtoMapper
 {

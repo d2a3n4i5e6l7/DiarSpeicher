@@ -1,15 +1,8 @@
 namespace DiarSpeicher.Infrastructure.Filesystem;
 
 /// <summary>
-/// Lista blanca de carpetas donde pueden vivir bibliotecas. Seccion "Libraries".
-/// <para>
-/// Sin ella, el explorador de carpetas deja leer el sistema de ficheros entero del
-/// contenedor a cualquiera con <c>ManageLibrary</c>.
-/// </para>
-/// <para>
-/// Cada disco montado en el compose se declara aqui:
-/// <c>Libraries__Roots__0=/libraries/manga</c>, <c>Libraries__Roots__1=/libraries/comics</c>.
-/// </para>
+/// Without it the folder explorer lets anyone with <c>ManageLibrary</c> read the whole file
+/// system of the container.
 /// </summary>
 public class LibraryRootsOptions
 {
@@ -18,14 +11,14 @@ public class LibraryRootsOptions
     public const string DefaultRoot = "/libraries";
 
     /// <summary>
-    /// Vacia a proposito: el enlace de configuracion <em>anade</em> a la lista en vez de
-    /// reemplazarla, asi que un valor por defecto aqui saldria duplicado.
+    /// Empty on purpose: configuration binding <em>appends</em> to the list instead of
+    /// replacing it, so a default here would come out duplicated.
     /// </summary>
     public List<string> Roots { get; set; } = [];
 
     /// <summary>
-    /// Incluye las raices que no existen en disco, para poder distinguir "no configurada"
-    /// de "configurada pero sin montar".
+    /// Includes roots that do not exist on disk, so "not configured" can be told apart from
+    /// "configured but not mounted".
     /// </summary>
     public IReadOnlyList<string> ResolveRoots()
     {
@@ -39,8 +32,8 @@ public class LibraryRootsOptions
     }
 
     /// <summary>
-    /// Resuelve la ruta antes de comprobar el prefijo: con la cadena original, un
-    /// <c>..</c> se cuela.
+    /// The path is resolved before checking the prefix: with the original string a <c>..</c>
+    /// slips through.
     /// </summary>
     public bool TryResolve(string? candidate, out string resolved)
     {
@@ -67,9 +60,9 @@ public class LibraryRootsOptions
     }
 
     /// <summary>
-    /// Una raiz es el contenedor de las bibliotecas, no una biblioteca. Registrarla como tal
-    /// deja una entrada que despues no se puede retirar del disco, porque borrar la carpeta
-    /// se llevaria por delante todas las demas bibliotecas que cuelgan de ella.
+    /// A root is the container of libraries, not a library. Registering it as one leaves an
+    /// entry that can never be removed from disk, because deleting the folder would take every
+    /// other library under it along.
     /// </summary>
     public bool IsRoot(string? candidate)
     {
@@ -96,8 +89,8 @@ public class LibraryRootsOptions
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim()));
 
     /// <summary>
-    /// El separador final es obligatorio: sin el, "/libraries-privadas" pasaria por estar
-    /// dentro de "/libraries".
+    /// The trailing separator is mandatory: without it "/libraries-private" would pass as being
+    /// inside "/libraries".
     /// </summary>
     private static bool IsInside(string path, string root)
     {

@@ -25,9 +25,8 @@ public static class KoboEndpoints
     {
         var group = app.MapGroup("/kobo/{apiKey}");
 
-        // Filtro de grupo en lugar de una comprobación por ruta: el permiso cubre toda la
-        // superficie de Kobo, y repetirlo en cada lambda deja la puerta abierta en la
-        // siguiente que se añada.
+        // A group filter rather than a per-route check: the permission covers the whole Kobo
+        // surface, and repeating it in each lambda leaves the door open on the next one added.
         group.AddEndpointFilter(RequireKoboSyncAsync);
 
         group.MapGet("/v1/initialization", async (

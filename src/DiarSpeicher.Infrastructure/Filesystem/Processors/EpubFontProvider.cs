@@ -6,13 +6,12 @@ using SkiaSharp;
 
 namespace DiarSpeicher.Infrastructure.Filesystem.Processors;
 
-/// <param name="Regular">Cuerpo de texto.</param>
-/// <param name="Bold">Titulos. Cae en la regular si el libro no trae negrita.</param>
+/// <param name="Bold">Falls back to the regular face when the book has no bold.</param>
 public readonly record struct ReaderFonts(SKTypeface Regular, SKTypeface Bold);
 
 public static class EpubFontProvider
 {
-    /// <summary>Valor de <c>FontFamily</c> que pide usar las fuentes incrustadas en el EPUB.</summary>
+    /// <summary><c>FontFamily</c> value that asks for the fonts embedded in the EPUB.</summary>
     public const string BookEmbedded = "__book__";
 
 
@@ -28,8 +27,8 @@ public static class EpubFontProvider
 
     private const string FallbackFamily = "Inter";
 
-    // Las tipografias se reutilizan entre paginas y NO se liberan: crearlas cuesta y viven
-    // lo que el proceso. Por eso los llamantes no deben envolverlas en using.
+    // Typefaces are reused across pages and NOT disposed: creating them is costly and they live
+    // as long as the process, so callers must not wrap them in using.
     private static readonly ConcurrentDictionary<string, SKTypeface?> Cache = new();
 
     private const int BookFaceLimit = 16;
@@ -41,8 +40,8 @@ public static class EpubFontProvider
     private static string FontsDirectory => Path.Combine(AppContext.BaseDirectory, "Fonts");
 
     /// <summary>
-    /// Tipografias para este perfil. Nunca devuelve null: si no hay nada utilizable acaba en
-    /// la que Skia traiga por defecto, que es lo que pasaba siempre antes de que hubiera fuentes.
+    /// Never returns null: when nothing usable is found it falls back to Skia's default
+    /// typeface.
     /// </summary>
     public static ReaderFonts Resolve(EpubDeviceProfile profile, ZipArchive? archive)
     {
@@ -70,8 +69,6 @@ public static class EpubFontProvider
             return File.Exists(ruta) ? SKTypeface.FromFile(ruta) : null;
         });
     }
-
-    // ---------------------------------------------------------------- libro
 
     private static ReaderFonts? FromArchive(ZipArchive archive)
     {
@@ -102,7 +99,7 @@ public static class EpubFontProvider
             .FirstOrDefault();
 
         if (elegida.Path == null) return null;
-        // Sin negrita propia no se sustituye por la regular: eso lo decide el llamante.
+        // A missing bold is not replaced by the regular face here: the caller decides that.
         if (bold && Math.Abs(elegida.Weight - objetivo) > 200) return null;
 
         var bytes = LoadFaceBytes(archive, elegida.Path, uid, cifrados);

@@ -4,13 +4,9 @@ using Microsoft.Extensions.Hosting;
 namespace DiarSpeicher.Infrastructure.Background;
 
 /// <summary>
-/// Copies the database to disk every <see cref="BackupOptions.IntervalHours"/> hours, keeping
-/// the two most recent copies in fixed slots.
-/// <para>
 /// The copy goes through SQLite's online backup API rather than a file copy: the database runs
 /// in WAL mode, where committed data lives in the -wal file until a checkpoint, so copying the
 /// main file alone would produce an almost empty backup.
-/// </para>
 /// </summary>
 public class DatabaseBackupService : BackgroundService
 {
@@ -152,7 +148,6 @@ public class DatabaseBackupService : BackgroundService
             ?? slots.MinBy(File.GetLastWriteTimeUtc)!;
     }
 
-    /// <summary>Age of the most recent backup, or null when no backup exists yet.</summary>
     private static TimeSpan? TimeSinceNewestBackup(string directory)
     {
         var newest = SlotFileNames

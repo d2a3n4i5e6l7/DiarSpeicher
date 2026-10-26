@@ -28,46 +28,46 @@ public record ScanProgressEvent
     public string? CurrentSeries { get; init; }
 
     /// <summary>
-    /// Grano de tomo dentro de la serie en curso. Con solo el grano de serie, una biblioteca
-    /// de una sola carpeta con treinta tomos se pasa el escaneo entero diciendo "0 de 1", y
-    /// el cliente no tiene con que dibujar por donde va.
+    /// Volume-level progress within the current series. With series granularity alone, a
+    /// single-folder library with thirty volumes spends the whole scan at "0 of 1" and the
+    /// client has nothing to draw progress with.
     /// </summary>
     public int CompletedMedia { get; init; }
     public int TotalMedia { get; init; }
     public string? CurrentMedia { get; init; }
 
     /// <summary>
-    /// Rutas de los tomos que la serie en curso va a crear, en orden de proceso. Va la ruta y no
-    /// el nombre porque el nombre se repite: dos carpetas distintas tienen cada una su
-    /// "Volumen 1", y con el nombre como clave el cliente los tomaria por el mismo tomo.
+    /// Paths of the volumes the current series is about to create, in processing order. The
+    /// path and not the name, because names repeat: two different folders each have their own
+    /// "Volume 1", and keyed by name the client would take them for the same volume.
     /// </summary>
     public IReadOnlyList<string> PendingMedia { get; init; } = [];
 
     /// <summary>
-    /// Nombre de fichero del tomo que se esta leyendo, de la misma forma que los de
-    /// <see cref="PendingMedia"/>. <see cref="CurrentMedia"/> no sirve para casarlos: cuando el
-    /// tomo trae metadatos, ese lleva el titulo y no el nombre del archivo.
+    /// File name of the volume being read, in the same form as <see cref="PendingMedia"/>. <see
+    /// cref="CurrentMedia"/> cannot be used to match them: when the volume carries metadata it
+    /// holds the title, not the file name.
     /// </summary>
     public string? CurrentFile { get; init; }
 
     /// <summary>
-    /// Ficheros que el escaner esta leyendo ahora mismo, por nombre, como los de
-    /// <see cref="PendingMedia"/>. Se anuncian antes del analisis —que es la parte lenta— para
-    /// que el hueco se encienda mientras se lee y no cuando ya ha terminado.
+    /// Files the scanner is reading right now, by name, like <see cref="PendingMedia"/>. They
+    /// are announced before the analysis, which is the slow part, so the slot lights up while
+    /// reading rather than once it has finished.
     /// </summary>
     public IReadOnlyList<string> ReadingFiles { get; init; } = [];
 
     /// <summary>
-    /// Tomos que acaban de entrar en el catalogo, ya mapeados. Van completos para que el
-    /// cliente pinte la tarjeta definitiva —portada, paginas y tamaño— en cuanto llega el
-    /// evento, sin volver a pedir el catalogo entero cada vez que termina una serie.
+    /// Volumes just added to the catalog, already mapped. They are sent in full so the client
+    /// draws the final card (cover, pages and size) as soon as the event arrives, without
+    /// refetching the whole catalog every time a series finishes.
     /// </summary>
     public IReadOnlyList<DiarSpeicherMediaDto> CreatedMedia { get; init; } = [];
 
-    /// <summary>Series que acaban de entrar en el catalogo, por el mismo motivo.</summary>
+    /// <summary>Series just added to the catalog, sent in full for the same reason.</summary>
     public IReadOnlyList<DiarSpeicherSeriesDto> CreatedSeries { get; init; } = [];
 
-    /// <summary>Identifica la serie sin depender del nombre, que no es unico.</summary>
+    /// <summary>Identifies the series without relying on the name, which is not unique.</summary>
     public string? CurrentSeriesId { get; init; }
 
     public string? Message { get; init; }

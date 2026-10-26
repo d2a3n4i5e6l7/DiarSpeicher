@@ -10,9 +10,6 @@ using DiarSpeicher.Infrastructure.Data.Extensions;
 
 namespace DiarSpeicher.Infrastructure.Catalog;
 
-/// <summary>
-/// Lectura del interior de un EPUB para el lector: indice de contenidos y recursos sueltos.
-/// </summary>
 public sealed partial class DiarSpeicherService
 {
     private static async Task<List<DiarSpeicherEpubTocItem>> ReadNcxTocAsync(ZipArchive archive, CancellationToken ct)
@@ -22,7 +19,7 @@ public sealed partial class DiarSpeicherService
         var ncxEntry = archive.Entries.FirstOrDefault(e => e.FullName.EndsWith(".ncx", StringComparison.OrdinalIgnoreCase));
         if (ncxEntry == null) return tocItems;
 
-        using var stream = ncxEntry.Open();
+        await using var stream = await ncxEntry.OpenAsync(ct);
         var doc = await XDocument.LoadAsync(stream, LoadOptions.None, ct);
 
         foreach (var point in doc.Descendants().Where(e => e.Name.LocalName == "navPoint"))
@@ -52,15 +49,15 @@ public sealed partial class DiarSpeicherService
     public async Task<DiarSpeicherEpubTocDto?> GetEpubTocAsync(AuthUser user, string mediaId, CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "s", "sm");
-        parameters.Add("MediaId", mediaId);
-        var sql = $"""
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.MediaId = mediaId;
+        const string sql = $"""
             SELECT m."Id", m."Name", m."Path", m."Extension"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE m."Id" = @MediaId AND {where}
+            WHERE m."Id" = @MediaId AND {CatalogSqlFilters.MediaVisible}
             LIMIT 1;
             """;
         var rows = await conn.QueryAsync<Media>(sql, parameters).WithMetadataAsync(conn);
@@ -90,15 +87,15 @@ public sealed partial class DiarSpeicherService
     public async Task<(byte[] Data, string ContentType)?> GetEpubResourceAsync(AuthUser user, string mediaId, string resourcePath, CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "s", "sm");
-        parameters.Add("MediaId", mediaId);
-        var sql = $"""
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.MediaId = mediaId;
+        const string sql = $"""
             SELECT m."Id", m."Path"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE m."Id" = @MediaId AND {where}
+            WHERE m."Id" = @MediaId AND {CatalogSqlFilters.MediaVisible}
             LIMIT 1;
             """;
         var media = await conn.QueryFirstOrDefaultAsync<Media>(sql, parameters);
@@ -114,7 +111,7 @@ public sealed partial class DiarSpeicherService
 
         if (entry == null) return null;
 
-        using var stream = entry.Open();
+        await using var stream = await entry.OpenAsync(ct);
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms, ct);
 

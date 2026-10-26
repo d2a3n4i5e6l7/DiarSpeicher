@@ -32,30 +32,29 @@ public sealed partial class DiarSpeicherService
         page = Math.Max(0, page);
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
+        var parameters = CatalogSqlFilters.ArgsFor(user);
 
         if (!string.IsNullOrWhiteSpace(seriesId))
         {
-            where += @" AND m.""SeriesId"" = @SeriesId";
-            parameters.Add("SeriesId", seriesId);
+            parameters.SeriesId = seriesId;
         }
 
-        var countSql = $"""
+        const string countSql = $"""
             SELECT COUNT(*)
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE {where};
+            WHERE {CatalogSqlFilters.MediaVisible} AND {CatalogSqlFilters.InSeries};
             """;
 
         var total = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
-        var orderBy = newestFirst ? @"m.""Id"" DESC" : @"m.""SortName"" ASC, m.""Name"" ASC";
-        parameters.Add("PageSize", pageSize);
-        parameters.Add("Offset", page * pageSize);
+        parameters.NewestFirst = newestFirst ? 1 : 0;
+        parameters.PageSize = pageSize;
+        parameters.Offset = page * pageSize;
 
-        var selectSql = $"""
+        const string selectSql = $"""
             SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status", m."Hash",
                    m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt", m."ModifiedAt",
                    m."DeletedAt", m."SeriesId"
@@ -63,14 +62,14 @@ public sealed partial class DiarSpeicherService
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE {where}
-            ORDER BY {orderBy}
+            WHERE {CatalogSqlFilters.MediaVisible} AND {CatalogSqlFilters.InSeries}
+            ORDER BY CASE WHEN @NewestFirst = 1 THEN m."Id" END DESC, m."SortName" ASC, m."Name" ASC
             LIMIT @PageSize OFFSET @Offset;
             """;
 
         var rows = await conn.QueryAsync<Media>(selectSql, parameters).WithMetadataAsync(conn);
 
-        var mediaList = rows.AsList();
+        var mediaList = rows.AsRowList();
         var mediaIds = mediaList.Select(m => m.Id).ToList();
         var sessionMap = await conn.GetLatestSessionsPerMediaAsync(user.Id, mediaIds, ct);
 
@@ -87,10 +86,10 @@ public sealed partial class DiarSpeicherService
     public async Task<DiarSpeicherMediaDto?> GetMediaByIdAsync(AuthUser user, string id, CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        parameters.Add("Id", id);
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.Id = id;
 
-        var sql = $"""
+        const string sql = $"""
             SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status", m."Hash",
                    m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt", m."ModifiedAt",
                    m."DeletedAt", m."SeriesId"
@@ -98,7 +97,7 @@ public sealed partial class DiarSpeicherService
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE m."Id" = @Id AND {where}
+            WHERE m."Id" = @Id AND {CatalogSqlFilters.MediaVisible}
             LIMIT 1;
             """;
 
@@ -131,10 +130,10 @@ public sealed partial class DiarSpeicherService
         var mediaIds = sessions.Select(s => s.MediaId).Distinct().ToList();
         if (mediaIds.Count == 0) return [];
 
-        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        parameters.Add("MediaIds", mediaIds);
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.MediaIds = SqlKeys.ToJson(mediaIds);
 
-        var sql = $"""
+        const string sql = $"""
             SELECT m."Id", m."Name", m."SortName", m."Size", m."Extension", m."Pages", m."Path", m."Status", m."Hash",
                    m."KoreaderHash", m."ThumbnailPath", m."ThumbnailMeta", m."CreatedAt", m."UpdatedAt", m."ModifiedAt",
                    m."DeletedAt", m."SeriesId"
@@ -142,7 +141,7 @@ public sealed partial class DiarSpeicherService
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE m."Id" IN @MediaIds AND {where};
+            WHERE m."Id" IN (SELECT value FROM json_each(@MediaIds)) AND {CatalogSqlFilters.MediaVisible};
             """;
 
         var rows = await conn.QueryAsync<Media>(sql, parameters).WithMetadataAsync(conn);
@@ -165,16 +164,16 @@ public sealed partial class DiarSpeicherService
     private async Task<Media?> FetchMediaForUserAsync(AuthUser user, string mediaId, CancellationToken ct)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        parameters.Add("Id", mediaId);
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.Id = mediaId;
 
-        var sql = $"""
+        const string sql = $"""
             SELECT m."Id", m."Name", m."Path", m."Extension", m."ThumbnailPath"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE m."Id" = @Id AND {where}
+            WHERE m."Id" = @Id AND {CatalogSqlFilters.MediaVisible}
             LIMIT 1;
             """;
 

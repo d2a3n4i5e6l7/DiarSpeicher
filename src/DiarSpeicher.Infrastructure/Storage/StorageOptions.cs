@@ -1,17 +1,9 @@
 namespace DiarSpeicher.Infrastructure.Storage;
 
-/// <summary>
-/// Filesystem locations for data DiarSpeicher generates (as opposed to the user's libraries).
-/// Bound from the "Storage" configuration section.
-/// </summary>
 public class StorageOptions
 {
     public const string SectionName = "Storage";
 
-    /// <summary>
-    /// Root for all generated data. Defaults to "storage" under the process working
-    /// directory, which is where thumbnails already lived before this was configurable.
-    /// </summary>
     public string RootPath { get; set; } = Path.Combine(Directory.GetCurrentDirectory(), "storage");
 
     /// <summary>Overrides the thumbnail directory. Defaults to "&lt;RootPath&gt;/thumbnails".</summary>
@@ -84,9 +76,6 @@ public class ThumbnailOptions
     public bool PreferJpeg { get; set; }
 }
 
-/// <summary>
-/// Filesystem watching, so copying a file into a library indexes it without a manual scan.
-/// </summary>
 public class WatcherOptions
 {
     public bool Enabled { get; set; } = true;

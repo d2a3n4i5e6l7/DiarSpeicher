@@ -12,13 +12,10 @@ public interface IMangaBakaCatalog
 }
 
 /// <summary>
-/// Consulta el volcado de MangaBaka. Solo lectura: el fichero lo produce la ingesta y aquí
-/// nunca se escribe.
-/// <para>
-/// El volcado original no trae ni un índice, así que buscar por título sería un escaneo
-/// secuencial de 3,5 GB. La ingesta construye una tabla FTS5 (<c>series_fts</c>) y esta
-/// clase busca contra ella; si no existiera, la búsqueda cae a LIKE y se nota.
-/// </para>
+/// Read only: the ingest produces the file and nothing is written here. The original dump has
+/// no index, so searching by title would be a sequential scan of 3.5 GB. The ingest builds an
+/// FTS5 table (<c>series_fts</c>) and this class searches it; without it the search falls back
+/// to LIKE, noticeably slower.
 /// </summary>
 public class MangaBakaCatalog : IMangaBakaCatalog
 {
@@ -76,8 +73,8 @@ public class MangaBakaCatalog : IMangaBakaCatalog
     }
 
     /// <summary>
-    /// El volcado no cambia mientras no se vuelva a ingerir, asi que el recuento se guarda.
-    /// La marca es tamaño y fecha del fichero: si entra un volcado nuevo, deja de valer.
+    /// The dump does not change until it is ingested again, so the count is cached. The stamp
+    /// is file size and date: a new dump invalidates it.
     /// </summary>
     private (string Stamp, long Total)? _countCache;
 
@@ -125,8 +122,8 @@ public class MangaBakaCatalog : IMangaBakaCatalog
         }
         else
         {
-            // Sin índice esto es lento a propósito: el camino bueno es el FTS5 y conviene
-            // que se note que la ingesta no lo construyó.
+            // Slow without an index on purpose: the good path is FTS5, and it should be
+            // noticeable that the ingest did not build it.
             _logger.LogWarning("MangaBaka dump has no series_fts index; falling back to a scan");
             command.CommandText = """
                 SELECT id, title, native_title, romanized_title, type, year,
@@ -210,9 +207,8 @@ public class MangaBakaCatalog : IMangaBakaCatalog
     };
 
     /// <summary>
-    /// La sinopsis del volcado puede ocupar paginas. En una lista de candidatos solo hace
-    /// falta lo justo para reconocer la obra, y mandarla entera por cada uno de los doce
-    /// resultados es ancho de banda tirado.
+    /// The dump synopsis can span pages. A candidate list only needs enough to recognize the
+    /// work, and sending it whole for each of the twelve results is wasted bandwidth.
     /// </summary>
     private static string? Shorten(string? text)
     {
@@ -234,9 +230,8 @@ public class MangaBakaCatalog : IMangaBakaCatalog
     }
 
     /// <summary>
-    /// Convierte lo que escribe una persona en una expresión MATCH. Cada palabra se cita
-    /// para que los signos del nombre de una carpeta —comillas, guiones, corchetes— no se
-    /// lean como sintaxis de FTS5 y revienten la consulta.
+    /// Every word is quoted so the punctuation of a folder name (quotes, dashes, brackets) is
+    /// not read as FTS5 syntax and does not break the query.
     /// </summary>
     private static string ToMatchExpression(string query)
     {

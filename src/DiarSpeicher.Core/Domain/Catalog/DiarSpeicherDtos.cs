@@ -127,16 +127,16 @@ public sealed class DiarSpeicherSeriesDto
     public string? Description { get; set; }
 
     /// <summary>
-    /// Marca del ultimo cambio de portada. El cliente la cuelga de la URL de la miniatura
-    /// para que el navegador no siga sirviendo la anterior desde su cache.
+    /// The client appends it to the thumbnail URL so the browser stops serving the previous
+    /// cover from its cache.
     /// </summary>
     [JsonPropertyName("coverUpdatedAt")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CoverUpdatedAt { get; set; }
 
     /// <summary>
-    /// Ficha externa, si la serie esta emparejada. Ausente mientras nadie la haya
-    /// emparejado, que es como el frontend distingue una serie sin identificar.
+    /// Absent until someone matches the series, which is how the frontend tells an unidentified
+    /// series apart.
     /// </summary>
     [JsonPropertyName("metadata")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -144,8 +144,7 @@ public sealed class DiarSpeicherSeriesDto
 }
 
 /// <summary>
-/// Lo que aporta el catalogo externo sobre una serie. <c>source</c> dice de donde salio,
-/// para que la interfaz pueda marcarlo y ofrecer revertirlo.
+/// <c>source</c> tells where it came from, so the UI can flag it and offer to revert it.
 /// </summary>
 public sealed class DiarSpeicherSeriesMetadataDto
 {
@@ -153,7 +152,6 @@ public sealed class DiarSpeicherSeriesMetadataDto
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Source { get; set; }
 
-    /// <summary>Id en el catalogo externo, para reabrir la ficha de origen.</summary>
     [JsonPropertyName("externalId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? ExternalId { get; set; }
@@ -194,17 +192,14 @@ public sealed class DiarSpeicherSeriesMetadataDto
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Link { get; set; }
 
-    /// <summary>Ultimo volumen publicado: con el se dice "3 de 12".</summary>
     [JsonPropertyName("finalVolume")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? FinalVolume { get; set; }
 
-    /// <summary>Manga, novela, manhwa... tal como lo clasifica el catalogo externo.</summary>
     [JsonPropertyName("type")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Type { get; set; }
 
-    /// <summary>Capitulos publicados en total.</summary>
     [JsonPropertyName("totalChapters")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? TotalChapters { get; set; }
@@ -215,11 +210,9 @@ public sealed class DiarSpeicherLibraryDto
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
-    /// <summary>Series del indice cuya carpeta ya no esta en el disco.</summary>
     [JsonPropertyName("missingSeries")]
     public int MissingSeries { get; set; }
 
-    /// <summary>Tomos del indice cuyo fichero ya no esta en el disco.</summary>
     [JsonPropertyName("missingVolumes")]
     public int MissingVolumes { get; set; }
 
@@ -380,8 +373,8 @@ public sealed class DiarSpeicherCreateLibraryInput
 }
 
 /// <summary>
-/// Cuerpo de PUT /api/v2/libraries/{id}. Un campo nulo significa "no tocar", de modo que el
-/// cliente puede enviar solo lo que cambia sin arrastrar el resto del recurso.
+/// A null field means "leave unchanged", so the client can send only what changes without the
+/// rest of the resource.
 /// </summary>
 public sealed class DiarSpeicherUpdateLibraryInput
 {
@@ -389,10 +382,10 @@ public sealed class DiarSpeicherUpdateLibraryInput
     public string? Name { get; set; }
 
     /// <summary>
-    /// Mueve la biblioteca a otra carpeta. No copia ni mueve ficheros: reapunta el registro
-    /// a donde ya estan. Las rutas absolutas guardadas en Series y Media se reescriben en la
-    /// misma transaccion, porque el escaner empareja por ruta y sin eso cada serie pasaria a
-    /// "Missing" y el progreso de lectura se quedaria colgando de filas duplicadas.
+    /// Does not copy or move files: it repoints the record to where they already are. The
+    /// absolute paths stored in Series and Media are rewritten in the same transaction, because
+    /// the scanner matches by path; without that every series would turn "Missing" and reading
+    /// progress would hang off duplicated rows.
     /// </summary>
     [JsonPropertyName("path")]
     public string? Path { get; set; }
@@ -408,13 +401,10 @@ public sealed class DiarSpeicherUpdateLibraryInput
 }
 
 /// <summary>
-/// Cuerpo de PUT /api/v2/series/{id}. Un campo nulo significa "no tocar".
-/// <para>
-/// El nombre de una serie sale del nombre de su carpeta, y ahi acaban cosas como
-/// "Accel World Tomos [01-08][Completo]" o, si la serie cuelga de la raiz de la
-/// biblioteca, el nombre de la propia biblioteca. El escaner solo lo escribe al crear la
-/// serie, nunca despues, asi que un renombrado a mano sobrevive a los rescaneos.
-/// </para>
+/// A null field means "leave unchanged". A series name comes from its folder name, which yields
+/// things like "Accel World Tomos [01-08][Completo]" or, when the series hangs off the library
+/// root, the library name itself. The scanner only writes it when creating the series, never
+/// afterwards, so a manual rename survives rescans.
 /// </summary>
 public sealed class DiarSpeicherUpdateSeriesInput
 {
@@ -425,7 +415,6 @@ public sealed class DiarSpeicherUpdateSeriesInput
     public string? Description { get; set; }
 }
 
-/// <summary>Cuerpo de PUT /api/v2/series/{id}/thumbnail: el tomo cuya portada se adopta.</summary>
 public sealed class DiarSpeicherSeriesThumbnailInput
 {
     [JsonPropertyName("mediaId")]
@@ -486,7 +475,6 @@ public sealed class DiarSpeicherUploadFileInput
     public Stream Content { get; set; } = Stream.Null;
 }
 
-/// <summary>Estado de un escaneo, tal y como viaja por SSE y por el sondeo de respaldo.</summary>
 public sealed class DiarSpeicherScanStatusDto
 {
     [JsonPropertyName("libraryId")]
@@ -504,30 +492,24 @@ public sealed class DiarSpeicherScanStatusDto
     [JsonPropertyName("currentSeries")]
     public string? CurrentSeries { get; set; }
 
-    /// <summary>Avance dentro de la serie en curso, para dibujar un hueco por tomo.</summary>
     [JsonPropertyName("completedMedia")]
     public int CompletedMedia { get; set; }
 
     [JsonPropertyName("totalMedia")]
     public int TotalMedia { get; set; }
 
-    /// <summary>Nombres de los tomos que la serie en curso va a crear, en orden de proceso.</summary>
     [JsonPropertyName("pendingMedia")]
     public IReadOnlyList<string> PendingMedia { get; set; } = [];
 
-    /// <summary>Nombre de fichero del tomo en curso, comparable con <see cref="PendingMedia"/>.</summary>
     [JsonPropertyName("currentFile")]
     public string? CurrentFile { get; set; }
 
-    /// <summary>Ficheros que se estan leyendo ahora mismo, por nombre.</summary>
     [JsonPropertyName("readingFiles")]
     public IReadOnlyList<string> ReadingFiles { get; set; } = [];
 
-    /// <summary>Tomos que acaban de entrar en el catalogo, listos para pintar su tarjeta.</summary>
     [JsonPropertyName("createdMedia")]
     public IReadOnlyList<DiarSpeicherMediaDto> CreatedMedia { get; set; } = [];
 
-    /// <summary>Series que acaban de entrar en el catalogo.</summary>
     [JsonPropertyName("createdSeries")]
     public IReadOnlyList<DiarSpeicherSeriesDto> CreatedSeries { get; set; } = [];
 
@@ -546,19 +528,17 @@ public sealed class DiarSpeicherScanStatusDto
     [JsonPropertyName("elapsedSeconds")]
     public int ElapsedSeconds { get; set; }
 
-    /// <summary>Null mientras no haya una serie terminada: sin muestras no hay estimacion.</summary>
+    /// <summary>Null until a series has finished: without samples there is no estimate.</summary>
     [JsonPropertyName("etaSeconds")]
     public int? EtaSeconds { get; set; }
 
     [JsonPropertyName("finished")]
     public bool Finished { get; set; }
 
-    /// <summary>Esperando turno: hay otro escaneo delante en la cola.</summary>
     [JsonPropertyName("queued")]
     public bool Queued { get; set; }
 }
 
-/// <summary>Una serie del indice cuya carpeta ya no esta en el disco.</summary>
 public sealed class DiarSpeicherMissingSeriesDto
 {
     [JsonPropertyName("id")]
@@ -573,7 +553,6 @@ public sealed class DiarSpeicherMissingSeriesDto
     [JsonPropertyName("volumeCount")]
     public int VolumeCount { get; set; }
 
-    /// <summary>Sesiones de lectura que se perderian al purgarla.</summary>
     [JsonPropertyName("readingSessions")]
     public int ReadingSessions { get; set; }
 }
@@ -583,7 +562,6 @@ public sealed class DiarSpeicherMissingReportDto
     [JsonPropertyName("series")]
     public List<DiarSpeicherMissingSeriesDto> Series { get; set; } = [];
 
-    /// <summary>Tomos perdidos cuya serie si sigue en disco.</summary>
     [JsonPropertyName("orphanVolumes")]
     public int OrphanVolumes { get; set; }
 

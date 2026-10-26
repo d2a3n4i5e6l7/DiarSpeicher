@@ -52,7 +52,7 @@ public static class ArchiveEntryReader
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Una pagina ilegible se guarda sin dimensiones y el resto sigue.
+                // An unreadable page is stored without dimensions and the rest continues.
             }
 
             dimensions.Add(new MeasuredPage

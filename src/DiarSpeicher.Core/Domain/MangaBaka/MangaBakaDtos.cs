@@ -2,10 +2,8 @@ using System.Text.Json.Serialization;
 
 namespace DiarSpeicher.Core.Domain.MangaBaka;
 
-/// <summary>Estado de la ingesta del volcado, tal como lo ve la interfaz.</summary>
 public enum MangaBakaState
 {
-    /// <summary>No hay volcado en disco.</summary>
     Absent,
     Downloading,
     Decompressing,
@@ -19,7 +17,7 @@ public sealed class MangaBakaStatusDto
     [JsonPropertyName("state")]
     public string State { get; set; } = nameof(MangaBakaState.Absent);
 
-    /// <summary>0-100 dentro de la fase actual. Nulo cuando el tamaño no se conoce.</summary>
+    /// <summary>0-100 within the current phase. Null when the size is unknown.</summary>
     [JsonPropertyName("percent")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? Percent { get; set; }
@@ -42,10 +40,6 @@ public sealed class MangaBakaStatusDto
     public bool Busy { get; set; }
 }
 
-/// <summary>
-/// Un candidato de emparejado. Lleva lo justo para que una persona decida entre varios
-/// homónimos: portada, año, tipo y estado.
-/// </summary>
 public class MangaBakaCandidateDto
 {
     [JsonPropertyName("id")]
@@ -95,7 +89,6 @@ public class MangaBakaCandidateDto
     public string? Genres { get; set; }
 }
 
-/// <summary>La ficha completa de una serie del volcado.</summary>
 public sealed class MangaBakaSeriesDto : MangaBakaCandidateDto
 {
     [JsonPropertyName("artists")]
@@ -110,7 +103,6 @@ public sealed class MangaBakaSeriesDto : MangaBakaCandidateDto
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? TotalChapters { get; set; }
 
-    /// <summary>Último volumen publicado. Es lo que permite decir "3 de 5".</summary>
     [JsonPropertyName("finalVolume")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? FinalVolume { get; set; }

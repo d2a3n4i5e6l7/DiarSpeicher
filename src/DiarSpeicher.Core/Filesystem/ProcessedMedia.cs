@@ -33,10 +33,7 @@ public record ExtractedMetadata
     public int? FrontCoverIndex { get; set; }
 }
 
-/// <summary>
-/// Dimensiones de una pagina obtenidas durante el analisis del archivo.
-/// Width/Height quedan a nulo cuando la cabecera de la imagen no se pudo decodificar.
-/// </summary>
+/// <summary>Width/Height stay null when the image header could not be decoded.</summary>
 public record MeasuredPage
 {
     public int Number { get; init; }
@@ -62,8 +59,8 @@ public record ProcessedBook
     public ExtractedPage? Cover { get; init; }
 
     /// <summary>
-    /// Dimensiones por pagina, pobladas solo cuando el analisis se pidio con measurePages.
-    /// Vacia cuando el formato no permite medir sin descomprimir el libro entero.
+    /// Populated only when the analysis was requested with measurePages. Empty when the format
+    /// cannot be measured without decompressing the whole book.
     /// </summary>
     public List<MeasuredPage> PageDimensions { get; init; } = [];
 }

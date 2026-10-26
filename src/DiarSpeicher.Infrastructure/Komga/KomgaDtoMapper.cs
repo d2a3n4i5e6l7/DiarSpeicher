@@ -13,8 +13,8 @@ internal static class KomgaDtoMapper
 
     internal static KomgaSeriesDto ToSeriesDto(Series s, int? bookCountOverride = null)
     {
-        var title = s.Metadata?.Title ?? s.Name;
         var booksCount = bookCountOverride ?? s.Media.Count(m => m.DeletedAt == null);
+        var lastModified = (s.UpdatedAt ?? s.CreatedAt).ToString("O");
 
         return new KomgaSeriesDto
         {
@@ -23,18 +23,21 @@ internal static class KomgaDtoMapper
             Name = s.Name,
             Url = s.Path,
             Created = s.CreatedAt.ToString("O"),
-            LastModified = (s.UpdatedAt ?? s.CreatedAt).ToString("O"),
-            FileLastModified = (s.UpdatedAt ?? s.CreatedAt).ToString("O"),
+            LastModified = lastModified,
+            FileLastModified = lastModified,
             BooksCount = booksCount,
             BooksUnreadCount = booksCount,
-            Metadata = new KomgaSeriesMetadataDto
-            {
-                Title = title,
-                Summary = s.Metadata?.Summary ?? s.Description ?? string.Empty,
-                AgeRating = s.Metadata?.AgeRating
-            }
+            Metadata = BuildSeriesMetadataDto(s)
         };
     }
+
+    private static KomgaSeriesMetadataDto BuildSeriesMetadataDto(Series s) =>
+        new()
+        {
+            Title = s.Metadata?.Title ?? s.Name,
+            Summary = s.Metadata?.Summary ?? s.Description ?? string.Empty,
+            AgeRating = s.Metadata?.AgeRating
+        };
 
     private static string ResolveLastModified(Media m) =>
         (m.UpdatedAt ?? m.CreatedAt).ToString("O");

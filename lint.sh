@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Verifica las dos mitades del repositorio sin escribir en ningun fichero:
+# Checks both halves of the repository without writing to any file:
 #
-#   backend   dotnet format --verify-no-changes  +  build con warnings como errores
+#   backend   dotnet format --verify-no-changes  +  build with warnings as errors
 #   frontend  eslint
 #
-# Sale con codigo distinto de cero si algo falla. Para corregir, usa format.sh.
+# Exits non-zero if anything fails. To fix, use format.sh.
 
 set -uo pipefail
 

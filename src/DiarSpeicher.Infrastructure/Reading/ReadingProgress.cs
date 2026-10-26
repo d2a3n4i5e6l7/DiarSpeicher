@@ -3,6 +3,7 @@ using Dapper;
 using DiarSpeicher.Core.Domain.Entities;
 using DiarSpeicher.Core.Domain.Enums;
 using DiarSpeicher.Infrastructure.Data;
+using DiarSpeicher.Infrastructure.Data.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace DiarSpeicher.Infrastructure.Reading;
@@ -226,11 +227,11 @@ public class ReadingProgress : IReadingProgress
         const string sql = """
             SELECT "MediaId", "TotalPages"
             FROM "EpubPageMaps"
-            WHERE "MediaId" IN @MediaIds AND "ProfileKey" = @ProfileKey AND "TotalPages" > 0;
+            WHERE "MediaId" IN (SELECT value FROM json_each(@MediaIds)) AND "ProfileKey" = @ProfileKey AND "TotalPages" > 0;
             """;
 
         var rows = await conn.QueryAsync<MediaTotalPagesRow>(
-            sql, new { MediaIds = mediaIds, ProfileKey = profileKey });
+            sql, new { MediaIds = SqlKeys.ToJson(mediaIds), ProfileKey = profileKey });
 
         return rows.ToDictionary(r => r.MediaId, r => r.TotalPages, StringComparer.Ordinal);
     }

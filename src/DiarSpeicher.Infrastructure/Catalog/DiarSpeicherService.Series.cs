@@ -15,33 +15,32 @@ public sealed partial class DiarSpeicherService
         page = Math.Max(0, page);
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
+        var parameters = CatalogSqlFilters.ArgsFor(user);
 
         if (!string.IsNullOrWhiteSpace(libraryId))
         {
-            where += @" AND s.""LibraryId"" = @LibraryId";
-            parameters.Add("LibraryId", libraryId);
+            parameters.LibraryId = libraryId;
         }
 
-        var countSql = $"""
+        const string countSql = $"""
             SELECT COUNT(*)
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE {where};
+            WHERE {CatalogSqlFilters.SeriesVisible} AND {CatalogSqlFilters.InLibrary};
             """;
 
         var total = await conn.ExecuteScalarAsync<int>(countSql, parameters);
 
-        parameters.Add("PageSize", pageSize);
-        parameters.Add("Offset", page * pageSize);
+        parameters.PageSize = pageSize;
+        parameters.Offset = page * pageSize;
 
-        var selectSql = $"""
+        const string selectSql = $"""
             SELECT s."Id", s."Name", s."Description", s."Path", s."Status", s."ThumbnailPath", s."ThumbnailMeta",
                    s."CreatedAt", s."UpdatedAt", s."DeletedAt", s."LibraryId",
                    (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "MediaCount"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE {where}
+            WHERE {CatalogSqlFilters.SeriesVisible} AND {CatalogSqlFilters.InLibrary}
             ORDER BY s."Name" ASC
             LIMIT @PageSize OFFSET @Offset;
             """;
@@ -62,16 +61,16 @@ public sealed partial class DiarSpeicherService
     public async Task<DiarSpeicherSeriesDto?> GetSeriesByIdAsync(AuthUser user, string id, CancellationToken ct = default)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
-        parameters.Add("Id", id);
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.Id = id;
 
-        var selectSql = $"""
+        const string selectSql = $"""
             SELECT s."Id", s."Name", s."Description", s."Path", s."Status", s."ThumbnailPath", s."ThumbnailMeta",
                    s."CreatedAt", s."UpdatedAt", s."DeletedAt", s."LibraryId",
                    (SELECT COUNT(*) FROM "Media" m WHERE m."SeriesId" = s."Id" AND m."DeletedAt" IS NULL) AS "MediaCount"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE s."Id" = @Id AND {where}
+            WHERE s."Id" = @Id AND {CatalogSqlFilters.SeriesVisible}
             LIMIT 1;
             """;
 
@@ -85,9 +84,7 @@ public sealed partial class DiarSpeicherService
         if (existing == null) return null;
 
         var name = !string.IsNullOrWhiteSpace(input.Name) ? input.Name.Trim() : existing.Name;
-        var description = input.Description != null
-            ? (string.IsNullOrWhiteSpace(input.Description) ? null : input.Description.Trim())
-            : existing.Description;
+        var description = ResolveDescription(input.Description, existing.Description);
         var now = DateTimeOffset.UtcNow;
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
@@ -110,14 +107,14 @@ public sealed partial class DiarSpeicherService
     private async Task<IdPathThumbnailRow?> FetchSeriesBasicAsync(AuthUser user, string seriesId, CancellationToken ct)
     {
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (where, parameters) = CatalogSqlFilters.BuildSeriesVisibilityFilter(user, "s", "sm");
-        parameters.Add("Id", seriesId);
+        var parameters = CatalogSqlFilters.ArgsFor(user);
+        parameters.Id = seriesId;
 
-        var selectSql = $"""
+        const string selectSql = $"""
             SELECT s."Id", s."Path", s."ThumbnailPath"
             FROM "Series" s
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE s."Id" = @Id AND {where}
+            WHERE s."Id" = @Id AND {CatalogSqlFilters.SeriesVisible}
             LIMIT 1;
             """;
 
@@ -151,7 +148,7 @@ public sealed partial class DiarSpeicherService
         const string selectMediaThumbs = @"SELECT ""ThumbnailPath"" FROM ""Media"" WHERE ""SeriesId"" = @SeriesId AND ""ThumbnailPath"" IS NOT NULL;";
         var thumbs = (await conn.QueryAsync<string>(
             selectMediaThumbs, new { SeriesId = id }
-        )).AsList();
+        )).AsRowList();
 
         foreach (var thumb in thumbs)
         {
@@ -180,16 +177,16 @@ public sealed partial class DiarSpeicherService
         }
 
         await using var conn = await _connectionFactory.CreateOpenConnectionAsync(ct);
-        var (mediaWhere, mediaParams) = CatalogSqlFilters.BuildMediaVisibilityFilter(user, "m", "mm", "s", "sm");
-        mediaParams.Add("SeriesId", seriesId);
+        var mediaParams = CatalogSqlFilters.ArgsFor(user);
+        mediaParams.SeriesId = seriesId;
 
-        var fallbackSql = $"""
+        const string fallbackSql = $"""
             SELECT m."ThumbnailPath"
             FROM "Media" m
             LEFT JOIN "MediaMetadata" mm ON m."Id" = mm."MediaId"
             LEFT JOIN "Series" s ON m."SeriesId" = s."Id"
             LEFT JOIN "SeriesMetadata" sm ON s."Id" = sm."SeriesId"
-            WHERE m."SeriesId" = @SeriesId AND m."ThumbnailPath" IS NOT NULL AND {mediaWhere}
+            WHERE m."SeriesId" = @SeriesId AND m."ThumbnailPath" IS NOT NULL AND {CatalogSqlFilters.MediaVisible}
             ORDER BY m."SortName" ASC, m."Name" ASC
             LIMIT 1;
             """;
@@ -290,6 +287,12 @@ public sealed partial class DiarSpeicherService
 
     private string BuildSeriesThumbnailPath(string seriesId, string extension) =>
         Path.Combine(_storage.ResolveThumbnailsPath(), "series", $"{seriesId}{extension}");
+
+    private static string? ResolveDescription(string? requested, string? current)
+    {
+        if (requested == null) return current;
+        return string.IsNullOrWhiteSpace(requested) ? null : requested.Trim();
+    }
 
     private static async Task<(byte[] Data, string ContentType)> ReadImageAsync(string path, CancellationToken ct)
     {

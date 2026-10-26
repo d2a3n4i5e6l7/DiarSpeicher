@@ -1,101 +1,81 @@
-using Dapper;
-
 namespace DiarSpeicher.Infrastructure.Data.Extensions;
 
+/// <summary>
+/// The visibility rules are compile-time constants, not SQL assembled per request: whether a
+/// rule applies is decided by the parameters (a null one disables its condition), so no query
+/// ever formats text into its SQL. The aliases are fixed: l for Libraries, s and sm for Series
+/// and its metadata, m and mm for Media and its metadata.
+/// </summary>
 public static class CatalogSqlFilters
 {
-    public static (string WhereClause, DynamicParameters Parameters) BuildLibraryVisibilityFilter(
-        AuthUser? user,
-        string tableAlias = "l")
-    {
-        var parameters = new DynamicParameters();
-        var clauses = new List<string>();
+    public const string LibraryVisible = """
+        (@ExcludedLibraries IS NULL OR l."Id" NOT IN (SELECT value FROM json_each(@ExcludedLibraries)))
+        """;
 
-        if (user != null && !user.IsServerOwner && user.ExcludedLibraryIds.Count > 0)
+    public const string SeriesVisible = """
+        s."DeletedAt" IS NULL
+        AND (@ExcludedLibraries IS NULL OR s."LibraryId" IS NULL OR s."LibraryId" NOT IN (SELECT value FROM json_each(@ExcludedLibraries)))
+        AND (@MaxAge IS NULL
+             OR sm."AgeRating" <= @MaxAge
+             OR (@RestrictOnUnset = 0 AND (sm."SeriesId" IS NULL OR sm."AgeRating" IS NULL)))
+        """;
+
+    public const string MediaVisible = """
+        m."DeletedAt" IS NULL
+        AND (@ExcludedLibraries IS NULL OR s."Id" IS NULL OR s."LibraryId" IS NULL OR s."LibraryId" NOT IN (SELECT value FROM json_each(@ExcludedLibraries)))
+        AND (@MaxAge IS NULL
+             OR mm."AgeRating" <= @MaxAge
+             OR (mm."AgeRating" IS NULL
+                 AND (sm."AgeRating" <= @MaxAge
+                      OR (@RestrictOnUnset = 0 AND (sm."SeriesId" IS NULL OR sm."AgeRating" IS NULL)))))
+        """;
+
+    public const string InLibrary = """(@LibraryId IS NULL OR s."LibraryId" = @LibraryId)""";
+
+    public const string InSeries = """(@SeriesId IS NULL OR m."SeriesId" = @SeriesId)""";
+
+    public const string LibrarySearch = """(@SearchPattern IS NULL OR l."Name" LIKE @SearchPattern)""";
+
+    public const string SeriesSearch = """(@SearchPattern IS NULL OR s."Name" LIKE @SearchPattern OR sm."Title" LIKE @SearchPattern)""";
+
+    public const string MediaSearch = """(@SearchPattern IS NULL OR m."Name" LIKE @SearchPattern OR mm."Title" LIKE @SearchPattern)""";
+
+    public static CatalogQueryArgs ArgsFor(AuthUser? user)
+    {
+        var args = new CatalogQueryArgs();
+        if (user == null || user.IsServerOwner) return args;
+
+        if (user.ExcludedLibraryIds.Count > 0)
         {
-            clauses.Add($"{tableAlias}.\"Id\" NOT IN @ExcludedLibraries");
-            parameters.Add("ExcludedLibraries", user.ExcludedLibraryIds);
+            args.ExcludedLibraries = SqlKeys.ToJson(user.ExcludedLibraryIds);
         }
 
-        var where = clauses.Count > 0 ? string.Join(" AND ", clauses) : "1=1";
-        return (where, parameters);
+        if (user.AgeRestriction.HasValue)
+        {
+            args.MaxAge = user.AgeRestriction.Value;
+            args.RestrictOnUnset = user.RestrictOnUnset ? 1 : 0;
+        }
+
+        return args;
     }
 
-    public static (string WhereClause, DynamicParameters Parameters) BuildSeriesVisibilityFilter(
+    /// <summary>
+    /// Fails loudly for any other alias: <see cref="MediaVisible"/> is a constant, so it cannot
+    /// follow them, and silently returning SQL that names tables the caller did not alias would
+    /// show up as a confusing "no such column".
+    /// </summary>
+    public static (string WhereClause, CatalogQueryArgs Parameters) BuildMediaVisibilityFilter(
         AuthUser? user,
-        string seriesAlias = "s",
-        string seriesMetaAlias = "sm")
+        string mediaAlias,
+        string mediaMetaAlias,
+        string seriesAlias,
+        string seriesMetaAlias)
     {
-        var parameters = new DynamicParameters();
-        var clauses = new List<string> { $"{seriesAlias}.\"DeletedAt\" IS NULL" };
-
-        if (user != null && !user.IsServerOwner)
+        if (mediaAlias != "m" || mediaMetaAlias != "mm" || seriesAlias != "s" || seriesMetaAlias != "sm")
         {
-            if (user.ExcludedLibraryIds.Count > 0)
-            {
-                clauses.Add($"({seriesAlias}.\"LibraryId\" IS NULL OR {seriesAlias}.\"LibraryId\" NOT IN @ExcludedLibraries)");
-                parameters.Add("ExcludedLibraries", user.ExcludedLibraryIds);
-            }
-
-            if (user.AgeRestriction.HasValue)
-            {
-                parameters.Add("MaxAge", user.AgeRestriction.Value);
-                if (user.RestrictOnUnset)
-                {
-                    clauses.Add($"({seriesMetaAlias}.\"AgeRating\" IS NOT NULL AND {seriesMetaAlias}.\"AgeRating\" <= @MaxAge)");
-                }
-                else
-                {
-                    clauses.Add($"({seriesMetaAlias}.\"SeriesId\" IS NULL OR {seriesMetaAlias}.\"AgeRating\" IS NULL OR {seriesMetaAlias}.\"AgeRating\" <= @MaxAge)");
-                }
-            }
+            throw new ArgumentException("The media visibility filter is written for the aliases m, mm, s and sm.");
         }
 
-        return (string.Join(" AND ", clauses), parameters);
-    }
-
-    public static (string WhereClause, DynamicParameters Parameters) BuildMediaVisibilityFilter(
-        AuthUser? user,
-        string mediaAlias = "m",
-        string mediaMetaAlias = "mm",
-        string seriesAlias = "s",
-        string seriesMetaAlias = "sm")
-    {
-        var parameters = new DynamicParameters();
-        var clauses = new List<string> { $"{mediaAlias}.\"DeletedAt\" IS NULL" };
-
-        if (user != null && !user.IsServerOwner)
-        {
-            if (user.ExcludedLibraryIds.Count > 0)
-            {
-                clauses.Add($"({seriesAlias}.\"Id\" IS NULL OR {seriesAlias}.\"LibraryId\" IS NULL OR {seriesAlias}.\"LibraryId\" NOT IN @ExcludedLibraries)");
-                parameters.Add("ExcludedLibraries", user.ExcludedLibraryIds);
-            }
-
-            if (user.AgeRestriction.HasValue)
-            {
-                parameters.Add("MaxAge", user.AgeRestriction.Value);
-                if (user.RestrictOnUnset)
-                {
-                    clauses.Add($"""
-                        (
-                            ({mediaMetaAlias}."AgeRating" IS NOT NULL AND {mediaMetaAlias}."AgeRating" <= @MaxAge)
-                            OR ({mediaMetaAlias}."AgeRating" IS NULL AND {seriesMetaAlias}."AgeRating" IS NOT NULL AND {seriesMetaAlias}."AgeRating" <= @MaxAge)
-                        )
-                        """);
-                }
-                else
-                {
-                    clauses.Add($"""
-                        (
-                            ({mediaMetaAlias}."AgeRating" IS NOT NULL AND {mediaMetaAlias}."AgeRating" <= @MaxAge)
-                            OR ({mediaMetaAlias}."AgeRating" IS NULL AND ({seriesMetaAlias}."SeriesId" IS NULL OR {seriesMetaAlias}."AgeRating" IS NULL OR {seriesMetaAlias}."AgeRating" <= @MaxAge))
-                        )
-                        """);
-                }
-            }
-        }
-
-        return (string.Join(" AND ", clauses), parameters);
+        return (MediaVisible, ArgsFor(user));
     }
 }

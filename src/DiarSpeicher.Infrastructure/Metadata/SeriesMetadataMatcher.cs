@@ -12,10 +12,6 @@ public interface ISeriesMetadataMatcher
     Task<bool> ClearAsync(string seriesId, CancellationToken cancellationToken = default);
 }
 
-/// <summary>
-/// Empareja una serie local con una del volcado y vuelca sus datos en
-/// <see cref="Core.Domain.Entities.SeriesMetadata"/>.
-/// </summary>
 public class SeriesMetadataMatcher : ISeriesMetadataMatcher
 {
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(2);
@@ -33,7 +29,6 @@ public class SeriesMetadataMatcher : ISeriesMetadataMatcher
     private static readonly Regex ExtraSpacesRegex =
         new(@"\s{2,}", RegexOptions.Compiled, RegexTimeout);
 
-    /// <summary>Marca de procedencia en <c>SeriesMetadata.MetaType</c>.</summary>
     public const string SourceTag = "mangabaka";
 
     private readonly ISqliteConnectionFactory _connectionFactory;

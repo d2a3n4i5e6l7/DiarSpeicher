@@ -14,13 +14,11 @@ public sealed record TrashEntry
     public DateTimeOffset DeletedAt { get; init; }
 }
 
-/// <summary>Lo que se destruiria, contado antes de destruirlo.</summary>
 public sealed record DeletionScope(string Path, string Name, int FileCount, long Bytes, IReadOnlyList<DeletionScope> Children);
 
 /// <summary>
-/// Por que no se movio. "No existe" y "no permitido" tienen que viajar por separado: son
-/// respuestas distintas para el usuario, y borrar del indice algo cuyo fichero ya no esta
-/// es legitimo.
+/// "Does not exist" and "not allowed" must travel separately: they are different answers for
+/// the user, and removing from the index something whose file is gone is legitimate.
 /// </summary>
 public enum TrashOutcome
 {
@@ -37,7 +35,6 @@ public interface ITrashService
     IReadOnlyList<TrashEntry> List();
     bool Restore(string id);
 
-    /// <summary>Lo vacia ya, sin esperar al plazo.</summary>
     bool PurgeNow(string id);
     void PurgeExpired();
 }
@@ -53,17 +50,13 @@ public sealed class NullTrashService : ITrashService
 }
 
 /// <summary>
-/// Papelera con caducidad para los borrados que tocan el disco.
-/// <para>
-/// Nada se borra de verdad al pedirlo: se mueve dentro de la propia raiz declarada, a una
-/// carpeta que empieza por punto para que el escaner la ignore. Tiene que ser ahi y no en
-/// el almacenamiento porque <c>File.Move</c> entre sistemas de ficheros distintos degrada a
-/// copiar y borrar, y mover una biblioteca entera seria copiarla entera.
-/// </para>
-/// <para>
-/// El indice de cada elemento es un JSON a su lado, no una tabla: si el proceso muere a
-/// medias, la papelera sigue explicandose sola y se puede vaciar a mano.
-/// </para>
+/// Nothing is really deleted on request: it is moved inside the declared root itself, into a
+/// folder starting with a dot so the scanner ignores it. It has to be there and not in storage
+/// because <c>File.Move</c> across file systems degrades to copy and delete, and moving a whole
+/// library would mean copying it whole.
+///
+/// The index of each item is a JSON next to it, not a table: if the process dies halfway, the
+/// trash still explains itself and can be emptied by hand.
 /// </summary>
 public sealed class TrashService : ITrashService
 {
@@ -153,13 +146,13 @@ public sealed class TrashService : ITrashService
                 Directory.CreateDirectory(slot);
                 var destination = Path.Combine(slot, PayloadName);
 
-                // Los metadatos primero. Un corte de luz entre el movimiento y el JSON
-                // dejaria el contenido en la papelera sin saber de donde salio: imposible
-                // de restaurar. Al reves solo queda un hueco vacio que el purgado limpia.
+                // Metadata first. A power cut between the move and the JSON would leave the
+                // content in the trash without knowing where it came from: impossible to
+                // restore. The other way round only leaves an empty slot the purge cleans.
                 File.WriteAllText(Path.Combine(slot, MetaName), JsonSerializer.Serialize(moved, InfrastructureJsonContext.Default.TrashEntry));
 
-                // Renombrado dentro del mismo sistema de ficheros: es atomico, asi que no
-                // existe el estado "a medio mover".
+                // Rename within the same file system: it is atomic, so the "half moved" state
+                // does not exist.
                 if (isDirectory)
                 {
                     Directory.Move(resolved, destination);
@@ -203,11 +196,11 @@ public sealed class TrashService : ITrashService
     {
         var payload = Path.Combine(slot, PayloadName);
 
-        // Hueco sin contenido: el proceso murio entre escribir el JSON y mover.
-        // No hay nada que devolver, y el purgado se lo llevara.
+        // Slot without content: the process died between writing the JSON and moving. There is
+        // nothing to restore, and the purge will take it.
         if (!Directory.Exists(payload) && !File.Exists(payload)) return false;
 
-        // Si mientras tanto alguien creo algo con ese nombre, no se pisa.
+        // If someone created something with that name in the meantime, it is not overwritten.
         if (Directory.Exists(entry.OriginalPath) || File.Exists(entry.OriginalPath)) return false;
 
         try
@@ -280,8 +273,8 @@ public sealed class TrashService : ITrashService
             foreach (var slot in EnumerateSlots())
             {
                 var entry = ReadEntry(slot);
-                // Un hueco sin metadatos legibles se tira por fecha de la carpeta: si no,
-                // se quedaria ocupando disco para siempre.
+                // A slot without readable metadata is discarded by folder date: otherwise it
+                // would take up disk forever.
                 var deletedAt = entry?.DeletedAt ?? new DateTimeOffset(Directory.GetCreationTimeUtc(slot));
                 if (deletedAt > deadline) continue;
 
@@ -327,8 +320,8 @@ public sealed class TrashService : ITrashService
     }
 
     /// <summary>
-    /// Ademas de estar dentro de una raiz: nunca la raiz misma ni nada de la propia
-    /// papelera, que son las dos formas de convertir un borrado en una catastrofe.
+    /// Besides being inside a root: never the root itself nor anything inside the trash, the
+    /// two ways of turning a deletion into a catastrophe.
     /// </summary>
     private bool CanTouch(string? path, out string resolved)
     {
@@ -363,13 +356,13 @@ public sealed class TrashService : ITrashService
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException)
                 {
-                    // Se cuenta el fichero aunque no se pueda medir.
+                    // The file is counted even if it cannot be measured.
                 }
             }
         }
         catch (Exception e) when (e is UnauthorizedAccessException or IOException)
         {
-            // Lo que no se pueda recorrer no se cuenta; el aviso dira de menos, nunca de mas.
+            // Whatever cannot be walked is not counted; the warning will say less, never more.
         }
 
         return (files, bytes);
@@ -388,12 +381,10 @@ public sealed class TrashService : ITrashService
     }
 }
 
-/// <summary>Cuanto sobrevive lo borrado antes de irse de verdad. Seccion "Trash".</summary>
 public class TrashOptions
 {
     public const string SectionName = "Trash";
 
-    /// <summary>Minutos que se guarda lo borrado. Una hora por defecto.</summary>
     public int RetentionMinutes { get; set; } = 60;
 
     public TimeSpan Retention => TimeSpan.FromMinutes(Math.Max(1, RetentionMinutes));

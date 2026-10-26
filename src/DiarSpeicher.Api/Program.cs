@@ -1,5 +1,4 @@
 using DiarSpeicher.Api.Endpoints;
-using DiarSpeicher.Api.GraphQL;
 using DiarSpeicher.Api.Serialization;
 using DiarSpeicher.Api.Middleware;
 using DiarSpeicher.Core.Filesystem;
@@ -33,7 +32,7 @@ var connectionString = new SqliteConnectionStringBuilder(configuredConnection)
 builder.Services.AddSingleton<ISqliteConnectionFactory, SqliteConnectionFactory>();
 
 builder.Services.AddHttpContextAccessor();
-builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.TypeInfoResolverChain.Insert(0, ApiJsonContext.Default));
+builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.TypeInfoResolverChain.Insert(0, ApiJsonResolvers.Combined));
 
 builder.Services.Configure<GatewayOptions>(builder.Configuration.GetSection(GatewayOptions.SectionName));
 
@@ -96,28 +95,7 @@ builder.Services.AddHostedService<DatabaseBackupService>();
 
 builder.Services.AddSingleton<ScanProgressHub>();
 builder.Services.AddSingleton<IScanProgressHub>(sp => sp.GetRequiredService<ScanProgressHub>());
-builder.Services.AddScoped<GraphQLScanProgressPublisher>();
-builder.Services.AddScoped<IScanProgressPublisher>(sp => new CompositeScanProgressPublisher(
-    [sp.GetRequiredService<GraphQLScanProgressPublisher>(), sp.GetRequiredService<ScanProgressHub>()],
-    sp.GetRequiredService<ILogger<CompositeScanProgressPublisher>>()));
-builder.Services.AddScoped<AuthUserResolver>();
-
-builder.Services
-    .AddGraphQLServer()
-    .AddQueryType<Query>()
-    .AddMutationType<Mutation>()
-    .AddSubscriptionType<Subscription>()
-    .AddTypeExtension<SeriesResolvers>()
-    .AddTypeExtension<MediaResolvers>()
-    .AddTypeExtension<LibraryResolvers>()
-    .AddTypeExtension<MangaBakaQueries>()
-    .AddCatalogDataLoaders()
-    .AddInMemorySubscriptions()
-    .AddFiltering()
-    .AddSorting()
-    .AddProjections()
-    .ModifyOptions(options => options.UseXmlDocumentation = false)
-    .ModifyRequestOptions(options => options.IncludeExceptionDetails = builder.Environment.IsDevelopment());
+builder.Services.AddSingleton<IScanProgressPublisher>(sp => sp.GetRequiredService<ScanProgressHub>());
 
 var app = builder.Build();
 
@@ -148,9 +126,6 @@ app.UseOpdsAuth();
 
 app.MapGet("/health", () => Results.Ok(new ServiceHealthResponse("healthy", "DiarSpeicher", "1.0.0", "SQLite (WAL)")));
 
-app.UseWebSockets();
-
-app.MapGraphQL();
 app.MapOpdsEndpoints();
 app.MapOpdsV2Endpoints();
 app.MapKomgaEndpoints();
@@ -177,7 +152,6 @@ static void EnsureDataDirectories(IServiceProvider services, string connectionSt
         Path.Combine(Path.GetFullPath(storage.RootPath), "manga_database"),
     };
 
-    // Una base en memoria no tiene directorio que crear.
     var dataSource = new SqliteConnectionStringBuilder(connectionString).DataSource;
     if (!string.IsNullOrWhiteSpace(dataSource)
         && !dataSource.Equals(":memory:", StringComparison.Ordinal))

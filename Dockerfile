@@ -1,99 +1,97 @@
 # syntax=docker/dockerfile:1
 
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:11.0 AS dotnet-builder
+FROM --platform=$BUILDPLATFORM debian:trixie-slim AS rootfs-builder
 ARG TARGETARCH
-WORKDIR /build
-
-# Native AOT enlaza con clang en la maquina que compila. Para arm64 desde x86 hace falta
-# ademas el enlazador y la libc de aarch64: sin ellos el publish muere en el paso de enlace.
-RUN set -eu; \
-    CROSS=""; \
-    if [ "$TARGETARCH" = "arm64" ] && [ "$(dpkg --print-architecture)" != "arm64" ]; then \
-        CROSS="binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu"; \
-    fi; \
-    apt-get update -qq; \
-    apt-get install -y -qq --no-install-recommends clang llvm $CROSS; \
-    rm -rf /var/lib/apt/lists/*
-
-COPY Directory.Build.props Directory.Packages.props ./
-COPY src/DiarSpeicher.Core/DiarSpeicher.Core.csproj src/DiarSpeicher.Core/
-COPY src/DiarSpeicher.Infrastructure/DiarSpeicher.Infrastructure.csproj src/DiarSpeicher.Infrastructure/
-COPY src/DiarSpeicher.Api/DiarSpeicher.Api.csproj src/DiarSpeicher.Api/
-RUN RID="linux-x64"; \
-    if [ "$TARGETARCH" = "arm64" ]; then RID="linux-arm64"; fi; \
-    dotnet restore src/DiarSpeicher.Api/DiarSpeicher.Api.csproj -r "$RID"
-
-COPY src/ src/
-COPY frontEnd/public/fonts/ frontEnd/public/fonts/
-
-RUN RID="linux-x64"; \
-    if [ "$TARGETARCH" = "arm64" ]; then RID="linux-arm64"; fi; \
-    dotnet publish src/DiarSpeicher.Api/DiarSpeicher.Api.csproj \
-    -c Release \
-    -r "$RID" \
-    --self-contained true \
-    --no-restore \
-    -o /build/publish \
-    && find /build/publish -name '*.dbg' -delete
-
-FROM debian:trixie-slim AS rootfs-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update -qq \
-    && apt-get install -y -qq --no-install-recommends \
-        libfontconfig1 libfreetype6 libsqlite3-0 \
-        coreutils dash util-linux \
-    && rm -rf /var/lib/apt/lists/*
+RUN <<'EOF'
+set -eu
+if [ "$TARGETARCH" != "$(dpkg --print-architecture)" ]; then
+    dpkg --add-architecture "$TARGETARCH"
+fi
+apt-get update -qq
+apt-get install -y -qq --no-install-recommends binutils \
+    "libfontconfig1:$TARGETARCH" "libfreetype6:$TARGETARCH" "libsqlite3-0:$TARGETARCH" \
+    "libstdc++6:$TARGETARCH" "libacl1:$TARGETARCH" "libattr1:$TARGETARCH" "libcap2:$TARGETARCH" \
+    "libcap-ng0:$TARGETARCH" "libgmp10:$TARGETARCH" "libselinux1:$TARGETARCH" \
+    "libpcre2-8-0:$TARGETARCH" "libseccomp2:$TARGETARCH"
+PACKAGES="coreutils:$TARGETARCH dash:$TARGETARCH util-linux:$TARGETARCH"
+if apt-cache show "setpriv:$TARGETARCH" >/dev/null 2>&1; then
+    PACKAGES="$PACKAGES setpriv:$TARGETARCH"
+fi
+mkdir -p /debs /target
+cd /debs
+apt-get download $PACKAGES
+for deb in /debs/*.deb; do dpkg-deb -x "$deb" /target; done
+rm -rf /var/lib/apt/lists/* /debs
+EOF
 
 RUN groupadd -g 1000 node \
     && useradd -u 1000 -g node -s /usr/sbin/nologin -M -d /home/node node
 
-WORKDIR /
+COPY publish/ /rootfs/app/
 
-RUN TRIPLET="$([ "$(dpkg --print-architecture)" = "arm64" ] && echo "aarch64-linux-gnu" || echo "x86_64-linux-gnu")" \
-    && mkdir -p /rootfs/usr/bin "/rootfs/usr/lib/$TRIPLET" \
-             /rootfs/etc/fonts \
-             /rootfs/usr/share/fontconfig \
-             /rootfs/var/cache/fontconfig \
-             /rootfs/data/db /rootfs/data/thumbnails \
-             /rootfs/data/backups /rootfs/data/manga_database \
-             /rootfs/libraries /rootfs/app /rootfs/tmp
+# Dependencies are read with readelf rather than ldd: ldd runs the target binary, which would
+# need emulation to build arm64 on x86.
+RUN <<'EOF'
+set -eu
+case "$TARGETARCH" in
+    arm64) TRIPLET="aarch64-linux-gnu" ;;
+    amd64) TRIPLET="x86_64-linux-gnu" ;;
+    *) echo "Unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;;
+esac
+LIBDIR="/rootfs/usr/lib/$TRIPLET"
 
-RUN cp /usr/bin/dash           /rootfs/usr/bin/ \
-    && cp /usr/bin/setpriv     /rootfs/usr/bin/ \
-    && cp /usr/bin/id          /rootfs/usr/bin/ \
-    && cp /usr/bin/mkdir /usr/bin/chown /usr/bin/chmod /usr/bin/env \
-          /usr/bin/cat /usr/bin/ls \
-          /rootfs/usr/bin/ \
-    && ln -sf dash /rootfs/usr/bin/sh
+mkdir -p /rootfs/usr/bin "$LIBDIR" \
+         /rootfs/etc/fonts /rootfs/usr/share/fontconfig /rootfs/var/cache/fontconfig \
+         /rootfs/data/db /rootfs/data/thumbnails /rootfs/data/backups /rootfs/data/manga_database \
+         /rootfs/libraries /rootfs/tmp
 
-COPY --from=dotnet-builder /build/publish/ /rootfs/app/
+for bin in dash setpriv id mkdir chown chmod env cat ls; do
+    if [ ! -x "/target/usr/bin/$bin" ]; then
+        echo "Missing /usr/bin/$bin in the $TARGETARCH packages" >&2
+        exit 1
+    fi
+    cp "/target/usr/bin/$bin" /rootfs/usr/bin/
+done
+ln -sf dash /rootfs/usr/bin/sh
 
-# El rootfs se arma resolviendo las dependencias reales con ldd en lugar de listarlas a mano:
-# libSkiaSharp.so arrastra fontconfig, freetype, expat, png y zlib de forma transitiva, y esa
-# cadena cambia entre versiones de SkiaSharp. Listarla fija seria falsear la dependencia.
-RUN set -eu; \
-    TRIPLET="$([ "$(dpkg --print-architecture)" = "arm64" ] && echo "aarch64-linux-gnu" || echo "x86_64-linux-gnu")"; \
-    { for bin in /rootfs/usr/bin/dash /rootfs/usr/bin/setpriv /rootfs/usr/bin/id \
-                 /rootfs/usr/bin/mkdir /rootfs/usr/bin/chown /rootfs/usr/bin/chmod \
-                 /rootfs/usr/bin/env /rootfs/usr/bin/cat /rootfs/usr/bin/ls \
-                 /rootfs/app/DiarSpeicher.Api; do \
-          ldd "$bin" 2>/dev/null | awk '/=> \//{print $3}'; \
-      done; \
-      find /rootfs/app -name '*.so' -o -name '*.so.*' | while read -r so; do \
-          ldd "$so" 2>/dev/null | awk '/=> \//{print $3}'; \
-      done; \
-    } | sort -u | while read -r lib; do \
-        case "$lib" in /rootfs/*) continue ;; esac; \
-        cp -L "$lib" "/rootfs/usr/lib/$TRIPLET/" 2>/dev/null || true; \
-    done; \
-    cp -L /lib*/ld-linux-*.so* "/rootfs/usr/lib/$TRIPLET/" 2>/dev/null || true; \
-    cp -L "/usr/lib/$TRIPLET"/libsqlite3.so* "/rootfs/usr/lib/$TRIPLET/" 2>/dev/null || true; \
-    ln -sf libsqlite3.so.0 "/rootfs/usr/lib/$TRIPLET/libe_sqlite3.so"
+find /rootfs/usr/bin /rootfs/app -type f \( -perm -u+x -o -name '*.so' -o -name '*.so.*' \) > /tmp/pending
+: > /tmp/seen
+missing=""
+while [ -s /tmp/pending ]; do
+    file="$(head -n 1 /tmp/pending)"
+    sed -i 1d /tmp/pending
+    readelf -d "$file" 2>/dev/null | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' > /tmp/needed || true
+    while read -r lib; do
+        grep -qxF "$lib" /tmp/seen && continue
+        echo "$lib" >> /tmp/seen
+        [ -e "$LIBDIR/$lib" ] && continue
+        [ -n "$(find /rootfs/app -name "$lib*" -print -quit)" ] && continue
+        source=""
+        for dir in "/usr/lib/$TRIPLET" "/target/usr/lib/$TRIPLET"; do
+            if [ -e "$dir/$lib" ]; then source="$dir/$lib"; break; fi
+        done
+        if [ -z "$source" ]; then
+            missing="$missing $lib"
+            continue
+        fi
+        cp -L "$source" "$LIBDIR/$lib"
+        echo "$LIBDIR/$lib" >> /tmp/pending
+    done < /tmp/needed
+done
+if [ -n "$missing" ]; then
+    echo "Libraries not found for $TARGETARCH:$missing" >&2
+    exit 1
+fi
 
-RUN cp -a /etc/fonts/. /rootfs/etc/fonts/ \
-    && cp -a /usr/share/fontconfig/. /rootfs/usr/share/fontconfig/
+cp -L "/usr/lib/$TRIPLET"/libsqlite3.so* "$LIBDIR/"
+ln -sf libsqlite3.so.0 "$LIBDIR/libe_sqlite3.so"
+
+cp -a /etc/fonts/. /rootfs/etc/fonts/
+cp -a /usr/share/fontconfig/. /rootfs/usr/share/fontconfig/
+EOF
 
 COPY --chmod=0755 entrypoint.sh /rootfs/usr/local/bin/entrypoint.sh
 
