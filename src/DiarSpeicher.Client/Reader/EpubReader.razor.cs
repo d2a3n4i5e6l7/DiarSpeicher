@@ -1,8 +1,4 @@
-using System.Runtime.InteropServices.JavaScript;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using DiarSpeicher.Client.Api;
-using DiarSpeicher.Client.Catalog;
 using DiarSpeicher.Client.Interop;
 using DiarSpeicher.Core.Domain.Catalog;
 using Microsoft.AspNetCore.Components;
@@ -10,21 +6,15 @@ using Microsoft.AspNetCore.Components.Web;
 
 namespace DiarSpeicher.Client.Reader;
 
-public sealed record TocItem(string Label, string Href);
-
-[JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
-[JsonSerializable(typeof(List<TocItem>))]
-internal sealed partial class EpubJsonContext : JsonSerializerContext;
-
 public sealed partial class EpubReader : IDisposable
 {
-    private const string ViewerId = "epub-viewer";
-    private const string RootId = "epub-root";
+    private const string PageId = "epub-page";
     private const int FontStep = 10;
     private const int MinFont = 70;
     private const int MaxFont = 180;
     private const int DefaultFont = 100;
     private const int PercentScale = 100;
+    private const int NearlyDone = 99;
     private static readonly TimeSpan UiHideDelay = TimeSpan.FromMilliseconds(3000);
     private static readonly TimeSpan ProgressDebounce = TimeSpan.FromMilliseconds(1200);
 
@@ -35,14 +25,17 @@ public sealed partial class EpubReader : IDisposable
         new("sepia", "Sepia", "#1C1814"),
     ];
 
+    private readonly ChapterPager _pager = new(PageId);
     private bool _loading = true;
-    private string _status = "Conectando con el almacén...";
     private string? _error;
     private bool _uiVisible = true;
     private bool _fullscreen;
     private bool _tocOpen;
     private bool _settingsOpen;
-    private List<TocItem> _toc = [];
+    private DiarSpeicherEpubManifestDto _manifest = new();
+    private int _chapter;
+    private MarkupString _chapterHtml;
+    private Action? _positionAfterRender;
     private int _fontSize = DefaultFont;
     private EpubTheme _theme = Themes[0];
     private int _progress;
@@ -57,47 +50,33 @@ public sealed partial class EpubReader : IDisposable
 
     [Inject] private MediaApi MediaApi { get; set; } = null!;
 
+    private List<long> ChapterSizes => _manifest.ChapterSizes;
+
     protected override void OnInitialized()
     {
         _progress = (int)Math.Round(Media.ReadPercent ?? 0);
-        EpubJs.DownloadProgress += OnDownloadProgress;
-        EpubJs.Relocated += OnRelocated;
-        EpubJs.TocLoaded += OnToc;
-        EpubJs.Clicked += OnBookClicked;
         ReaderBridgeJs.FullscreenChanged += OnFullscreenChanged;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender)
+        if (firstRender)
         {
+            await _root.FocusAsync(preventScroll: true);
+            await OpenAsync();
             return;
         }
 
-        await _root.FocusAsync(preventScroll: true);
-        _status = "Descargando archivo...";
-        try
+        if (_positionAfterRender is { } position)
         {
-            var fileUrl = MediaApi.FileUrl(Media.Id);
-            await EpubJs.Open(ViewerId, fileUrl, await TrySignAsync(fileUrl), _theme.Name);
-            _loading = false;
-            WakeUi();
+            _positionAfterRender = null;
+            position();
+            ReportProgress();
         }
-        catch (JSException exception)
-        {
-            _error = string.IsNullOrEmpty(exception.Message) ? "Error al abrir el archivo EPUB." : exception.Message;
-            _loading = false;
-        }
-
-        StateHasChanged();
     }
 
     public void Dispose()
     {
-        EpubJs.DownloadProgress -= OnDownloadProgress;
-        EpubJs.Relocated -= OnRelocated;
-        EpubJs.TocLoaded -= OnToc;
-        EpubJs.Clicked -= OnBookClicked;
         ReaderBridgeJs.FullscreenChanged -= OnFullscreenChanged;
         Cancel(ref _hideUi);
         if (_progressTimer is not null && _pendingProgress is { } pending)
@@ -106,47 +85,81 @@ public sealed partial class EpubReader : IDisposable
         }
 
         Cancel(ref _progressTimer);
-        EpubJs.Destroy();
     }
 
-    private static async Task<string?> TrySignAsync(string fileUrl)
+    private async Task OpenAsync()
     {
         try
         {
-            return await DpopJs.SignRequestProof("GET", fileUrl);
+            _manifest = await MediaApi.EpubManifestAsync(Media.Id) ?? new DiarSpeicherEpubManifestDto();
+            if (ChapterSizes.Count == 0)
+            {
+                _error = "El libro no tiene capítulos legibles.";
+            }
+            else
+            {
+                var (chapter, within) = Locate(_progress / (double)PercentScale);
+                await LoadChapterAsync(chapter, () => _pager.ShowFraction(within));
+                WakeUi();
+            }
         }
-        catch (JSException)
+        catch (ApiException exception)
         {
-            return null;
+            _error = exception.Message;
+        }
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task LoadChapterAsync(int chapter, Action position)
+    {
+        try
+        {
+            var content = await MediaApi.EpubChapterAsync(Media.Id, chapter);
+            _chapter = chapter;
+            _chapterHtml = new MarkupString(content?.Html ?? string.Empty);
+            _positionAfterRender = position;
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
         }
     }
 
-    private void OnDownloadProgress(double loaded, double total) => _ = InvokeAsync(() =>
+    private (int Chapter, double Within) Locate(double fraction)
     {
-        var percent = total > 0 ? (int)Math.Round(loaded / total * PercentScale) : 0;
-        var totalPart = total > 0 ? $" de {Formatting.FormatBytes((long)total)}" : string.Empty;
-        _status = $"Descargando libro: {Formatting.FormatBytes((long)loaded)}{totalPart} ({percent}%)";
-        StateHasChanged();
-    });
+        var target = fraction * ChapterSizes.Sum();
+        long before = 0;
+        for (var chapter = 0; chapter < ChapterSizes.Count - 1; chapter++)
+        {
+            var size = ChapterSizes[chapter];
+            if (before + size > target)
+            {
+                return (chapter, size > 0 ? (target - before) / size : 0);
+            }
 
-    private void OnRelocated(int percentage, bool completed) => _ = InvokeAsync(() =>
+            before += size;
+        }
+
+        var last = ChapterSizes[^1];
+        return (ChapterSizes.Count - 1, last > 0 ? Math.Clamp((target - before) / last, 0, 1) : 0);
+    }
+
+    private void ReportProgress()
     {
+        var total = ChapterSizes.Sum();
+        if (total <= 0)
+        {
+            return;
+        }
+
+        var read = ChapterSizes.Take(_chapter).Sum() + ChapterSizes[_chapter] * _pager.StartFraction;
+        var percentage = Math.Clamp((int)Math.Round(read / total * PercentScale), 1, PercentScale);
+        var completed = (_chapter == ChapterSizes.Count - 1 && _pager.IsLast) || percentage >= NearlyDone;
         _progress = percentage;
         ScheduleProgress(new DiarSpeicherUpdateProgressInput { Page = percentage, Percentage = percentage, IsCompleted = completed });
-        StateHasChanged();
-    });
-
-    private void OnToc(string json) => _ = InvokeAsync(() =>
-    {
-        _toc = JsonSerializer.Deserialize(json, EpubJsonContext.Default.ListTocItem) ?? [];
-        StateHasChanged();
-    });
-
-    private void OnBookClicked() => _ = InvokeAsync(() =>
-    {
-        WakeUi();
-        StateHasChanged();
-    });
+    }
 
     private void OnFullscreenChanged(bool fullscreen) => _ = InvokeAsync(() =>
     {
@@ -186,16 +199,34 @@ public sealed partial class EpubReader : IDisposable
         });
     }
 
-    private void GoNext()
+    private async Task GoNext()
     {
-        EpubJs.Next();
         WakeUi();
+        _pager.Measure();
+        if (!_pager.IsLast)
+        {
+            _pager.Show(_pager.Page + 1);
+            ReportProgress();
+        }
+        else if (_chapter < ChapterSizes.Count - 1)
+        {
+            await LoadChapterAsync(_chapter + 1, () => _pager.Show(0));
+        }
     }
 
-    private void GoPrev()
+    private async Task GoPrev()
     {
-        EpubJs.Prev();
         WakeUi();
+        _pager.Measure();
+        if (_pager.Page > 0)
+        {
+            _pager.Show(_pager.Page - 1);
+            ReportProgress();
+        }
+        else if (_chapter > 0)
+        {
+            await LoadChapterAsync(_chapter - 1, _pager.ShowLast);
+        }
     }
 
     private async Task OnKeyDown(KeyboardEventArgs e)
@@ -203,10 +234,10 @@ public sealed partial class EpubReader : IDisposable
         switch (e.Key)
         {
             case "ArrowRight" or " " or "PageDown":
-                GoNext();
+                await GoNext();
                 break;
             case "ArrowLeft" or "PageUp":
-                GoPrev();
+                await GoPrev();
                 break;
             case "Escape":
                 await Exit.InvokeAsync();
@@ -216,26 +247,27 @@ public sealed partial class EpubReader : IDisposable
 
     private void ChangeFontSize(int delta)
     {
+        _pager.Measure();
+        var fraction = _pager.StartFraction;
         _fontSize = Math.Clamp(_fontSize + delta, MinFont, MaxFont);
-        EpubJs.FontSize(_fontSize);
+        _positionAfterRender = () => _pager.ShowFraction(fraction);
         WakeUi();
     }
 
     private void SelectTheme(EpubTheme theme)
     {
         _theme = theme;
-        EpubJs.SelectTheme(theme.Name);
         WakeUi();
     }
 
-    private void NavigateToChapter(string href)
+    private async Task NavigateToChapter(DiarSpeicherEpubTocEntry entry)
     {
-        EpubJs.Display(href);
         _tocOpen = false;
         WakeUi();
+        await LoadChapterAsync(entry.Chapter, entry.Anchor is { } anchor ? () => _pager.ShowAnchor(anchor) : () => _pager.Show(0));
     }
 
-    private void ToggleFullscreen() => ReaderBridgeJs.ToggleFullscreen(RootId);
+    private static Task ToggleFullscreen() => ReaderBridgeJs.ToggleFullscreen();
 
     private void OpenToc() => _tocOpen = true;
 

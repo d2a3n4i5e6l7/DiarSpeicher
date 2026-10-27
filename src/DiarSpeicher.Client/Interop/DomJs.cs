@@ -10,8 +10,23 @@ internal static partial class DomJs
     [JSImport("scrollHorizontally", Module)]
     public static partial void ScrollHorizontally(string elementId, int delta);
 
-    [JSImport("historyBack", Module)]
-    public static partial bool HistoryBack();
+    [JSImport("globalThis.document.getElementById")]
+    public static partial JSObject? GetElementById(string id);
+
+    [JSImport("globalThis.history.back")]
+    private static partial void GoBack();
+
+    public static bool HistoryBack()
+    {
+        using var history = JSHost.GlobalThis.GetPropertyAsJSObject("history");
+        if (history is null || history.GetPropertyAsInt32("length") <= 1)
+        {
+            return false;
+        }
+
+        GoBack();
+        return true;
+    }
 
     [JSImport("coverColumns", Module)]
     public static partial int CoverColumns(int minWidth, int gap);
@@ -21,14 +36,6 @@ internal static partial class DomJs
     private const string Source = """"
         export function scrollHorizontally(elementId, delta) {
             document.getElementById(elementId)?.scrollBy({ left: delta, behavior: "smooth" });
-        }
-
-        export function historyBack() {
-            if (globalThis.history.length <= 1) {
-                return false;
-            }
-            globalThis.history.back();
-            return true;
         }
 
         export function coverColumns(minWidth, gap) {

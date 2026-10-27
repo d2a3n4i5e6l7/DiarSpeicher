@@ -32,6 +32,12 @@ public sealed class MediaApi(HttpClient http, GatewayOptions gateway)
         return page?.Data ?? [];
     }
 
+    public Task<DiarSpeicherEpubManifestDto?> EpubManifestAsync(string id, CancellationToken cancellationToken = default) =>
+        _client.GetAsync($"/api/v2/epub/{id}/manifest", CatalogJsonContext.Default.DiarSpeicherEpubManifestDto, cancellationToken);
+
+    public Task<DiarSpeicherEpubChapterDto?> EpubChapterAsync(string id, int chapter, CancellationToken cancellationToken = default) =>
+        _client.GetAsync($"/api/v2/epub/{id}/chapter/{chapter}", CatalogJsonContext.Default.DiarSpeicherEpubChapterDto, cancellationToken);
+
     public string ThumbnailUrl(string id) => _client.Url($"/api/v2/media/{id}/thumbnail");
 
     public string PageUrl(string id, int page) => _client.Url($"/api/v2/media/{id}/page/{page}");

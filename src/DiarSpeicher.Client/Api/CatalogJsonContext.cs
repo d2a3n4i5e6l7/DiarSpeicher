@@ -24,6 +24,8 @@ namespace DiarSpeicher.Client.Api;
 [JsonSerializable(typeof(List<DiarSpeicherScanStatusDto>))]
 [JsonSerializable(typeof(DiarSpeicherUploadResponseDto))]
 [JsonSerializable(typeof(DiarSpeicherEpubTocDto))]
+[JsonSerializable(typeof(DiarSpeicherEpubManifestDto))]
+[JsonSerializable(typeof(DiarSpeicherEpubChapterDto))]
 [JsonSerializable(typeof(List<EpubDeviceProfile>))]
 [JsonSerializable(typeof(List<FolderRootDto>))]
 [JsonSerializable(typeof(FolderEntryDto))]

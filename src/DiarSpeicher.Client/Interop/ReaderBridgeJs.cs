@@ -1,95 +1,83 @@
 using System.Runtime.InteropServices.JavaScript;
-using System.Text;
 
 namespace DiarSpeicher.Client.Interop;
 
 internal static partial class ReaderBridgeJs
 {
-    private const string Module = "reader-bridge";
-
-    public static event Action<int>? PageVisible;
-
     public static event Action<bool>? FullscreenChanged;
 
-    [JSImport("toggleFullscreen", Module)]
-    public static partial void ToggleFullscreen(string elementId);
+    public static event Action? Scrolled;
 
-    [JSImport("imageRatio", Module)]
-    public static partial double ImageRatio(string imageId);
+    public static void Initialize()
+    {
+        AddDocumentListener("fullscreenchange", () => FullscreenChanged?.Invoke(IsFullscreen()), false);
+        AddDocumentListener("scroll", () => Scrolled?.Invoke(), true);
+    }
 
-    [JSImport("observePages", Module)]
-    public static partial void ObservePages(string containerId);
+    public static async Task ToggleFullscreen()
+    {
+        try
+        {
+            await (IsFullscreen() ? ExitFullscreen() : RequestFullscreen());
+        }
+        catch (JSException)
+        {
+        }
+    }
 
-    [JSImport("disconnect", Module)]
-    public static partial void Disconnect();
-
-    [JSExport]
-    internal static void OnPageVisible(int page) => PageVisible?.Invoke(page);
-
-    [JSExport]
-    internal static void OnFullscreenChanged(bool fullscreen) => FullscreenChanged?.Invoke(fullscreen);
-
-    public static Task Load() => JSHost.ImportAsync(Module, "data:text/javascript;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(Source)));
-
-    private const string Source = """"
-        const VISIBLE_SHARE = 0.5;
-        let observer = null;
-        let exportsPromise = null;
-
-        function exports() {
-            exportsPromise ??= globalThis.getDotnetRuntime(0).getAssemblyExports("DiarSpeicher.Client.dll");
-            return exportsPromise;
+    public static double ImageRatio(string imageId)
+    {
+        using var image = DomJs.GetElementById(imageId);
+        if (image is null)
+        {
+            return 0;
         }
 
-        function bridge(handler) {
-            exports().then((e) => handler(e.DiarSpeicher.Client.Interop.ReaderBridgeJs));
+        var width = image.GetPropertyAsDouble("naturalWidth");
+        var height = image.GetPropertyAsDouble("naturalHeight");
+        return width > 0 && height > 0 ? width / height : 0;
+    }
+
+    public static int? PageAtViewportCenter(string scrollerId, Func<int, string> slotId, int pageCount)
+    {
+        using var scroller = DomJs.GetElementById(scrollerId);
+        if (scroller is null || pageCount < 1)
+        {
+            return null;
         }
 
-        document.addEventListener("fullscreenchange", () => {
-            const active = Boolean(document.fullscreenElement);
-            bridge((b) => b.OnFullscreenChanged(active));
-        });
-
-        export function toggleFullscreen(elementId) {
-            if (document.fullscreenElement) {
-                document.exitFullscreen().catch(() => undefined);
-                return;
+        var center = scroller.GetPropertyAsDouble("scrollTop") + scroller.GetPropertyAsDouble("clientHeight") / 2;
+        var (low, high) = (1, pageCount);
+        while (low < high)
+        {
+            var middle = (low + high + 1) / 2;
+            using var slot = DomJs.GetElementById(slotId(middle));
+            if (slot is not null && slot.GetPropertyAsDouble("offsetTop") <= center)
+            {
+                low = middle;
             }
-            document.getElementById(elementId)?.requestFullscreen().catch(() => undefined);
-        }
-
-        export function imageRatio(imageId) {
-            const img = document.getElementById(imageId);
-            if (!img || img.naturalWidth <= 0 || img.naturalHeight <= 0) {
-                return 0;
-            }
-            return img.naturalWidth / img.naturalHeight;
-        }
-
-        export function observePages(containerId) {
-            disconnect();
-            const root = document.getElementById(containerId);
-            if (!root) {
-                return;
-            }
-            observer = new IntersectionObserver((entries) => {
-                for (const entry of entries) {
-                    if (entry.isIntersecting && entry.intersectionRatio > VISIBLE_SHARE) {
-                        const value = Number(entry.target.dataset.page);
-                        if (!Number.isNaN(value)) {
-                            bridge((b) => b.OnPageVisible(value));
-                        }
-                    }
-                }
-            }, { threshold: [VISIBLE_SHARE] });
-            for (const node of root.querySelectorAll("[data-page]")) {
-                observer.observe(node);
+            else
+            {
+                high = middle - 1;
             }
         }
 
-        export function disconnect() {
-            observer?.disconnect();
-            observer = null;
-        }
-        """";
+        return low;
+    }
+
+    private static bool IsFullscreen()
+    {
+        using var document = JSHost.GlobalThis.GetPropertyAsJSObject("document");
+        using var element = document?.GetPropertyAsJSObject("fullscreenElement");
+        return element is not null;
+    }
+
+    [JSImport("globalThis.document.addEventListener")]
+    private static partial void AddDocumentListener(string type, [JSMarshalAs<JSType.Function>] Action listener, bool capture);
+
+    [JSImport("globalThis.document.exitFullscreen")]
+    private static partial Task ExitFullscreen();
+
+    [JSImport("globalThis.document.documentElement.requestFullscreen")]
+    private static partial Task RequestFullscreen();
 }

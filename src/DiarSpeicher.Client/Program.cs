@@ -44,10 +44,8 @@ services.AddCascadingAuthenticationState();
 services.AddMudServices();
 
 await DpopJs.Load();
-await StorageJs.Load();
 await DomJs.Load();
-await ReaderBridgeJs.Load();
-await EpubJs.Load();
+ReaderBridgeJs.Initialize();
 await builder.Build().RunAsync();
 
 static HttpClient CreateHttpClient(string baseAddress, UnauthorizedSignal unauthorized) =>

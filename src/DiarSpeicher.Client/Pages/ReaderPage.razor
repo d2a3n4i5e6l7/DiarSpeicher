@@ -24,11 +24,11 @@ else
 
         @if (Strip)
         {
-            <div id="@StripId" class="reader-strip">
+            <div class="reader-strip">
                 @for (var n = 1; n <= TotalPages; n++)
                 {
                     var pageNumber = n;
-                    <div @key="pageNumber" data-page="@pageNumber" class="reader-strip-slot" style="aspect-ratio: @Ratio(pageNumber)">
+                    <div @key="pageNumber" id="@StripSlotId(pageNumber)" class="reader-strip-slot" style="aspect-ratio: @Ratio(pageNumber)">
                         @if (Math.Abs(pageNumber - _page) <= StripWindow)
                         {
                             @PageFrame(pageNumber)

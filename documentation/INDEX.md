@@ -19,5 +19,4 @@ El índice propio del backend está en [backend/README.md](backend/README.md).
 
 ## Frontend
 
-Cliente Blazor WebAssembly + MudBlazor en `src/DiarSpeicher.Client`. El plan de la migración está en
-[plan-migracion-blazor.md](plan-migracion-blazor.md).
+Cliente Blazor WebAssembly + MudBlazor en `src/DiarSpeicher.Client`.

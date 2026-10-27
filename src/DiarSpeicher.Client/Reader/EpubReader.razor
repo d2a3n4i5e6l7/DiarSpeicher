@@ -1,4 +1,4 @@
-<div id="@RootId" @ref="_root" tabindex="0" class="epub-root" style="background-color: @_theme.Background"
+<div @ref="_root" tabindex="0" class="epub-root epub-theme-@_theme.Name" style="background-color: @_theme.Background"
      @onmousemove="WakeUi" @onclick="WakeUi" @onkeydown="OnKeyDown">
 
     <div class="@(_uiVisible ? "epub-top visible" : "epub-top")">
@@ -44,7 +44,7 @@
         {
             <div class="epub-overlay" style="background-color: @_theme.Background">
                 <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Large" />
-                <span class="epub-status">@_status</span>
+                <span class="epub-status">Abriendo libro...</span>
             </div>
         }
 
@@ -56,7 +56,9 @@
             </div>
         }
 
-        <div id="@ViewerId" class="epub-viewer"></div>
+        <div class="epub-viewer">
+            <div id="@PageId" class="epub-page" style="font-size: @(_fontSize)%">@_chapterHtml</div>
+        </div>
 
         <div class="epub-zone left" @onclick="GoPrev" @onclick:stopPropagation="true"></div>
         <div class="epub-zone right" @onclick="GoNext" @onclick:stopPropagation="true"></div>
@@ -73,15 +75,15 @@
             <span class="epub-toc-title">// ÍNDICE DE CAPÍTULOS</span>
             <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="() => _tocOpen = false" />
         </div>
-        @if (_toc.Count == 0)
+        @if (_manifest.Toc.Count == 0)
         {
             <p class="epub-toc-empty">No hay índice disponible para este libro.</p>
         }
         else
         {
-            @foreach (var item in _toc)
+            @foreach (var entry in _manifest.Toc)
             {
-                <button type="button" class="epub-toc-item" @onclick="() => NavigateToChapter(item.Href)">@item.Label</button>
+                <button type="button" class="epub-toc-item" @onclick="() => NavigateToChapter(entry)">@entry.Title</button>
             }
         }
     </MudDrawer>

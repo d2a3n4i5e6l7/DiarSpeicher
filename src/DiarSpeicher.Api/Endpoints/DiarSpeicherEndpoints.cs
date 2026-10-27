@@ -11,6 +11,7 @@ public static partial class DiarSpeicherEndpoints
 {
     private const string AuthUserKey = "AuthUser";
     private const string CacheControlPublicOneDay = "public, max-age=86400";
+    private const string CacheControlPrivateImmutable = "private, max-age=31536000, immutable";
     private const string SeriesThumbnailRoute = "/series/{id}/thumbnail";
 
     /// <summary>

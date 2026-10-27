@@ -1,44 +1,42 @@
 using System.Runtime.InteropServices.JavaScript;
-using System.Text;
 
 namespace DiarSpeicher.Client.Interop;
 
 internal static partial class StorageJs
 {
-    private const string Module = "storage";
-
-    [JSImport("getItem", Module)]
-    public static partial string? GetItem(string key);
-
-    [JSImport("setItem", Module)]
-    public static partial void SetItem(string key, string value);
-
-    [JSImport("removeItem", Module)]
-    public static partial void RemoveItem(string key);
-
-    public static Task Load() => JSHost.ImportAsync(Module, "data:text/javascript;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(Source)));
-
-    private const string Source = """"
-        export function getItem(key) {
-            try {
-                return globalThis.localStorage.getItem(key);
-            } catch {
-                return null;
-            }
+    public static string? GetItem(string key)
+    {
+        try
+        {
+            return LocalStorageGetItem(key);
         }
-
-        export function setItem(key, value) {
-            try {
-                globalThis.localStorage.setItem(key, value);
-            } catch {
-            }
+        catch (JSException)
+        {
+            return null;
         }
+    }
 
-        export function removeItem(key) {
-            try {
-                globalThis.localStorage.removeItem(key);
-            } catch {
-            }
+    public static void SetItem(string key, string value) => IgnoreUnavailable(() => LocalStorageSetItem(key, value));
+
+    public static void RemoveItem(string key) => IgnoreUnavailable(() => LocalStorageRemoveItem(key));
+
+    private static void IgnoreUnavailable(Action write)
+    {
+        try
+        {
+            write();
         }
-        """";
+        catch (JSException)
+        {
+        }
+    }
+
+    [JSImport("globalThis.localStorage.getItem")]
+    private static partial string? LocalStorageGetItem(string key);
+
+    [JSImport("globalThis.localStorage.setItem")]
+    private static partial void LocalStorageSetItem(string key, string value);
+
+    [JSImport("globalThis.localStorage.removeItem")]
+    private static partial void LocalStorageRemoveItem(string key);
 }

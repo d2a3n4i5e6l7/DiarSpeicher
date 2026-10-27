@@ -38,9 +38,40 @@ public static partial class DiarSpeicherEndpoints
             var res = await service.GetEpubResourceAsync(user, id, resourcePath, ct);
             if (res == null) return Results.NotFound();
 
-            httpContext.Response.Headers.CacheControl = CacheControlPublicOneDay;
+            httpContext.Response.Headers.CacheControl = httpContext.Request.Query.ContainsKey("v")
+                ? CacheControlPrivateImmutable
+                : CacheControlPublicOneDay;
             return Results.File(res.Value.Data, res.Value.ContentType);
         });
+
+        group.MapGet("/epub/{id}/manifest", async (
+            string id,
+            HttpContext httpContext,
+            [FromServices] IDiarSpeicherService service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            var manifest = await service.GetEpubManifestAsync(user, id, ct);
+            return manifest == null ? Results.NotFound() : Results.Ok(manifest);
+        });
+
+        group.MapGet("/epub/{id}/chapter/{index:int}", async (
+            string id,
+            int index,
+            HttpContext httpContext,
+            [FromServices] IDiarSpeicherService service,
+            CancellationToken ct) =>
+        {
+            var user = (AuthUser)httpContext.Items[AuthUserKey]!;
+            var chapter = await service.GetEpubChapterAsync(user, id, index, SiblingResourceBase(httpContext.Request), ct);
+            return chapter == null ? Results.NotFound() : Results.Ok(chapter);
+        });
+    }
+
+    private static string SiblingResourceBase(HttpRequest request)
+    {
+        var chapterPath = $"{request.PathBase}{request.Path}";
+        return chapterPath[..chapterPath.LastIndexOf("/chapter/", StringComparison.Ordinal)] + "/resource/";
     }
 
     private static void MapUserProfileRoutes(RouteGroupBuilder group)

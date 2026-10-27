@@ -23,5 +23,7 @@ namespace DiarSpeicher.Api.Serialization;
 [JsonSerializable(typeof(List<DiarSpeicherScanStatusDto>))]
 [JsonSerializable(typeof(DiarSpeicherUploadResponseDto))]
 [JsonSerializable(typeof(DiarSpeicherEpubTocDto))]
+[JsonSerializable(typeof(DiarSpeicherEpubManifestDto))]
+[JsonSerializable(typeof(DiarSpeicherEpubChapterDto))]
 [JsonSerializable(typeof(List<EpubDeviceProfile>))]
 internal sealed partial class CatalogJsonContext : JsonSerializerContext;

@@ -14,10 +14,10 @@ public sealed partial class ReaderPage : IDisposable
     private const int SwipeThreshold = 60;
     private const string EpubExtension = "epub";
     private const string CanvasId = "reader-canvas";
-    private const string StripId = "reader-strip";
     private static readonly TimeSpan UiHideDelay = TimeSpan.FromMilliseconds(2500);
     private static readonly TimeSpan ProgressDebounce = TimeSpan.FromMilliseconds(1200);
     private static readonly TimeSpan SliderPreviewDebounce = TimeSpan.FromMilliseconds(150);
+    private static readonly TimeSpan ScrollSettle = TimeSpan.FromMilliseconds(150);
 
     private const double FallbackRatio = 2.0 / 3.0;
 
@@ -33,7 +33,7 @@ public sealed partial class ReaderPage : IDisposable
     private bool _uiVisible = true;
     private bool _panelOpen;
     private bool _fullscreen;
-    private bool _observing;
+    private bool _scrollSettling;
     private bool _focusPending;
     private (double X, double Y)? _touchStart;
     private CancellationTokenSource? _hideUi;
@@ -64,7 +64,7 @@ public sealed partial class ReaderPage : IDisposable
 
     protected override void OnInitialized()
     {
-        ReaderBridgeJs.PageVisible += OnPageVisible;
+        ReaderBridgeJs.Scrolled += OnScrolled;
         ReaderBridgeJs.FullscreenChanged += OnFullscreenChanged;
         WakeUi();
     }
@@ -100,19 +100,6 @@ public sealed partial class ReaderPage : IDisposable
             return;
         }
 
-        if (Strip != _observing)
-        {
-            _observing = Strip;
-            if (Strip)
-            {
-                ReaderBridgeJs.ObservePages(StripId);
-            }
-            else
-            {
-                ReaderBridgeJs.Disconnect();
-            }
-        }
-
         if (_focusPending)
         {
             _focusPending = false;
@@ -122,9 +109,8 @@ public sealed partial class ReaderPage : IDisposable
 
     public void Dispose()
     {
-        ReaderBridgeJs.PageVisible -= OnPageVisible;
+        ReaderBridgeJs.Scrolled -= OnScrolled;
         ReaderBridgeJs.FullscreenChanged -= OnFullscreenChanged;
-        ReaderBridgeJs.Disconnect();
         Cancel(ref _hideUi);
         Cancel(ref _preview);
         Cancel(ref _progress);
@@ -214,9 +200,9 @@ public sealed partial class ReaderPage : IDisposable
 
     private void Exit() => Navigation.NavigateTo(_media is null ? string.Empty : $"media/{_media.Id}");
 
-    private void ToggleFullscreen() => ReaderBridgeJs.ToggleFullscreen(CanvasId);
+    private Task ToggleFullscreen() => ReaderBridgeJs.ToggleFullscreen();
 
-    private void OnKeyDown(KeyboardEventArgs e)
+    private async Task OnKeyDown(KeyboardEventArgs e)
     {
         switch (e.Key)
         {
@@ -233,7 +219,7 @@ public sealed partial class ReaderPage : IDisposable
                 GoPrev();
                 break;
             case "f" or "F":
-                ToggleFullscreen();
+                await ToggleFullscreen();
                 break;
             case "Escape" when !_fullscreen:
                 Exit();
@@ -295,6 +281,27 @@ public sealed partial class ReaderPage : IDisposable
     private double RatioOf(int pageNumber) => _ratios.TryGetValue(pageNumber, out var ratio) ? ratio : _lastRatio;
 
     private static string PageImageId(int pageNumber) => $"reader-page-{pageNumber}";
+
+    private static string StripSlotId(int pageNumber) => $"reader-slot-{pageNumber}";
+
+    private void OnScrolled()
+    {
+        if (!Strip || _media is null || _scrollSettling)
+        {
+            return;
+        }
+
+        _scrollSettling = true;
+        _ = InvokeAsync(async () =>
+        {
+            await Task.Delay(ScrollSettle);
+            _scrollSettling = false;
+            if (ReaderBridgeJs.PageAtViewportCenter(CanvasId, StripSlotId, TotalPages) is { } page && page != _page)
+            {
+                OnPageVisible(page);
+            }
+        });
+    }
 
     private void OnPageVisible(int page) => _ = InvokeAsync(() =>
     {

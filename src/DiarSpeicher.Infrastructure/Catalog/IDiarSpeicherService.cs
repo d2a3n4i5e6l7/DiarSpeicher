@@ -22,6 +22,8 @@ public interface IDiarSpeicherService
     Task<bool> UpdateProgressAsync(AuthUser user, string mediaId, DiarSpeicherUpdateProgressInput input, CancellationToken ct = default);
     Task<DiarSpeicherEpubTocDto?> GetEpubTocAsync(AuthUser user, string mediaId, CancellationToken ct = default);
     Task<(byte[] Data, string ContentType)?> GetEpubResourceAsync(AuthUser user, string mediaId, string resourcePath, CancellationToken ct = default);
+    Task<DiarSpeicherEpubManifestDto?> GetEpubManifestAsync(AuthUser user, string mediaId, CancellationToken ct = default);
+    Task<DiarSpeicherEpubChapterDto?> GetEpubChapterAsync(AuthUser user, string mediaId, int chapter, string resourceBase, CancellationToken ct = default);
     Task<DiarSpeicherLibraryDto?> CreateLibraryAsync(AuthUser user, DiarSpeicherCreateLibraryInput input, CancellationToken ct = default);
     Task<DiarSpeicherLibraryDto?> UpdateLibraryAsync(AuthUser user, string id, DiarSpeicherUpdateLibraryInput input, CancellationToken ct = default);
     Task<bool> DeleteLibraryAsync(AuthUser user, string id, bool deleteFiles = false, CancellationToken ct = default);

@@ -344,6 +344,34 @@ public sealed class DiarSpeicherEpubTocItem
     public List<DiarSpeicherEpubTocItem> Children { get; set; } = new();
 }
 
+public sealed class DiarSpeicherEpubManifestDto
+{
+    [JsonPropertyName("chapterSizes")]
+    public List<long> ChapterSizes { get; set; } = new();
+
+    [JsonPropertyName("toc")]
+    public List<DiarSpeicherEpubTocEntry> Toc { get; set; } = new();
+}
+
+public sealed class DiarSpeicherEpubTocEntry
+{
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+
+    [JsonPropertyName("chapter")]
+    public int Chapter { get; set; }
+
+    [JsonPropertyName("anchor")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Anchor { get; set; }
+}
+
+public sealed class DiarSpeicherEpubChapterDto
+{
+    [JsonPropertyName("html")]
+    public string Html { get; set; } = string.Empty;
+}
+
 public sealed class DiarSpeicherUpdateProgressInput
 {
     [JsonPropertyName("page")]
