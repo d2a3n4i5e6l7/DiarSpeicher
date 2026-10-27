@@ -16,10 +16,11 @@
 
                 <div class="library-path-row">
                     <MudTextField T="string" @bind-Value="_path" Immediate="true" Label="Ruta en el sistema de ficheros" Variant="Variant.Outlined"
-                                  Disabled="_saving" HelperText="@PathHelper" Placeholder="/libraries/manga" Class="library-path" />
+                                  Disabled="_saving" Placeholder="/libraries/manga" Class="library-path" />
                     <MudButton Variant="Variant.Outlined" Disabled="_saving" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="() => _pickerOpen = true" Class="library-browse">
                         Examinar
                     </MudButton>
+                    <MudText Typo="Typo.caption" Class="library-path-helper">@PathHelper</MudText>
                 </div>
 
                 <MudTextField T="string" @bind-Value="_description" Label="Descripción opcional" Variant="Variant.Outlined" Lines="2"

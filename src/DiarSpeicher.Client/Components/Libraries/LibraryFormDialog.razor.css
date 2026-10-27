@@ -6,20 +6,27 @@
 }
 
 .library-path-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 8px;
+    row-gap: 4px;
 }
 
 .library-path-row ::deep .library-path {
-    flex-grow: 1;
+    margin: 0;
     font-family: var(--font-mono);
 }
 
 .library-path-row ::deep .library-browse {
-    margin-top: 41px;
-    flex-shrink: 0;
+    align-self: center;
     white-space: nowrap;
+}
+
+.library-path-row ::deep .library-path-helper {
+    grid-column: 1 / -1;
+    align-self: end;
+    padding: 0 14px;
+    color: var(--mud-palette-text-secondary);
 }
 
 .library-config {
