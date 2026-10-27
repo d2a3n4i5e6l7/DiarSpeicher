@@ -1,0 +1,57 @@
+@if (ShowText)
+{
+    <span class="logo">
+        @Icon
+        <span class="logo-text">
+            <span class="logo-name" style="font-size: @(Size > LargeThreshold ? 24 : 17)px">DIAR<span class="logo-accent">SPEICHER</span></span>
+            @if (ShowSubtitle)
+            {
+                <span class="logo-subtitle">@Subtitle</span>
+            }
+        </span>
+    </span>
+}
+else
+{
+    @Icon
+}
+
+@code {
+    private const int LargeThreshold = 40;
+
+    [Parameter] public int Size { get; set; } = 36;
+
+    [Parameter] public bool ShowText { get; set; } = true;
+
+    [Parameter] public bool ShowSubtitle { get; set; }
+
+    [Parameter] public string Subtitle { get; set; } = "ARCHIVE NODE";
+
+    private RenderFragment Icon => @<svg viewBox="0 0 200 200" width="@Size" height="@Size" class="logo-icon">
+        <defs>
+            <linearGradient id="dsMetal" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" style="stop-color: var(--ds-metal)" />
+                <stop offset="50%" style="stop-color: var(--ds-metal-2)" />
+                <stop offset="100%" style="stop-color: var(--ds-metal-lo)" />
+            </linearGradient>
+            <linearGradient id="dsCrimson" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" style="stop-color: var(--ds-red-hover)" />
+                <stop offset="50%" style="stop-color: var(--ds-red)" />
+                <stop offset="100%" style="stop-color: var(--ds-red-light)" />
+            </linearGradient>
+        </defs>
+        <polygon points="40,20 135,20 185,75 185,125 135,180 40,180 40,150 55,135 55,65 40,50" fill="url(#dsMetal)" style="stroke: var(--ds-metal-hi)" stroke-width="3" />
+        <polygon points="135,20 155,5 142,20" style="fill: var(--ds-red)" />
+        <polygon points="185,75 200,68 185,87" style="fill: var(--ds-red)" />
+        <polygon points="185,125 200,132 185,113" style="fill: var(--ds-red)" />
+        <polygon points="135,180 155,195 142,180" style="fill: var(--ds-red)" />
+        <polygon points="80,55 115,55 150,90 150,110 115,145 80,145" style="fill: var(--ds-bg-deep); stroke: var(--ds-red-hover)" stroke-width="2" />
+        <g transform="translate(118, 100)">
+            <polygon points="0,-42 7,-18 0,-10 -7,-18" fill="url(#dsCrimson)" />
+            <polygon points="0,42 7,18 0,10 -7,18" fill="url(#dsCrimson)" />
+            <polygon points="-35,0 -14,6 -8,0 -14,-6" fill="url(#dsCrimson)" />
+            <polygon points="35,0 14,6 8,0 14,-6" fill="url(#dsCrimson)" />
+            <polygon points="0,-7 7,0 0,7 -7,0" fill="#FFF" style="stroke: var(--ds-red-glow)" stroke-width="1.5" />
+        </g>
+    </svg>;
+}

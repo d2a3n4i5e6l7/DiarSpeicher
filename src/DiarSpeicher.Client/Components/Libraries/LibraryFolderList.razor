@@ -1,0 +1,50 @@
+@using DiarSpeicher.Core.Domain.Catalog
+@inject FilesystemApi Filesystem
+
+@if (_entries is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_entries.Count == 0)
+{
+    <span class="folders-empty">Sin carpetas dentro.</span>
+}
+else
+{
+    <div class="folders">
+        @foreach (var entry in _entries)
+        {
+            <div class="folder" @key="entry.Path">
+                <MudIcon Icon="@Icons.Material.Filled.Folder" Style="font-size: 15px; color: var(--ds-red-light)" />
+                <span class="folder-name">@entry.Name</span>
+                @if (entry.FileCount > 0)
+                {
+                    <span class="folder-count">@entry.FileCount</span>
+                }
+                <MudTooltip Text="@($"Subir a {entry.Name}")">
+                    <MudIconButton Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" OnClick="() => Upload.InvokeAsync(entry.Name)" />
+                </MudTooltip>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<FolderEntryDto>? _entries;
+
+    [Parameter, EditorRequired] public string Path { get; set; } = string.Empty;
+
+    [Parameter] public EventCallback<string> Upload { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _entries = (await Filesystem.BrowseAsync(Path))?.Entries ?? [];
+        }
+        catch (ApiException)
+        {
+            _entries = [];
+        }
+    }
+}

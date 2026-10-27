@@ -1,0 +1,41 @@
+.folders-empty {
+    padding: 0 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ds-subtle);
+}
+
+.folders {
+    max-height: 190px;
+    overflow-y: auto;
+    border: 1px solid var(--ds-border-soft);
+}
+
+.folder {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--ds-border-soft);
+}
+
+.folder:hover {
+    background-color: rgba(var(--ds-red-rgb), 0.06);
+}
+
+.folder-name {
+    flex-grow: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-tactical);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.folder-count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ds-subtle);
+}

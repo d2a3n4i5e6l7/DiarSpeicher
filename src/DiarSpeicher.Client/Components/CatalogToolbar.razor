@@ -1,0 +1,58 @@
+<div class="catalog-toolbar">
+    <MudTextField T="string" Value="Query" ValueChanged="QueryChanged" Immediate="true" Placeholder="@Placeholder"
+                  Variant="Variant.Outlined" Margin="Margin.Dense" Class="catalog-toolbar-search"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true" />
+
+    <MudSelect T="string" Value="Sort" ValueChanged="OnSortChanged" Variant="Variant.Outlined" Margin="Margin.Dense"
+               Class="catalog-toolbar-sort">
+        @foreach (var option in Options)
+        {
+            <MudSelectItem T="string" Value="@option.Id" Style="font-family: var(--font-tactical); font-weight: 600">@option.Label</MudSelectItem>
+        }
+    </MudSelect>
+
+    <MudTooltip Text="@(Flipped ? "Orden descendente" : "Orden ascendente")">
+        <MudIconButton Icon="@(Flipped ? Icons.Material.Filled.ArrowDownward : Icons.Material.Filled.ArrowUpward)"
+                       Size="Size.Small" Class="@(Flipped ? "catalog-toolbar-direction flipped" : "catalog-toolbar-direction")" OnClick="FlipDirection" />
+    </MudTooltip>
+
+    @if (Shown is { } shown && Total is { } total)
+    {
+        <span class="ds-pill-mono">@(shown == total ? $"{total}" : $"{shown} / {total}")</span>
+    }
+</div>
+
+@code {
+    [Parameter] public string Query { get; set; } = string.Empty;
+
+    [Parameter] public EventCallback<string> QueryChanged { get; set; }
+
+    [Parameter, EditorRequired] public string Sort { get; set; } = string.Empty;
+
+    [Parameter] public EventCallback<string> SortChanged { get; set; }
+
+    [Parameter] public CatalogSortDirection Direction { get; set; }
+
+    [Parameter] public EventCallback<CatalogSortDirection> DirectionChanged { get; set; }
+
+    [Parameter, EditorRequired] public IReadOnlyList<SortOption> Options { get; set; } = [];
+
+    [Parameter] public string Placeholder { get; set; } = "Buscar...";
+
+    [Parameter] public int? Shown { get; set; }
+
+    [Parameter] public int? Total { get; set; }
+
+    private bool Flipped => Direction == CatalogSortDirection.Desc;
+
+    private async Task OnSortChanged(string next)
+    {
+        await SortChanged.InvokeAsync(next);
+        if (Options.FirstOrDefault(option => option.Id == next) is { } option)
+        {
+            await DirectionChanged.InvokeAsync(option.DefaultDirection);
+        }
+    }
+
+    private Task FlipDirection() => DirectionChanged.InvokeAsync(Flipped ? CatalogSortDirection.Asc : CatalogSortDirection.Desc);
+}

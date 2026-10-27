@@ -1,0 +1,155 @@
+@using System.Globalization
+@using DiarSpeicher.Core.Domain.MangaBaka
+@inject MetadataApi MetadataApi
+
+<MudDialog Visible="Visible" VisibleChanged="VisibleChanged" Options="DialogOptions">
+    <TitleContent>Emparejar: @SeriesName</TitleContent>
+    <DialogContent>
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+        }
+
+        @if (_candidates is null)
+        {
+            <div class="match-state"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>
+        }
+        else if (_candidates.Count == 0)
+        {
+            <p class="match-empty">
+                Ningún candidato. Puede que el volcado no esté descargado todavía, o que el nombre de la carpeta no se parezca al
+                título de la obra.
+            </p>
+        }
+        else
+        {
+            <MudStack Spacing="2">
+                @foreach (var candidate in _candidates)
+                {
+                    <div class="match-row" @key="candidate.Id">
+                        <span class="ds-pill-mono match-id">#@candidate.Id</span>
+                        <div class="match-body">
+                            <span class="match-title">@candidate.Title</span>
+                            @if (!string.IsNullOrEmpty(candidate.NativeTitle))
+                            {
+                                <span class="match-native">@candidate.NativeTitle</span>
+                            }
+                            <div class="match-chips">
+                                @foreach (var chip in Chips(candidate))
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Text="@chip" />
+                                }
+                            </div>
+                            @if (!string.IsNullOrEmpty(candidate.Authors))
+                            {
+                                <span class="match-authors">@candidate.Authors.ToUpperInvariant()</span>
+                            }
+                            @if (!string.IsNullOrEmpty(candidate.Genres))
+                            {
+                                <span class="match-genres">@candidate.Genres</span>
+                            }
+                            @if (!string.IsNullOrEmpty(candidate.Description))
+                            {
+                                <span class="match-description">@candidate.Description</span>
+                            }
+                        </div>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_applying is not null" Class="match-apply"
+                                   OnClick="() => ApplyAsync(candidate)">
+                            @(_applying == candidate.Id ? "APLICANDO..." : "ES ESTA")
+                        </MudButton>
+                    </div>
+                }
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseAsync" Class="ds-button-muted">CANCELAR</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions DialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+    private const int CandidateLimit = 12;
+
+    private List<MangaBakaCandidateDto>? _candidates;
+    private string? _error;
+    private int? _applying;
+    private bool _wasVisible;
+
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    [Parameter, EditorRequired] public string SeriesId { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public string SeriesName { get; set; } = string.Empty;
+
+    [Parameter] public EventCallback Matched { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var opened = Visible && !_wasVisible;
+        _wasVisible = Visible;
+        if (!opened)
+        {
+            return;
+        }
+
+        _candidates = null;
+        _error = null;
+        try
+        {
+            _candidates = await MetadataApi.CandidatesAsync(SeriesId, CandidateLimit) ?? [];
+        }
+        catch (ApiException exception)
+        {
+            _candidates = [];
+            _error = exception.Message;
+        }
+    }
+
+    private static IEnumerable<string> Chips(MangaBakaCandidateDto candidate)
+    {
+        if (!string.IsNullOrEmpty(candidate.Type))
+        {
+            yield return candidate.Type.ToUpperInvariant();
+        }
+
+        if (candidate.Year is { } year)
+        {
+            yield return year.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (!string.IsNullOrEmpty(candidate.Status))
+        {
+            yield return candidate.Status.ToUpperInvariant();
+        }
+
+        if (candidate.Rating is { } rating)
+        {
+            yield return $"★ {rating.ToString("0.0", CultureInfo.InvariantCulture)}";
+        }
+    }
+
+    private Task CloseAsync() => VisibleChanged.InvokeAsync(false);
+
+    private async Task ApplyAsync(MangaBakaCandidateDto candidate)
+    {
+        _applying = candidate.Id;
+        _error = null;
+        try
+        {
+            await MetadataApi.MatchAsync(SeriesId, candidate.Id);
+            await Matched.InvokeAsync();
+            await CloseAsync();
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _applying = null;
+        }
+    }
+}

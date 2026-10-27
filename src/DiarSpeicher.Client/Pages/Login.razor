@@ -1,0 +1,166 @@
+@inject SessionState Session
+@inject AuthApi Auth
+@inject GatewayOptions Gateway
+
+<div class="login-screen">
+    <div class="ds-noise"></div>
+    <div class="login-card ds-bevel">
+        <HudFrame />
+
+        <div class="login-header">
+            <div class="login-header-tag">
+                <span class="login-sec">SEC-01</span>
+                <span class="login-header-title">CONTROL DE ACCESO AL NODO</span>
+            </div>
+            <span class="login-header-code">DS-ARCHIVE-2026</span>
+        </div>
+
+        <div class="login-body">
+            <div class="login-brand">
+                <DiarSpeicherLogo Size="70" ShowText="false" />
+                <div>
+                    <h1 class="login-title">DIAR<span class="login-title-accent">SPEICHER</span></h1>
+                    <div class="login-subtitle">@(_requiresFirstAdmin ? "CONFIGURACIÓN INICIAL: REGISTRO DE SYSADMIN" : "MANGA & EBOOK SELF-HOSTED ARCHIVE SERVER")</div>
+                </div>
+                <div class="login-protocol">
+                    <span class="login-protocol-name">DIARMUND ARCHIVE PROTOCOL</span>
+                    <span class="login-protocol-sep">|</span>
+                    <span class="login-protocol-core">IRON BLOOD CORE</span>
+                </div>
+            </div>
+
+            @if (_requiresFirstAdmin)
+            {
+                <MudAlert Severity="Severity.Warning" Icon="@Icons.Material.Outlined.AdminPanelSettings" Class="login-alert login-alert-warn">
+                    <div class="login-alert-title">INICIALIZACIÓN DEL SISTEMA</div>
+                    <div class="login-alert-text">
+                        No se detectaron usuarios en el reino. Las credenciales configuradas aquí se asignarán al
+                        <strong>Administrador Principal</strong>.
+                    </div>
+                </MudAlert>
+            }
+            else if (_errorMessage is not null)
+            {
+                <MudAlert Severity="Severity.Error" Class="login-alert login-alert-error">@_errorMessage</MudAlert>
+            }
+            else if (_infoMessage is not null)
+            {
+                <MudAlert Severity="Severity.Info" Class="login-alert login-alert-info">@_infoMessage</MudAlert>
+            }
+
+            <form @onsubmit="SubmitAsync" novalidate>
+                <div class="login-field">
+                    <label class="login-label">@(_requiresFirstAdmin ? "Usuario Administrador" : "Identificador / Usuario")</label>
+                    <MudTextField T="string" @bind-Value="_username" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  AutoFocus="true" Disabled="_loading" Placeholder="diarmund" Class="login-input"
+                                  HelperText="@(_requiresFirstAdmin ? "Este registro único inicial tendrá control total de DiarSpeicher." : null)" />
+                </div>
+
+                <div class="login-field">
+                    <label class="login-label">Contraseña Maestra</label>
+                    <MudTextField T="string" @bind-Value="_password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  InputType="@(_showPassword ? InputType.Text : InputType.Password)" Disabled="_loading"
+                                  Placeholder="••••••••••••" Class="login-input"
+                                  Adornment="Adornment.End"
+                                  AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                                  AdornmentAriaLabel="Mostrar u ocultar la contraseña" OnAdornmentClick="TogglePassword" />
+                </div>
+
+                <MudButton ButtonType="ButtonType.Submit" FullWidth="true" Disabled="_loading" Class="btn-tactical login-submit">
+                    @if (_loading)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@(_requiresFirstAdmin ? Icons.Material.Outlined.AdminPanelSettings : Icons.Material.Outlined.Lock)" Size="Size.Small" Class="mr-2" />
+                    }
+                    @SubmitText
+                </MudButton>
+            </form>
+
+            <div class="login-footer">
+                <span class="login-footer-gateway">GATEWAY: <code>@Gateway.UrlAccess</code></span>
+                <span class="login-footer-restricted">[RESTRICTED]</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private const string ProbeCredential = "__probe__";
+    private const string MissingCredentials = "Por favor, introduce el usuario y la contraseña.";
+    private const string NoUsersYet = "El reino DiarSpeicher no tiene usuarios registrados. Registra el primer Administrador.";
+    private const string RequestFailed = "Error al procesar la solicitud.";
+
+    private string _username = string.Empty;
+    private string _password = string.Empty;
+    private bool _showPassword;
+    private bool _loading;
+    private bool _requiresFirstAdmin;
+    private string? _infoMessage;
+    private string? _errorMessage;
+
+    private string SubmitText => (_loading, _requiresFirstAdmin) switch
+    {
+        (true, true) => "CONFIGURANDO...",
+        (true, false) => "AUTENTICANDO...",
+        (false, true) => "CREAR ADMINISTRADOR PRINCIPAL",
+        _ => "ACCEDER AL NODO",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var probe = await Auth.LoginAsync(new LoginRequest(ProbeCredential, ProbeCredential, null));
+            _requiresFirstAdmin = probe?.RequiresFirstAdmin == true;
+        }
+        catch (ApiException)
+        {
+        }
+    }
+
+    private void TogglePassword() => _showPassword = !_showPassword;
+
+    private async Task SubmitAsync()
+    {
+        var username = _username.Trim();
+        if (username.Length == 0 || _password.Length == 0)
+        {
+            _errorMessage = MissingCredentials;
+            return;
+        }
+
+        _errorMessage = null;
+        _loading = true;
+        try
+        {
+            await SignInAsync(username);
+        }
+        catch (ApiException exception)
+        {
+            _errorMessage = string.IsNullOrEmpty(exception.Message) ? RequestFailed : exception.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SignInAsync(string username)
+    {
+        if (_requiresFirstAdmin)
+        {
+            await Session.RegisterFirstAdminAsync(username, _password);
+            return;
+        }
+
+        var response = await Session.LoginAsync(username, _password);
+        if (response?.RequiresFirstAdmin == true)
+        {
+            _requiresFirstAdmin = true;
+            _infoMessage = response.Message ?? NoUsersYet;
+        }
+    }
+}

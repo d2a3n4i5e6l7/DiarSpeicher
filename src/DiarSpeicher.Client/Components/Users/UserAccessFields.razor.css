@@ -1,0 +1,12 @@
+.access-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.access-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--ds-border-soft);
+}

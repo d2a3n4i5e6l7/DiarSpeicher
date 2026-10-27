@@ -225,7 +225,7 @@ public sealed partial class DiarSpeicherService
         if (series == null) return false;
 
         var extension = Path.GetExtension(fileName).ToLowerInvariant();
-        if (!CoverExtensions.Contains(extension)) return false;
+        if (!CoverFormats.Extensions.Contains(extension)) return false;
 
         var target = BuildSeriesThumbnailPath(seriesId, extension);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);

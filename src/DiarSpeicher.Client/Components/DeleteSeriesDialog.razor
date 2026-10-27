@@ -1,0 +1,64 @@
+@inject SeriesApi SeriesApi
+@inject NavigationManager Navigation
+
+<MudDialog Visible="Visible" VisibleChanged="VisibleChanged" Options="DialogOptions">
+    <TitleContent>// Eliminar serie</TitleContent>
+    <DialogContent>
+        <MudText Class="mb-4" Style="color: var(--ds-platinum)">¿Seguro que quieres eliminar <strong>@SeriesName</strong> y sus @VolumeCount tomos?</MudText>
+        @if (!_deleteFiles)
+        {
+            <MudAlert Severity="Severity.Info">
+                Solo se quita del índice. La carpeta sigue en el disco y volverá a aparecer en el próximo escaneo.
+            </MudAlert>
+        }
+        <MudSwitch T="bool" @bind-Value="_deleteFiles" Disabled="_deleting" Color="Color.Primary" Class="mt-4"
+                   Label="ELIMINAR TAMBIÉN LA CARPETA DEL DISCO" />
+        @if (_deleteFiles)
+        {
+            <DeleteScopeNotice Path="@SeriesPath" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseAsync" Class="ds-button-muted">CANCELAR</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_deleting" OnClick="DeleteAsync">
+            @(_deleting ? "ELIMINANDO..." : "ELIMINAR")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions DialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+
+    private bool _deleteFiles;
+    private bool _deleting;
+
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    [Parameter, EditorRequired] public string SeriesId { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public string SeriesName { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public string SeriesPath { get; set; } = string.Empty;
+
+    [Parameter] public string? LibraryId { get; set; }
+
+    [Parameter] public int VolumeCount { get; set; }
+
+    private Task CloseAsync() => VisibleChanged.InvokeAsync(false);
+
+    private async Task DeleteAsync()
+    {
+        _deleting = true;
+        try
+        {
+            await SeriesApi.DeleteAsync(SeriesId, _deleteFiles);
+            Navigation.NavigateTo(string.IsNullOrEmpty(LibraryId) ? "series" : $"libraries/{LibraryId}");
+        }
+        catch (ApiException)
+        {
+            _deleting = false;
+        }
+    }
+}

@@ -1,0 +1,57 @@
+.roles-card {
+    overflow: hidden;
+}
+
+.roles-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 48px;
+    text-align: center;
+}
+
+.roles-syncing {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: var(--ds-subtle);
+}
+
+.roles-empty-title {
+    font-family: var(--font-tactical);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--ds-platinum);
+}
+
+.roles-empty-text,
+.roles-description {
+    font-family: var(--font-body);
+    font-size: 13px;
+    color: var(--ds-muted);
+}
+
+.roles-col-id {
+    width: 96px;
+}
+
+.roles-col-actions {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.roles-name {
+    font-family: var(--font-tactical);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--ds-text-strong);
+}
+
+.roles-danger-title {
+    color: var(--ds-red-glow);
+}

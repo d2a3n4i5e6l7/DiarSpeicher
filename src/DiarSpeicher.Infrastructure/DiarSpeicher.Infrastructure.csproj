@@ -24,7 +24,7 @@
 
 
   <ItemGroup>
-    <Content Include="..\..\frontEnd\public\fonts\*.ttf" Link="Fonts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\DiarSpeicher.Client\wwwroot\fonts\*.ttf" Link="Fonts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

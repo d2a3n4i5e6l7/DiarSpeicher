@@ -1,0 +1,25 @@
+.config-row {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.config-toggle {
+    margin-bottom: 8px;
+}
+
+.config-helper {
+    display: block;
+    margin: -4px 0 0 48px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.66;
+    letter-spacing: 0.4px;
+    color: var(--ds-muted);
+}
+
+@media (min-width: 600px) {
+    .config-row {
+        flex-direction: row;
+    }
+}

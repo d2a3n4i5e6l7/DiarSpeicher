@@ -1,0 +1,24 @@
+.detail-row {
+    display: flex;
+    gap: 16px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--ds-border-soft);
+}
+
+.detail-row-label {
+    min-width: 150px;
+    flex-shrink: 0;
+    font-family: var(--font-tactical);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--ds-muted);
+}
+
+.detail-row-value {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ds-platinum);
+    word-break: break-all;
+}

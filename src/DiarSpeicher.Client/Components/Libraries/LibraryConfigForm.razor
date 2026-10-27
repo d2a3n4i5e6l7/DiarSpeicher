@@ -1,0 +1,97 @@
+@using DiarSpeicher.Core.Domain.Catalog
+@using DiarSpeicher.Core.Domain.Enums
+
+<MudStack Spacing="3">
+    <div class="config-row">
+        <MudSelect T="string" @bind-Value="Value.LibraryType" Label="Tipo de contenido" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="Disabled">
+            @foreach (var type in Enum.GetNames<LibraryType>())
+            {
+                <MudSelectItem T="string" Value="@type">@Label(TypeLabels, type)</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="string" @bind-Value="Value.LibraryPattern" Label="Estructura de carpetas" Variant="Variant.Outlined" Margin="Margin.Dense"
+                   Disabled="Disabled" SelectedValuesChanged="PatternChanged">
+            @foreach (var pattern in Enum.GetNames<LibraryPattern>())
+            {
+                <MudSelectItem T="string" Value="@pattern">@Label(PatternLabels, pattern)</MudSelectItem>
+            }
+        </MudSelect>
+    </div>
+
+    <div class="config-row">
+        <MudSelect T="string" @bind-Value="Value.DefaultReadingDir" Label="Dirección de lectura" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="Disabled">
+            @foreach (var direction in Enum.GetNames<ReadingDirection>())
+            {
+                <MudSelectItem T="string" Value="@direction">@Label(DirectionLabels, direction)</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="string" @bind-Value="Value.DefaultReadingMode" Label="Modo de lectura" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="Disabled">
+            @foreach (var mode in Enum.GetNames<ReadingMode>())
+            {
+                <MudSelectItem T="string" Value="@mode">@Label(ModeLabels, mode)</MudSelectItem>
+            }
+        </MudSelect>
+    </div>
+
+    <MudDivider />
+
+    <div>
+        @Toggle(() => Value.ProcessMetadata, value => Value.ProcessMetadata = value, "Leer metadatos embebidos", "Extrae ComicInfo.xml y metadatos de EPUB durante el escaneo.")
+        @Toggle(() => Value.GenerateFileHashes, value => Value.GenerateFileHashes = value, "Calcular hash de fichero", "Identifica el archivo por contenido, no solo por ruta.")
+        @Toggle(() => Value.GenerateKoreaderHashes, value => Value.GenerateKoreaderHashes = value, "Calcular hash de KOReader", "Necesario para que KOReader sincronice el progreso.")
+        @Toggle(() => Value.ConvertRarToZip, value => Value.ConvertRarToZip = value, "Convertir CBR a CBZ", "Los CBR requieren descompresión externa; el CBZ se sirve directo.")
+        @Toggle(() => Value.HardDeleteConversions, value => Value.HardDeleteConversions = value, "Borrar el CBR tras convertir", "Solo se aplica si la conversión está activada.")
+    </div>
+</MudStack>
+
+@code {
+    private static readonly Dictionary<string, string> TypeLabels = new()
+    {
+        [nameof(LibraryType.Comic)] = "Cómic",
+        [nameof(LibraryType.Manga)] = "Manga",
+        [nameof(LibraryType.Book)] = "Libro",
+        [nameof(LibraryType.LightNovel)] = "Novela ligera",
+        [nameof(LibraryType.Manhwa)] = "Manhwa",
+        [nameof(LibraryType.Mixed)] = "Mixta",
+        [nameof(LibraryType.WebNovel)] = "Novela web",
+        [nameof(LibraryType.Webtoon)] = "Webtoon",
+    };
+
+    private static readonly Dictionary<string, string> PatternLabels = new()
+    {
+        [nameof(LibraryPattern.SeriesBased)] = "Por series (una carpeta por serie)",
+        [nameof(LibraryPattern.CollectionBased)] = "Por colecciones (carpetas anidadas)",
+    };
+
+    private static readonly Dictionary<string, string> DirectionLabels = new()
+    {
+        [nameof(ReadingDirection.LeftToRight)] = "Izquierda a derecha",
+        [nameof(ReadingDirection.RightToLeft)] = "Derecha a izquierda (manga)",
+    };
+
+    private static readonly Dictionary<string, string> ModeLabels = new()
+    {
+        [nameof(ReadingMode.Paged)] = "Paginado",
+        [nameof(ReadingMode.ContinuousVertical)] = "Tira vertical",
+        [nameof(ReadingMode.ContinuousHorizontal)] = "Tira horizontal",
+    };
+
+    [Parameter, EditorRequired] public DiarSpeicherLibraryConfigDto Value { get; set; } = new();
+
+    [Parameter] public bool Disabled { get; set; }
+
+    [Parameter] public EventCallback<string> PatternChange { get; set; }
+
+    private Task PatternChanged(IEnumerable<string?> selected) => PatternChange.InvokeAsync(Value.LibraryPattern);
+
+    private static string Label(Dictionary<string, string> labels, string value) =>
+        labels.TryGetValue(value, out var label) ? label : value;
+
+    private RenderFragment Toggle(Func<bool> get, Action<bool> set, string label, string hint) => __builder =>
+    {
+        <div class="config-toggle">
+            <MudSwitch T="bool" Value="get()" ValueChanged="set" Label="@label" Color="Color.Primary" Disabled="Disabled" />
+            <span class="config-helper">@hint</span>
+        </div>
+    };
+}

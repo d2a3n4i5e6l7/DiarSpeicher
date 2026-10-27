@@ -1,0 +1,67 @@
+@using DiarSpeicher.Core.Domain.Catalog
+@inject FilesystemApi Filesystem
+
+@if (_loadedPath != Path)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-4" />
+}
+else if (_scope is null)
+{
+    <MudAlert Severity="Severity.Error" Class="mt-4">@(_error ?? ReadFailed)</MudAlert>
+}
+else
+{
+    <MudAlert Severity="Severity.Error" Class="mt-4">
+        <div class="scope-total">Se borrarán @_scope.FileCount archivos del disco (@Formatting.FormatBytes(_scope.Bytes)).</div>
+        @if (_scope.Folders.Count > 0)
+        {
+            <div class="scope-folders">
+                @foreach (var folder in _scope.Folders)
+                {
+                    <div class="scope-folder" @key="folder.Path">
+                        <MudIcon Icon="@Icons.Material.Filled.Folder" Style="font-size: 14px; color: var(--ds-red-light)" />
+                        <span class="scope-folder-name">@folder.Name</span>
+                        <span class="scope-folder-count">@folder.FileCount</span>
+                    </div>
+                }
+            </div>
+        }
+        <div class="scope-note">Se podrá recuperar desde <strong>Restaurar</strong> durante una hora. Después, no.</div>
+    </MudAlert>
+}
+
+@code {
+    private const string ReadFailed = "No se pudo leer la carpeta.";
+
+    private string? _loadedPath;
+    private DeletionPreviewDto? _scope;
+    private string? _error;
+
+    [Parameter, EditorRequired] public string Path { get; set; } = string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Path) || _loadedPath == Path)
+        {
+            return;
+        }
+
+        var requested = Path;
+        _loadedPath = null;
+        try
+        {
+            _scope = await Filesystem.DeletionPreviewAsync(requested);
+            _error = null;
+        }
+        catch (ApiException exception)
+        {
+            _scope = null;
+            _error = exception.Message;
+        }
+
+        if (requested == Path)
+        {
+            _loadedPath = requested;
+        }
+    }
+}

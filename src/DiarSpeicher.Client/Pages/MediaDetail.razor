@@ -1,0 +1,204 @@
+@page "/media/{Id}"
+@using DiarSpeicher.Core.Domain.Catalog
+@inject MediaApi MediaApi
+@inject SeriesApi SeriesApi
+@inject NavigationManager Navigation
+
+@if (_loadedId != Id)
+{
+    <div class="detail-loading"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>
+}
+else if (_media is null)
+{
+    <div class="detail-error">
+        <MudAlert Severity="Severity.Error">@(_error ?? "El tomo no existe o no es accesible.")</MudAlert>
+        <BackButton FallbackHref="" FallbackLabel="VOLVER AL ARCHIVO" LabelFormat="VOLVER A {0}" Class="mt-4" />
+    </div>
+}
+else
+{
+    <BackButton FallbackHref="@(_series is null ? "" : $"series/{_series.Id}")"
+                FallbackLabel="@(_series?.Name.ToUpperInvariant() ?? "ARCHIVO")" Class="ds-button-muted mb-4" />
+
+    <div class="detail-hero">
+        <HudFrame />
+        <div class="detail-cover">
+            <MediaCard Href="@($"read/{_media.Id}")" CoverUrl="@MediaApi.ThumbnailUrl(_media.Id)" Progress="Progress" Width="100%" />
+        </div>
+
+        <div class="detail-body">
+            <h1 class="detail-title">@MediaHelpers.MediaTitle(_media)</h1>
+
+            <div class="detail-chips">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Text="@Format" />
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Text="@($"{_media.Pages} PÁGS")" />
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Text="@Formatting.FormatBytes(_media.Size)" />
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Text="@Formatting.FormatDurationMinutes(MediaHelpers.EstimatedMinutes(_media.Pages))" />
+                @if (_media.IsCompleted)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Text="TERMINADO" />
+                }
+                @if (_media.ReadPercent is { } percent)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Text="@($"LEÍDO {(int)Math.Round(percent)}%")" />
+                }
+                @if (MediaHelpers.RenderedLabel(_media) is { } imageProgress)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Text="@imageProgress" />
+                }
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_media.Metadata?.Summary))
+            {
+                <p class="detail-summary">@_media.Metadata.Summary.Trim()</p>
+            }
+
+            <div class="detail-actions">
+                <MudButton Href="@($"read/{_media.Id}")" StartIcon="@Icons.Material.Filled.PlayArrow" Variant="Variant.Filled" Color="Color.Primary" Class="btn-tactical btn-tactical-hot">
+                    @ReadText
+                </MudButton>
+                <MudButton Href="@MediaApi.FileUrl(_media.Id)" StartIcon="@Icons.Material.Filled.Download"
+                           UserAttributes="DownloadAttribute" Class="ds-button-ghost">
+                    DESCARGAR
+                </MudButton>
+                <MudButton StartIcon="@Icons.Material.Outlined.DeleteOutline" Class="ds-button-ghost" OnClick="OpenDelete">ELIMINAR</MudButton>
+            </div>
+        </div>
+    </div>
+
+    <MudDialog @bind-Visible="_confirmDelete" Options="DeleteDialog">
+        <TitleContent>// Eliminar tomo</TitleContent>
+        <DialogContent>
+            <MudText Class="mb-4" Style="color: var(--ds-platinum)">¿Seguro que quieres eliminar <strong>@_media.Name</strong>?</MudText>
+            @if (!_deleteFile)
+            {
+                <MudAlert Severity="Severity.Info">
+                    Solo se quita del índice. El fichero sigue en el disco y volverá a aparecer en el próximo escaneo.
+                </MudAlert>
+            }
+            <MudSwitch T="bool" @bind-Value="_deleteFile" Disabled="_deleting" Color="Color.Primary" Class="mt-4"
+                       Label="ELIMINAR TAMBIÉN EL FICHERO DEL DISCO" />
+            @if (_deleteFile)
+            {
+                <DeleteScopeNotice Path="@_media.Path" />
+            }
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="CloseDelete" Class="ds-button-muted">CANCELAR</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_deleting" OnClick="DeleteAsync">
+                @(_deleting ? "ELIMINANDO..." : "ELIMINAR")
+            </MudButton>
+        </DialogActions>
+    </MudDialog>
+
+    <div class="detail-technical">
+        <h2 class="detail-section-title">Detalles técnicos</h2>
+        <DetailRow Label="ID" Value="@_media.Id" />
+        <DetailRow Label="Ruta en disco" Value="@_media.Path" />
+        <DetailRow Label="Formato" Value="@Format" />
+        <DetailRow Label="Peso" Value="@Formatting.FormatBytes(_media.Size)" />
+        <DetailRow Label="Páginas" Value="@_media.Pages.ToString(System.Globalization.CultureInfo.InvariantCulture)" />
+        <DetailRow Label="Estado" Value="@_media.Status" />
+        <DetailRow Label="Añadido" Value="@Formatting.FormatDateTime(_media.CreatedAt)" />
+        <DetailRow Label="Hash" Value="@_media.Hash" />
+        <DetailRow Label="Hash KOReader" Value="@_media.KoreaderHash" />
+        <DetailRow Label="Editorial" Value="@_media.Metadata?.Publisher" />
+        <DetailRow Label="Autores" Value="@_media.Metadata?.Writers" />
+        <DetailRow Label="Géneros" Value="@_media.Metadata?.Genre" />
+    </div>
+}
+
+@code {
+    private static readonly DialogOptions DeleteDialog = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+    private static readonly Dictionary<string, object?> DownloadAttribute = new() { ["download"] = true };
+
+    private string? _loadedId;
+    private DiarSpeicherMediaDto? _media;
+    private DiarSpeicherSeriesDto? _series;
+    private string? _error;
+    private bool _confirmDelete;
+    private bool _deleteFile;
+    private bool _deleting;
+
+    [Parameter] public string Id { get; set; } = string.Empty;
+
+    private int Progress => _media is null ? 0 : MediaHelpers.ReadProgress(_media);
+
+    private string Format => _media?.Extension.TrimStart('.').ToUpperInvariant() ?? string.Empty;
+
+    private string ReadText
+    {
+        get
+        {
+            var resumePage = _media?.CurrentPage is > 1 ? _media.CurrentPage.Value : 1;
+            return Progress > 0 ? $"REANUDAR EN P{resumePage}" : "EMPEZAR LECTURA";
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId == Id)
+        {
+            return;
+        }
+
+        var requested = Id;
+        _loadedId = null;
+        try
+        {
+            var media = await MediaApi.GetAsync(requested);
+            var series = await LoadSeriesAsync(media?.SeriesId);
+            (_media, _series, _error) = (media, series, null);
+        }
+        catch (ApiException exception)
+        {
+            (_media, _series, _error) = (null, null, exception.Message);
+        }
+
+        if (requested == Id)
+        {
+            _loadedId = requested;
+        }
+    }
+
+    private async Task<DiarSpeicherSeriesDto?> LoadSeriesAsync(string? seriesId)
+    {
+        if (seriesId is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await SeriesApi.GetAsync(seriesId);
+        }
+        catch (ApiException)
+        {
+            return null;
+        }
+    }
+
+    private void OpenDelete() => _confirmDelete = true;
+
+    private void CloseDelete() => _confirmDelete = false;
+
+    private async Task DeleteAsync()
+    {
+        if (_media is null)
+        {
+            return;
+        }
+
+        _deleting = true;
+        try
+        {
+            await MediaApi.DeleteAsync(_media.Id, _deleteFile);
+            Navigation.NavigateTo(_media.SeriesId is null ? "series" : $"series/{_media.SeriesId}");
+        }
+        catch (ApiException)
+        {
+            _deleting = false;
+        }
+    }
+}

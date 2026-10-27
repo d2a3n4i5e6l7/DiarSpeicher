@@ -1,0 +1,97 @@
+.panel-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+}
+
+.panel-title {
+    font-family: var(--font-tactical);
+    font-size: 18px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.panel-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+}
+
+.disk {
+    min-width: 190px;
+}
+
+.disk-legend {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 4px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ds-muted);
+}
+
+.disk-legend .tight {
+    color: var(--ds-warn);
+}
+
+.drop {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 32px;
+    text-align: center;
+    border: 2px dashed var(--ds-border);
+    border-radius: 8px;
+    background-color: var(--ds-bg-sunken);
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.drop:hover,
+.drop.dragging {
+    border-color: var(--ds-red-glow);
+    background-color: rgba(var(--ds-red-rgb), 0.12);
+}
+
+.drop ::deep .drop-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.drop-title {
+    font-weight: 600;
+}
+
+.drop-note {
+    font-size: 13px;
+    color: var(--ds-muted);
+}
+
+.queue-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.queue-title {
+    font-weight: 700;
+}
+
+.queue-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.queue {
+    border: 1px solid var(--ds-border-soft);
+    border-radius: 6px;
+}

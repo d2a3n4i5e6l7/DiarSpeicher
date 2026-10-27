@@ -17,7 +17,7 @@ Esta skill define el sistema de diseño exclusivo, identidad visual y reglas de 
 ## 2. Paleta Cromática y Tokens CSS
 
 Lo que sigue es el juego de **noche**. `buildTheme(mode)` publica en `:root` uno de los
-dos juegos de `frontEnd/src/theme/tokens.ts`, así que los nombres no cambian nunca:
+dos juegos de `src/DiarSpeicher.Client/wwwroot/css/iron-blood.css`, así que los nombres no cambian nunca:
 una página escrita contra ellos ya sabe pintarse de día.
 
 ```css
@@ -285,7 +285,7 @@ SVG canónico para avatares, favicon y navbar:
 
 ## 6. Implementación en el Frontend (React + MUI v9)
 
-El sistema vive en `frontEnd/src/theme/index.ts`. Trampas reales al tocarlo:
+El sistema vive en `src/DiarSpeicher.Client/wwwroot/css/iron-blood.css`. Trampas reales al tocarlo:
 
 - **Doblar el selector en `Card` y `Dialog`.** Ambos comparten clase con `MuiPaper`, que
   pinta `border: 1px solid #282C38`. Con la misma especificidad gana el último inyectado
@@ -294,11 +294,11 @@ El sistema vive en `frontEnd/src/theme/index.ts`. Trampas reales al tocarlo:
   el slot `standard` con selectores anidados `&.${alertClasses.colorError}` (y
   `colorSuccess`, `colorWarning`, `colorInfo`). Lo mismo con `Chip`: para no pisar el
   color de un chip de aviso, el gris se limita a `&.${chipClasses.colorDefault}`.
-- **El marco HUD es un componente**, `frontEnd/src/components/HudFrame.tsx`. Se pone como
+- **El marco HUD es un componente**, `src/DiarSpeicher.Client/Components/HudFrame.razor`. Se pone como
   hijo directo de la tarjeta o del papel del diálogo, antes del contenido.
 - **Tokens desde los `sx`**: `import { DS } from "../theme"` en vez de repetir hex sueltos.
 - **El tema tiene dos modos.** `buildTheme(mode)` publica en `:root` el juego de tokens
-  de `frontEnd/src/theme/tokens.ts` (`DARK` o `DAY`). Los valores de `palette` sí son hex
+  de `src/DiarSpeicher.Client/wwwroot/css/iron-blood.css` (`DARK` o `DAY`). Los valores de `palette` sí son hex
   literales: MUI calcula contrastes y sombras sobre ellos y `var()` los rompería.
 - **`DS.*` no son colores, son referencias a variables CSS.** Esa es la razón de que las
   17 páginas cambien de modo sin reescribirlas. No pasarlos por `alpha()` ni concatenarlos

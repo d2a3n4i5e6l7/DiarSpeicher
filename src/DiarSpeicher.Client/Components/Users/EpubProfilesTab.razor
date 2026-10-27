@@ -1,0 +1,161 @@
+@using System.Globalization
+@using DiarSpeicher.Core.Domain.Models
+
+<div class="profiles">
+    <div class="profiles-card">
+        <div class="profiles-head">
+            <span class="profiles-title"><MudIcon Icon="@Icons.Material.Filled.AutoStories" Style="font-size: 20px; color: var(--ds-red)" /> AJUSTES DE RENDERIZADO: @Current.Name</span>
+            <MudTooltip Text="Restablecer valores por defecto">
+                <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Style="color: var(--ds-muted)" OnClick="ResetAsync" />
+            </MudTooltip>
+        </div>
+
+        <MudAlert Severity="Severity.Warning" Dense="true" Variant="Variant.Outlined" Class="mb-4 profiles-alert">
+            Cambiar la resolución, la fuente o los márgenes repagina los EPUB: un libro de 400 páginas puede pasar a 520. El progreso de
+            los libros sin terminar se traduce por proporción al reabrirlos, así que quedará cerca del punto en el que lo dejaste, pero no
+            exactamente en él.
+        </MudAlert>
+
+        <MudStack Spacing="3">
+            <MudTextField T="string" Value="Current.Name" ValueChanged="value => UpdateAsync(p => p.Name = value)" Label="Nombre del Perfil"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+            <div class="profiles-row">
+                <MudNumericField T="int" Value="Current.Width" ValueChanged="value => UpdateAsync(p => p.Width = Math.Max(MinWidth, value))"
+                                 Label="Ancho (px)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudNumericField T="int" Value="Current.Height" ValueChanged="value => UpdateAsync(p => p.Height = Math.Max(MinHeight, value))"
+                                 Label="Alto (px)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </div>
+
+            <MudDivider />
+
+            <div class="profiles-row">
+                <MudSelect T="string" Value="Current.FontFamily" ValueChanged="value => UpdateAsync(p => p.FontFamily = value)"
+                           Label="Tipografía del Lector" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var font in FontOptions)
+                    {
+                        <MudSelectItem T="string" Value="@font.Value"><span style="font-family: '@font.Value'">@font.Label</span></MudSelectItem>
+                    }
+                </MudSelect>
+                <MudSelect T="string" Value="Current.Theme" ValueChanged="value => UpdateAsync(p => p.Theme = value)"
+                           Label="Tema Cromático" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem T="string" Value="@("light")">Blanco Tinta Electrónica (#FFFFFF)</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("core")">Iron Blood Core (#050508)</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("sepia")">Sepia Táctico (#1C1814)</MudSelectItem>
+                </MudSelect>
+            </div>
+
+            @Slider($"Tamaño de Fuente: {Current.FontSize}px", $"{Current.FontSize}px", Current.FontSize, MinFont, MaxFont, 1, value => UpdateAsync(p => p.FontSize = (int)value))
+            @Slider($"Interlineado (Line Height): {LineHeightText}", $"x{LineHeightText}", Current.LineHeight, MinLineHeight, MaxLineHeight, LineHeightStep, value => UpdateAsync(p => p.LineHeight = (float)value))
+            <div class="profiles-row">
+                @Slider("Margen Horiz.", $"{Current.MarginHorizontal}px", Current.MarginHorizontal, MinMargin, MaxMargin, MarginStep, value => UpdateAsync(p => p.MarginHorizontal = (int)value))
+                @Slider("Margen Vert.", $"{Current.MarginVertical}px", Current.MarginVertical, MinMargin, MaxMargin, MarginStep, value => UpdateAsync(p => p.MarginVertical = (int)value))
+            </div>
+        </MudStack>
+    </div>
+
+    <div class="profiles-card profiles-preview-card">
+        <div class="profiles-head">
+            <span class="profiles-title profiles-title-small">VISTA PREVIA EN VIVO</span>
+            <span class="profiles-size">@Current.Width × @Current.Height PX</span>
+        </div>
+        <div class="device" style="background-color: @Theme.Background; border-color: @Theme.Border">
+            <div class="device-bar" style="border-color: @Theme.Border; background-color: @Theme.Chrome">
+                <span style="color: @Theme.Accent; font-weight: 700">DIARSPEICHER // EPUB STREAM</span>
+                <span style="color: @Theme.Muted">PÁG. FIJA</span>
+            </div>
+            <div class="device-page" style="@PageStyle">
+                <div style="@($"font-weight: 700; font-size: {Scaled(Current.FontSize * HeadingScale, MinPreviewFont)}px; color: {Theme.Heading}; margin-bottom: 12px; letter-spacing: 0.5px")">
+                    Capítulo 1: El despertar del búnker
+                </div>
+                <p>
+                    Los indicadores parpadearon en carmesí sobre la consola táctica de DiarSpeicher. El flujo de datos se sincronizaba en la
+                    memoria sin tocar el disco, listo para alimentar el visor de CDisplayEx.
+                </p>
+                <p>
+                    La iluminación de emergencia teñía el mamparo de un rojo profundo. Cada párrafo se rasterizaba con precisión milimétrica
+                    según los parámetros de tu dispositivo.
+                </p>
+                <p>—"Transmisión iniciada con éxito. Lectura táctica en curso"— confirmó el operador.</p>
+            </div>
+            <div class="device-bar" style="border-color: @Theme.Border; background-color: @Theme.Chrome">
+                <span style="color: @Theme.Muted">@Current.Name</span>
+                <span style="color: @Theme.Accent; font-weight: 700">[ PÁG. 01 / 28 ]</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private const int MinWidth = 320;
+    private const int MinHeight = 480;
+    private const int MinFont = 18;
+    private const int MaxFont = 64;
+    private const double MinLineHeight = 1.2;
+    private const double MaxLineHeight = 2.4;
+    private const double LineHeightStep = 0.05;
+    private const int MinMargin = 16;
+    private const int MaxMargin = 160;
+    private const int MarginStep = 4;
+    private const double PreviewWidth = 320;
+    private const double MinPreviewFont = 10;
+    private const double MinPreviewMargin = 8;
+    private const double HeadingScale = 1.35;
+
+    private static readonly IReadOnlyList<(string Label, string Value)> FontOptions =
+    [
+        ("Fuentes originales del libro", EpubDeviceProfile.BookEmbeddedFontFamily),
+        ("Inter (Estándar y Limpia)", "Inter"),
+        ("Chakra Petch (Táctica Naval)", "Chakra Petch"),
+        ("Rajdhani (Militar / Condensada)", "Rajdhani"),
+        ("Orbitron (Sci-Fi Táctico)", "Orbitron"),
+        ("JetBrains Mono (Técnica / Código)", "JetBrains Mono"),
+    ];
+
+    private static readonly Dictionary<string, PreviewTheme> Themes = new()
+    {
+        ["light"] = new("#FFFFFF", "#111111", "#000000", "#880000", "#D0D0D0", "#666666", "#F5F5F5"),
+        ["core"] = new("#050508", "#F0F2F6", "#FFFFFF", "#C21818", "#282C38", "#8E95A5", "rgba(0,0,0,0.4)"),
+        ["sepia"] = new("#1C1814", "#E4D8C8", "#E29D62", "#C27838", "#332B24", "#968270", "rgba(0,0,0,0.4)"),
+    };
+
+    [Parameter, EditorRequired] public List<EpubDeviceProfile> Profiles { get; set; } = [];
+
+    [Parameter] public EventCallback<List<EpubDeviceProfile>> ProfilesChanged { get; set; }
+
+    private EpubDeviceProfile Current => Profiles.Count > 0 ? Profiles[0] : EpubProfileDefaults.Create();
+
+    private PreviewTheme Theme => Themes.GetValueOrDefault(Current.Theme, Themes["core"]);
+
+    private string LineHeightText => Current.LineHeight.ToString("0.00", CultureInfo.InvariantCulture);
+
+    private double Scale => PreviewWidth / Math.Max(Current.Width, PreviewWidth);
+
+    private string PageStyle => string.Create(CultureInfo.InvariantCulture,
+        $"padding: {Scaled(Current.MarginVertical, MinPreviewMargin)}px {Scaled(Current.MarginHorizontal, MinPreviewMargin)}px; " +
+        $"color: {Theme.Text}; font-family: '{Current.FontFamily}'; font-size: {Scaled(Current.FontSize, MinPreviewFont)}px; " +
+        $"line-height: {Current.LineHeight}");
+
+    private int Scaled(double value, double minimum) => (int)Math.Max(minimum, Math.Round(value * Scale));
+
+    private Task UpdateAsync(Action<EpubDeviceProfile> change)
+    {
+        var profile = Current;
+        change(profile);
+        profile.DevicePattern = EpubProfileDefaults.AnyDevice;
+        profile.IsDefault = true;
+        return ProfilesChanged.InvokeAsync([profile]);
+    }
+
+    private Task ResetAsync() => ProfilesChanged.InvokeAsync([EpubProfileDefaults.Create()]);
+
+    private RenderFragment Slider(string label, string value, double current, double min, double max, double step, Func<double, Task> changed) => __builder =>
+    {
+        <div class="profiles-slider">
+            <div class="profiles-slider-head"><span>@label</span><span class="profiles-slider-value">@value</span></div>
+            <MudSlider T="double" Value="current" ValueChanged="changed" Min="min" Max="max" Step="step" Color="Color.Primary" Size="Size.Small" />
+        </div>
+    };
+
+    private sealed record PreviewTheme(string Background, string Text, string Heading, string Accent, string Border, string Muted, string Chrome);
+}

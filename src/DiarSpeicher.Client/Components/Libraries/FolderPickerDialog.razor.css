@@ -1,0 +1,170 @@
+.picker-roots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.picker-row,
+.picker-path {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.picker-path {
+    padding: 8px;
+    background-color: var(--ds-bg-sunken);
+    border: 1px solid var(--ds-border);
+}
+
+.picker-current {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--ds-platinum);
+}
+
+.picker-list {
+    height: 360px;
+    overflow-y: auto;
+    border: 1px solid var(--ds-border);
+    background-color: var(--ds-bg-sunken);
+}
+
+.picker-state {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    font-size: 13px;
+    color: var(--ds-muted);
+    text-align: center;
+}
+
+.picker-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--ds-border-soft);
+}
+
+.picker-item:hover {
+    background-color: rgba(var(--ds-red-rgb), 0.08);
+}
+
+.picker-item.locked {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.picker-enter {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+}
+
+.picker-enter:disabled {
+    cursor: not-allowed;
+}
+
+.picker-item-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.picker-item-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-tactical);
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--ds-platinum);
+}
+
+.picker-item-parent,
+.picker-item-files {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ds-subtle);
+}
+
+.picker-truncated,
+.picker-root-note {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ds-warn);
+}
+
+.picker-truncated {
+    display: block;
+    margin-top: 8px;
+}
+
+.picker-root-note {
+    margin-right: auto;
+}
+
+.picker-location {
+    display: block;
+    margin-bottom: 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ds-muted);
+}
+
+.picker-path ::deep .picker-new {
+    font-size: 12px;
+    letter-spacing: 1px;
+    color: var(--ds-platinum);
+    border-radius: 2px;
+    white-space: nowrap;
+}
+
+.picker-path ::deep .picker-new:hover {
+    border-color: var(--ds-red);
+    color: var(--ds-red-light);
+}
+
+.picker-state ::deep .picker-create {
+    margin-top: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: var(--ds-red-glow);
+    border-color: var(--ds-border-red);
+}
+
+.picker-state ::deep .picker-create:hover {
+    border-color: var(--ds-red-light);
+    background-color: rgba(var(--ds-red-rgb), 0.1);
+}
+
+.picker-path ::deep .mud-icon-button {
+    color: var(--ds-text-2);
+    border: 1px solid var(--ds-border);
+    border-radius: 2px;
+}

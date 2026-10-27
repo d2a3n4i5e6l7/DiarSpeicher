@@ -1,0 +1,56 @@
+<MudStack Spacing="3">
+    <MudTextField T="string" @bind-Value="Form.Age" Label="Edad del lector" InputType="InputType.Number"
+                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                  HelperText="Filtra el catálogo por clasificación de edad. Vacío = sin restricción." />
+
+    <div class="access-divider"><span class="ds-section-label">Permisos</span></div>
+
+    <MudSwitch T="bool" @bind-Value="Form.Wildcard" Label="Acceso total (*)" Color="Color.Primary" />
+
+    @foreach (var group in PermissionService.Groups)
+    {
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Secondary">@group.Title</MudText>
+            <MudStack Spacing="0">
+                @foreach (var permission in group.Permissions)
+                {
+                    <MudTooltip Text="@permission.Description" Placement="Placement.Right">
+                        <MudSwitch T="bool" Value="@(Form.Wildcard || Form.Permissions.Contains(permission.Id))"
+                                   ValueChanged="enabled => Form.SetPermission(permission.Id, enabled)"
+                                   Disabled="Form.Wildcard" Label="@permission.Label" Color="Color.Primary" Size="Size.Small" />
+                    </MudTooltip>
+                }
+            </MudStack>
+        </div>
+    }
+
+    <div class="access-divider"><span class="ds-section-label">Formas de conexión</span></div>
+
+    @foreach (var protocol in Protocols)
+    {
+        <div>
+            <MudSwitch T="bool" Value="@Form.Protocols.Contains(protocol.Id)"
+                       ValueChanged="enabled => Form.SetProtocol(protocol.Id, enabled)"
+                       Label="@protocol.Label" Color="Color.Primary" Size="Size.Small" />
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Style="display: block; padding-left: 48px">@protocol.Description</MudText>
+        </div>
+    }
+
+    @if (BasicWarning is { } warning && Form.Protocols.Contains(PermissionService.ProtocolBasic))
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">@warning</MudAlert>
+    }
+
+    <MudText Typo="Typo.caption" Color="Color.Secondary">
+        El Gateway nunca deja a un usuario sin protocolos: si los desactivas todos, conserva la clave de API.
+    </MudText>
+</MudStack>
+
+@code {
+    [Parameter, EditorRequired] public UserFormState Form { get; set; } = UserFormState.Empty();
+
+    [Parameter, EditorRequired] public IReadOnlyList<ProtocolItem> Protocols { get; set; } = [];
+
+    private string? BasicWarning =>
+        Protocols.FirstOrDefault(protocol => protocol.Id == PermissionService.ProtocolBasic)?.Warning;
+}

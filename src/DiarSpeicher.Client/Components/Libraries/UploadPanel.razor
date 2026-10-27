@@ -1,0 +1,86 @@
+@using DiarSpeicher.Core.Filesystem
+
+<MudStack Spacing="4">
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" ShowCloseIcon="true" CloseIconClicked="ClearError">@_error</MudAlert>
+    }
+
+    @if (_successCount is { } count)
+    {
+        <MudAlert Severity="Severity.Success" ShowCloseIcon="true" CloseIconClicked="ClearSuccess">
+            Ficheros completados (@count). El escáner automático de DiarSpeicher se ha activado.
+        </MudAlert>
+    }
+
+    <div class="panel ds-bevel">
+        <HudFrame />
+        <div class="panel-body">
+            <span class="panel-title">Destino</span>
+            <MudSelect T="string" @bind-Value="_subpath" Label="Carpeta destino" Variant="Variant.Outlined" Margin="Margin.Dense"
+                       Disabled="@(HasUploading || LibraryPath.Length == 0)">
+                <MudSelectItem T="string" Value="@string.Empty"><em>Raíz de la biblioteca</em></MudSelectItem>
+                @foreach (var folder in _subfolders)
+                {
+                    <MudSelectItem T="string" Value="@folder.Name">@folder.Name</MudSelectItem>
+                }
+            </MudSelect>
+
+            <div class="panel-row">
+                <MudTextField T="string" @bind-Value="_newFolder" Immediate="true" Label="Crear carpeta nueva aquí" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Placeholder="ej. Segunda temporada" Disabled="@(_creatingFolder || LibraryPath.Length == 0)" />
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="CreateFolderAsync"
+                           Disabled="@(_creatingFolder || _newFolder.Trim().Length == 0 || LibraryPath.Length == 0)">Crear</MudButton>
+
+                @if (_disk is { Available: true } disk)
+                {
+                    <div class="disk">
+                        <div class="disk-legend">
+                            <span>DISCO</span>
+                            <span class="@(DiskTight ? "tight" : null)">@Formatting.FormatBytes(disk.FreeBytes) libres de @Formatting.FormatBytes(disk.TotalBytes)</span>
+                        </div>
+                        <MudProgressLinear Value="DiskUsedPercent" Color="@(DiskTight ? Color.Warning : Color.Primary)" Size="Size.Medium" />
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="panel ds-bevel">
+        <HudFrame />
+        <div class="panel-body">
+            <span class="panel-title">Ficheros</span>
+            <div class="@(_dragging ? "drop dragging" : "drop")">
+                <InputFile OnChange="OnFilesSelected" multiple accept="@Accept" class="drop-input"
+                           @ondragenter="DragEnter" @ondragleave="DragLeave" @ondrop="DragLeave" />
+                <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Primary" Style="font-size: 48px" />
+                <span class="drop-title">Haz clic o arrastra ficheros aquí para subirlos</span>
+                <span class="drop-note">Formatos compatibles: @string.Join(", ", PathUtils.AcceptedMediaExtensions).ToUpperInvariant() (Streaming Directo TUS)</span>
+            </div>
+
+            @if (_items.Count > 0)
+            {
+                <div class="queue-head">
+                    <span class="queue-title">Cola de Transferencia (@_items.Count)</span>
+                    <div class="queue-actions">
+                        @if (HasStartable)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.PlayArrow" OnClick="StartAll">Subir Todos</MudButton>
+                        }
+                        @if (HasUploading)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Outlined.Pause" OnClick="PauseAll">Pausar Todos</MudButton>
+                        }
+                        <MudButton Size="Size.Small" Color="Color.Error" OnClick="ClearAllAsync">Limpiar Todos</MudButton>
+                    </div>
+                </div>
+                <div class="queue">
+                    @foreach (var item in _items)
+                    {
+                        <UploadItemRow @key="item" Upload="item" Start="() => StartAsync(item)" Pause="item.Pause" Remove="() => RemoveAsync(item)" />
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</MudStack>

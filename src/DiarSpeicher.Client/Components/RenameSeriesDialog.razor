@@ -1,0 +1,88 @@
+@using DiarSpeicher.Core.Domain.Catalog
+@inject SeriesApi SeriesApi
+
+<MudDialog Visible="Visible" VisibleChanged="VisibleChanged" Options="DialogOptions">
+    <TitleContent>Editar serie</TitleContent>
+    <DialogContent>
+        <form id="rename-series-form" @onsubmit="SubmitAsync">
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+            }
+            <MudStack Spacing="3" Class="mt-2">
+                <MudTextField T="string" @bind-Value="_name" Label="Nombre de la serie" Variant="Variant.Outlined" AutoFocus="true"
+                              Disabled="_saving" HelperText="Por defecto es el nombre de la carpeta. Al cambiarlo, los rescaneos lo respetan." />
+                <MudTextField T="string" @bind-Value="_description" Label="Descripción" Variant="Variant.Outlined" Lines="3"
+                              Disabled="_saving" />
+            </MudStack>
+        </form>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseAsync" Disabled="_saving" Class="ds-button-muted">CANCELAR</MudButton>
+        <MudButton ButtonType="ButtonType.Submit" form="rename-series-form" Variant="Variant.Filled" Color="Color.Primary" Disabled="_saving">
+            @(_saving ? "GUARDANDO..." : "GUARDAR")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions DialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+
+    private string _name = string.Empty;
+    private string _description = string.Empty;
+    private bool _saving;
+    private string? _error;
+    private bool _wasVisible;
+
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    [Parameter, EditorRequired] public string SeriesId { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public string CurrentName { get; set; } = string.Empty;
+
+    [Parameter] public string? CurrentDescription { get; set; }
+
+    [Parameter] public EventCallback Saved { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (Visible && !_wasVisible)
+        {
+            _name = CurrentName;
+            _description = CurrentDescription ?? string.Empty;
+            _error = null;
+        }
+
+        _wasVisible = Visible;
+    }
+
+    private Task CloseAsync() => VisibleChanged.InvokeAsync(false);
+
+    private async Task SubmitAsync()
+    {
+        if (_name.Trim().Length == 0)
+        {
+            _error = "El nombre no puede quedar vacío.";
+            return;
+        }
+
+        _saving = true;
+        _error = null;
+        try
+        {
+            await SeriesApi.UpdateAsync(SeriesId, new DiarSpeicherUpdateSeriesInput { Name = _name.Trim(), Description = _description });
+            await Saved.InvokeAsync();
+            await CloseAsync();
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

@@ -1,0 +1,53 @@
+@implements IDisposable
+@inject SessionState Session
+@inject NavigationManager Navigation
+
+<MudThemeProvider Theme="IronBloodTheme.Theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+@if (Session.Loading)
+{
+    <div class="ds-boot">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+    </div>
+}
+else if (Session.User is null)
+{
+    <Login />
+}
+else
+{
+    <ErrorBoundary>
+        <ChildContent>
+            <Router AppAssembly="typeof(App).Assembly">
+                <Found Context="routeData">
+                    <RouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
+                    <FocusOnNavigate RouteData="routeData" Selector="h1" />
+                </Found>
+            </Router>
+        </ChildContent>
+        <ErrorContent Context="exception">
+            <div class="ds-fatal">
+                <span class="ds-fatal-title">FALLO DEL NODO</span>
+                <span class="ds-fatal-message">@exception.Message</span>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Reload">RECARGAR</MudButton>
+            </div>
+        </ErrorContent>
+    </ErrorBoundary>
+}
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        Session.Changed += OnSessionChanged;
+        await Session.InitializeAsync();
+    }
+
+    public void Dispose() => Session.Changed -= OnSessionChanged;
+
+    private void OnSessionChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void Reload() => Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+}

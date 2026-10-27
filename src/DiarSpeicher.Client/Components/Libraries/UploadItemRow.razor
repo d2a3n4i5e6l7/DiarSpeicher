@@ -1,0 +1,65 @@
+@using DiarSpeicher.Client.Upload
+
+<div class="upload-row">
+    <div class="upload-head">
+        <div class="upload-name">
+            <MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Size="Size.Small" />
+            <span class="upload-file">@Upload.File.Name</span>
+            <span class="upload-size">(@Formatting.FormatBytes(Upload.File.Size))</span>
+        </div>
+        <div class="upload-actions">
+            <MudChip T="string" Size="Size.Small" Text="@StatusText" Color="StatusColor"
+                     Variant="@(Upload.Status == TusUploadStatus.Idle ? Variant.Outlined : Variant.Filled)" />
+            @if (Upload.Status == TusUploadStatus.Uploading)
+            {
+                <MudIconButton Icon="@Icons.Material.Outlined.Pause" Size="Size.Small" Color="Color.Warning" title="Pausar subida" OnClick="Pause" />
+            }
+            @if (CanStart)
+            {
+                <MudIconButton Icon="@Icons.Material.Outlined.PlayArrow" Size="Size.Small" Color="Color.Primary" title="Reanudar o Iniciar subida" OnClick="Start" />
+            }
+            <MudIconButton Icon="@Icons.Material.Outlined.DeleteOutline" Size="Size.Small" Color="Color.Error" title="Cancelar y eliminar" OnClick="Remove" />
+        </div>
+    </div>
+
+    <MudProgressLinear Value="Upload.Percentage" Color="@(Upload.Status == TusUploadStatus.Error ? Color.Error : Color.Primary)" Size="Size.Medium" />
+    <div class="upload-figures">
+        <span>@Formatting.FormatBytes(Upload.Offset) / @Formatting.FormatBytes(Upload.File.Size)</span>
+        <span>@Upload.Percentage%</span>
+    </div>
+
+    @if (!string.IsNullOrEmpty(Upload.ErrorMessage))
+    {
+        <span class="upload-error">@Upload.ErrorMessage</span>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TusUpload Upload { get; set; } = null!;
+
+    [Parameter] public EventCallback Start { get; set; }
+
+    [Parameter] public EventCallback Pause { get; set; }
+
+    [Parameter] public EventCallback Remove { get; set; }
+
+    private bool CanStart => Upload.Status is TusUploadStatus.Paused or TusUploadStatus.Idle or TusUploadStatus.Error;
+
+    private string StatusText => Upload.Status switch
+    {
+        TusUploadStatus.Uploading => $"Subiendo ({Upload.Percentage}%)",
+        TusUploadStatus.Paused => $"Pausado ({Upload.Percentage}%)",
+        TusUploadStatus.Completed => "Completado",
+        TusUploadStatus.Error => "Error",
+        _ => "En cola",
+    };
+
+    private Color StatusColor => Upload.Status switch
+    {
+        TusUploadStatus.Uploading => Color.Primary,
+        TusUploadStatus.Paused => Color.Warning,
+        TusUploadStatus.Completed => Color.Success,
+        TusUploadStatus.Error => Color.Error,
+        _ => Color.Default,
+    };
+}

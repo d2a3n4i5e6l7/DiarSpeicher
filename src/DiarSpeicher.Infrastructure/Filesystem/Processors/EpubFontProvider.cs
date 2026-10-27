@@ -11,8 +11,7 @@ public readonly record struct ReaderFonts(SKTypeface Regular, SKTypeface Bold);
 
 public static class EpubFontProvider
 {
-    /// <summary><c>FontFamily</c> value that asks for the fonts embedded in the EPUB.</summary>
-    public const string BookEmbedded = "__book__";
+    public const string BookEmbedded = EpubDeviceProfile.BookEmbeddedFontFamily;
 
 
     private static readonly Dictionary<string, (string Regular, string Bold)> Bundled =

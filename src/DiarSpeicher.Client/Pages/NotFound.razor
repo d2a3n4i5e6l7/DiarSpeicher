@@ -1,0 +1,8 @@
+@page "/{*path}"
+@inject NavigationManager Navigation
+
+@code {
+    [Parameter] public string? Path { get; set; }
+
+    protected override void OnInitialized() => Navigation.NavigateTo(string.Empty, replace: true);
+}

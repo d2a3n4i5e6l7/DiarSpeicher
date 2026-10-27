@@ -1,0 +1,202 @@
+@page "/metadata"
+@using System.Globalization
+@using DiarSpeicher.Core.Domain.MangaBaka
+@implements IDisposable
+@inject MetadataApi MetadataApi
+
+<div class="ds-readable">
+    <PageHeader Title="Metadata externa" Subtitle="Catálogo de MangaBaka para rellenar autores, géneros, estado y portadas de las series." />
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" ShowCloseIcon="true" CloseIconClicked="() => _error = null" Class="mb-6">@_error</MudAlert>
+    }
+
+    <div class="meta-card">
+        <HudFrame />
+        <div class="meta-status">
+            <MudIcon Icon="@Icons.Material.Filled.Storage" Style="@($"font-size: 28px; color: {StateColor}")" />
+            <div class="meta-status-body">
+                <div class="meta-chips">
+                    <span class="meta-state" style="color: @StateColor">@StateLabel</span>
+                    @if (_status is { SeriesCount: > 0 } withSeries)
+                    {
+                        <span class="ds-pill-mono">@withSeries.SeriesCount.ToString("N0", SpanishThousands) SERIES</span>
+                    }
+                    @if (_status is { SizeBytes: > 0 } withSize)
+                    {
+                        <span class="ds-pill-mono">@Formatting.FormatBytes(withSize.SizeBytes)</span>
+                    }
+                </div>
+                @if (Message is { } message)
+                {
+                    <span class="meta-message">@message</span>
+                }
+            </div>
+        </div>
+
+        @if (Busy)
+        {
+            <MudProgressLinear Indeterminate="@(ProgressValue is null)" Value="@(ProgressValue ?? 0)" Color="Color.Primary" Class="mb-4" />
+        }
+
+        <MudButton StartIcon="@Icons.Material.Filled.CloudDownload" Disabled="Busy" OnClick="StartDownloadAsync" Variant="Variant.Filled" Color="Color.Primary" Class="btn-tactical btn-tactical-hot">
+            DESCARGAR BASE DE DATOS DE MANGA
+        </MudButton>
+
+        <p class="meta-note">
+            La descarga son unos 390 MB comprimidos que se quedan en <code>manga_database/</code> como 3,5 GB de SQLite. Se hace una vez
+            y se refresca cada pocos meses. Datos de MangaBaka bajo licencia CC BY-NC-SA 4.0: uso no comercial con atribución.
+        </p>
+    </div>
+
+    <div class="@DropClass">
+        <InputFile OnChange="OnFileSelected" accept=".zst,.gz,.tgz" disabled="@Busy" class="meta-drop-input"
+                   @ondragenter="() => _dragging = true" @ondragleave="() => _dragging = false" @ondrop="() => _dragging = false" />
+        <MudIcon Icon="@Icons.Material.Filled.UploadFile" Style="font-size: 40px; color: var(--ds-red-glow)" />
+        <span class="meta-drop-title">O arrastra aquí un volcado que ya tengas</span>
+        <span class="meta-drop-formats">@string.Join(" · ", DumpFormats.Extensions).ToUpperInvariant()</span>
+    </div>
+</div>
+
+@code {
+    private static readonly TimeSpan PollBusy = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan PollIdle = TimeSpan.FromSeconds(10);
+    private static readonly NumberFormatInfo SpanishThousands = new() { NumberGroupSeparator = ".", NumberDecimalDigits = 0 };
+
+    private const long MaxDumpBytes = long.MaxValue;
+
+    private static readonly Dictionary<string, string> StateLabels = new()
+    {
+        [nameof(MangaBakaState.Absent)] = "SIN VOLCADO",
+        [nameof(MangaBakaState.Downloading)] = "DESCARGANDO",
+        [nameof(MangaBakaState.Decompressing)] = "DESCOMPRIMIENDO",
+        [nameof(MangaBakaState.Indexing)] = "INDEXANDO",
+        [nameof(MangaBakaState.Ready)] = "LISTO",
+        [nameof(MangaBakaState.Failed)] = "FALLIDO",
+    };
+
+    private readonly CancellationTokenSource _polling = new();
+    private MangaBakaStatusDto? _status;
+    private string? _error;
+    private bool _dragging;
+    private bool _uploading;
+    private int? _uploadPercent;
+
+    private bool Busy => _status?.Busy == true || _uploading;
+
+    private string State => _status?.State ?? nameof(MangaBakaState.Absent);
+
+    private string StateLabel => _uploading
+        ? $"SUBIENDO ({_uploadPercent ?? 0}%)"
+        : StateLabels.GetValueOrDefault(State, State.ToUpperInvariant());
+
+    private string? Message => _uploading
+        ? $"Transfiriendo volcado en fragmentos de 50 MB ({_uploadPercent ?? 0}%)"
+        : _status?.Message;
+
+    private int? ProgressValue => _uploading ? _uploadPercent ?? 0 : _status?.Percent;
+
+    private string StateColor => State switch
+    {
+        nameof(MangaBakaState.Ready) => "var(--ds-ok)",
+        nameof(MangaBakaState.Failed) => "var(--ds-red-glow)",
+        nameof(MangaBakaState.Absent) => "var(--ds-subtle)",
+        _ => "var(--ds-warn)",
+    };
+
+    private string DropClass => (Busy, _dragging) switch
+    {
+        (true, _) => "meta-drop busy",
+        (_, true) => "meta-drop dragging",
+        _ => "meta-drop",
+    };
+
+    protected override void OnInitialized() => _ = PollAsync(_polling.Token);
+
+    public void Dispose()
+    {
+        _polling.Cancel();
+        _polling.Dispose();
+    }
+
+    private async Task PollAsync(CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await InvokeAsync(async () =>
+                {
+                    await RefreshAsync();
+                    StateHasChanged();
+                });
+                await Task.Delay(_status?.Busy == true ? PollBusy : PollIdle, token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            _status = await MetadataApi.StatusAsync();
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+    }
+
+    private async Task StartDownloadAsync()
+    {
+        _error = null;
+        try
+        {
+            await MetadataApi.DownloadAsync();
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+
+        await RefreshAsync();
+    }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        _dragging = false;
+        _error = null;
+        var file = e.File;
+        if (!DumpFormats.IsAccepted(file.Name))
+        {
+            _error = $"\"{file.Name}\" no es un volcado válido. Se aceptan {string.Join(", ", DumpFormats.Extensions)}.";
+            return;
+        }
+
+        _uploading = true;
+        _uploadPercent = 0;
+        try
+        {
+            await MetadataApi.ImportChunkedAsync(file, MaxDumpBytes, percent =>
+            {
+                _uploadPercent = percent;
+                _ = InvokeAsync(StateHasChanged);
+            });
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _uploading = false;
+            _uploadPercent = null;
+        }
+
+        await RefreshAsync();
+    }
+}

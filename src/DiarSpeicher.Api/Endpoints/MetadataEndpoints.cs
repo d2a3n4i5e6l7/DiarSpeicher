@@ -101,7 +101,4 @@ public static partial class MetadataEndpoints
         }
         return Results.Ok(status);
     }
-
-    public sealed record MetadataImportInitRequest(string FileName, long TotalBytes);
-    public sealed record MetadataImportCompleteRequest(string UploadId, string FileName);
 }

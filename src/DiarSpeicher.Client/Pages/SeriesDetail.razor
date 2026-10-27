@@ -1,0 +1,196 @@
+@page "/series/{Id}"
+@using System.Globalization
+
+@if (_series is null && _error is null)
+{
+    <div class="series-loading"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>
+}
+else if (_series is null)
+{
+    <div class="series-error">
+        <MudAlert Severity="Severity.Error">@(_error ?? "La serie no existe o no es accesible.")</MudAlert>
+        <BackButton FallbackHref="series" FallbackLabel="VOLVER A SERIES" LabelFormat="VOLVER A {0}" Class="mt-4" />
+    </div>
+}
+else
+{
+    var stats = Stats;
+    var volumes = Volumes;
+    var external = External;
+
+    <BackButton FallbackHref="@(string.IsNullOrEmpty(_series.LibraryId) ? "series" : $"libraries/{_series.LibraryId}")"
+                FallbackLabel="@(string.IsNullOrEmpty(_series.LibraryId) ? "SERIES" : "BIBLIOTECA")" Class="ds-button-muted" />
+
+    <div class="series-hero">
+        <HudFrame />
+        <div class="series-cover">
+            <MediaCard Href="@(stats.NextVolume is null ? $"series/{_series.Id}" : $"read/{stats.NextVolume.Id}")"
+                       CoverUrl="@CoverUrl" Progress="stats.Percent" Width="100%" />
+        </div>
+
+        <div class="series-body">
+            <div class="series-title-row">
+                <h1 class="series-title">@_series.Name</h1>
+                <MudTooltip Text="Renombrar serie">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Class="series-icon" OnClick="OpenRename" />
+                </MudTooltip>
+                <MudTooltip Text="Cambiar portada">
+                    <MudIconButton Icon="@Icons.Material.Filled.Image" Size="Size.Small" Class="series-icon" OnClick="OpenCover" />
+                </MudTooltip>
+                <MudTooltip Text="Eliminar serie">
+                    <MudIconButton Icon="@Icons.Material.Outlined.DeleteOutline" Size="Size.Small" Class="series-icon series-icon-danger" OnClick="OpenDelete" />
+                </MudTooltip>
+            </div>
+
+            <div class="series-chips">
+                @MetaChip("TOMOS", _series.MediaCount != 0 ? _series.MediaCount : volumes.Count)
+                @MetaChip("PÁGS", stats.TotalPages)
+                @MetaChip("LECTURA", stats.TotalPages > 0 ? Formatting.FormatDurationMinutes(MediaHelpers.EstimatedMinutes((int)stats.TotalPages)) : null)
+                @MetaChip("PESO", stats.TotalSize > 0 ? Formatting.FormatBytes(stats.TotalSize) : null)
+                @MetaChip("", external?.Status ?? _series.Status)
+                @MetaChip("", external?.Year)
+                @MetaChip("EDITORIAL", external?.Publisher)
+                @MetaChip("AUTOR", external?.Writers)
+                @MetaChip("", external?.Genres)
+                @if (external?.FinalVolume is int finalVolume && finalVolume > 0)
+                {
+                    <span class="@(volumes.Count >= finalVolume ? "series-completeness complete" : "series-completeness")">
+                        @volumes.Count DE @finalVolume
+                    </span>
+                }
+            </div>
+
+            @if (external is not null)
+            {
+                <div class="series-source">
+                    <span class="series-source-chip">SEGÚN @((external.Source ?? "CATÁLOGO EXTERNO").ToUpperInvariant())</span>
+                    <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.LinkOff" OnClick="UnmatchAsync" Class="ds-button-muted">
+                        QUITAR VÍNCULO
+                    </MudButton>
+                </div>
+            }
+
+            <div class="series-progress">
+                <span class="series-progress-label">PROGRESO @stats.Percent% · @stats.ReadCount/@volumes.Count TOMOS</span>
+                <div class="series-progress-track"><div class="series-progress-bar" style="width: @(stats.Percent)%"></div></div>
+            </div>
+
+            <div class="series-actions">
+                @if (stats.NextVolume is { } next)
+                {
+                    <MudButton Href="@($"read/{next.Id}")" StartIcon="@Icons.Material.Filled.PlayArrow" Variant="Variant.Filled" Color="Color.Primary" Class="btn-tactical btn-tactical-hot">
+                        @NextVolumeText(next)
+                    </MudButton>
+                }
+                <MudButton StartIcon="@Icons.Material.Filled.TravelExplore" OnClick="OpenMatch" Class="ds-button-ghost">
+                    @(external is null ? "BUSCAR METADATA" : "CAMBIAR EMPAREJADO")
+                </MudButton>
+            </div>
+
+            @if (Summary is { } summary)
+            {
+                <div class="series-summary">
+                    <p class="@(_summaryOpen ? "series-summary-text open" : "series-summary-text")">@summary</p>
+                    <MudButton Size="Size.Small" EndIcon="@(_summaryOpen ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                               Class="series-more" OnClick="ToggleSummary">
+                        @(_summaryOpen ? "PLEGAR" : "LEER MÁS")
+                    </MudButton>
+                </div>
+            }
+
+            <div class="series-board">
+                <div>
+                    @DataField("Autores", external?.Writers)
+                    @DataField("Géneros", external?.Genres)
+                    @DataField("Formato", VolumeFormats)
+                </div>
+                <div>
+                    @DataField("Publicación", external?.Status)
+                    @DataField("Editorial", external?.Publisher)
+                    @DataField("Año", external?.Year)
+                </div>
+                <div>
+                    @DataField("Tipo", external?.Type)
+                    @DataField("Capítulos", external?.TotalChapters)
+                    @DataField("Volúmenes", external is { FinalVolume: > 0 } matched ? $"{volumes.Count} de {matched.FinalVolume}" : null)
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <MudTabs @bind-ActivePanelIndex="_tab" Class="series-tabs">
+        <MudTabPanel Text="@($"Tomos ({volumes.Count})")" />
+        <MudTabPanel Text="Detalles" />
+    </MudTabs>
+
+    @if (_tab == 0)
+    {
+        <div class="ds-cover-grid">
+            @foreach (var slot in Slots())
+            {
+                if (slot.Volume is { } volume)
+                {
+                    <MediaCard @key="volume.Id" Href="@OriginLink.Link($"media/{volume.Id}", $"series/{Id}", _series.Name.ToUpperInvariant())"
+                               Title="@MediaHelpers.MediaTitle(volume)" Subtitle="@MediaHelpers.MediaSubtitle(volume)"
+                               CoverUrl="@MediaApi.ThumbnailUrl(volume.Id)" Progress="MediaHelpers.ReadProgress(volume)"
+                               Badge="@(volume.Metadata?.Number is { } number ? $"#{number.ToString(CultureInfo.InvariantCulture)}" : null)"
+                               Width="100%" />
+                }
+                else
+                {
+                    <div @key="slot.Path" class="@(slot.Active ? "series-slot active" : "series-slot")">
+                        <span>@(slot.Active ? "INDEXANDO" : slot.FileName)</span>
+                        @if (slot.Active)
+                        {
+                            <div class="ds-scanline"></div>
+                        }
+                    </div>
+                }
+            }
+        </div>
+    }
+    else
+    {
+        <div class="ds-readable series-details">
+            <DetailRow Label="ID de serie" Value="@_series.Id" />
+            <DetailRow Label="Ruta en disco" Value="@_series.Path" />
+            <DetailRow Label="Biblioteca" Value="@_series.LibraryId" />
+            <DetailRow Label="Estado" Value="@_series.Status" />
+            <DetailRow Label="Tomos indexados" Value="@volumes.Count.ToString(CultureInfo.InvariantCulture)" />
+            <DetailRow Label="Páginas totales" Value="@(stats.TotalPages > 0 ? stats.TotalPages.ToString(CultureInfo.InvariantCulture) : null)" />
+            <DetailRow Label="Peso en disco" Value="@(stats.TotalSize > 0 ? Formatting.FormatBytes(stats.TotalSize) : null)" />
+            <DetailRow Label="Catálogo externo" Value="@external?.Source" />
+            <DetailRow Label="Id externo" Value="@external?.ExternalId?.ToString(CultureInfo.InvariantCulture)" />
+            <DetailRow Label="Ficha de origen" Value="@external?.Link" />
+        </div>
+    }
+
+    <DeleteSeriesDialog @bind-Visible="_deleteOpen" SeriesId="@_series.Id" SeriesName="@_series.Name" SeriesPath="@_series.Path"
+                        LibraryId="@_series.LibraryId" VolumeCount="volumes.Count" />
+    <MetadataMatchDialog @bind-Visible="_matchOpen" SeriesId="@_series.Id" SeriesName="@_series.Name" Matched="ReloadAsync" />
+    <RenameSeriesDialog @bind-Visible="_renameOpen" SeriesId="@_series.Id" CurrentName="@_series.Name"
+                        CurrentDescription="@_series.Description" Saved="ReloadAsync" />
+    <SeriesCoverDialog @bind-Visible="_coverOpen" SeriesId="@_series.Id" Changed="ReloadAsync" />
+}
+
+@code {
+    private static RenderFragment MetaChip(string label, object? value) => __builder =>
+    {
+        if (HasValue(value))
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="series-meta-chip"
+                     Text="@($"{label} {Convert.ToString(value, CultureInfo.InvariantCulture)}".Trim())" />
+        }
+    };
+
+    private static RenderFragment DataField(string label, object? value) => __builder =>
+    {
+        if (HasValue(value))
+        {
+            <div class="series-field">
+                <span class="series-field-label">@label</span>
+                <span class="series-field-value">@Convert.ToString(value, CultureInfo.InvariantCulture)</span>
+            </div>
+        }
+    };
+}

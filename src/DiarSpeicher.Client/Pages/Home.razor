@@ -1,0 +1,131 @@
+@page "/"
+@using DiarSpeicher.Core.Domain.Catalog
+@implements IDisposable
+@inject MediaApi MediaApi
+@inject SeriesApi SeriesApi
+@inject LibraryFilterState Filter
+
+@if (_loading)
+{
+    <div class="home-loading">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        <span>MONTANDO ÍNDICE DEL ARCHIVO...</span>
+    </div>
+}
+else
+{
+    <PageHeader Title="Archivo DiarSpeicher" Subtitle="Continúa donde lo dejaste o entra por la última ingesta del nodo." />
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-6">@_error</MudAlert>
+    }
+
+    <SectionRow Title="Continuar leyendo" Count="VisibleReading.Count"
+                Empty="@(VisibleReading.Count == 0 ? "No hay ninguna lectura abierta en este sector." : null)">
+        @foreach (var media in VisibleReading)
+        {
+            <MediaCard @key="media.Id" Href="@OriginLink.Link($"media/{media.Id}", HomePath, HomeLabel)"
+                       Title="@MediaHelpers.MediaTitle(media)" Subtitle="@MediaHelpers.MediaSubtitle(media)"
+                       CoverUrl="@MediaApi.ThumbnailUrl(media.Id)" Progress="MediaHelpers.ReadProgress(media)"
+                       Badge="@MediaHelpers.ReadBadge(media)" />
+        }
+    </SectionRow>
+
+    <SectionRow Title="Añadido reciente" Count="VisibleLatest.Count"
+                Empty="@(VisibleLatest.Count == 0 ? "Sin ingestas recientes en este sector." : null)">
+        @foreach (var media in VisibleLatest)
+        {
+            <MediaCard @key="media.Id" Href="@OriginLink.Link($"media/{media.Id}", HomePath, HomeLabel)"
+                       Title="@MediaHelpers.MediaTitle(media)" Subtitle="@MediaHelpers.MediaSubtitle(media)"
+                       CoverUrl="@MediaApi.ThumbnailUrl(media.Id)" Progress="MediaHelpers.ReadProgress(media)" />
+        }
+    </SectionRow>
+
+    <SectionRow Title="Series" Count="_series.Count" MoreHref="series"
+                Empty="@(_series.Count == 0 ? "Este sector no tiene series indexadas." : null)">
+        @foreach (var item in _series)
+        {
+            <MediaCard @key="item.Id" Href="@OriginLink.Link($"series/{item.Id}", HomePath, HomeLabel)"
+                       Title="@item.Name" Subtitle="@($"{item.MediaCount} TOMOS")"
+                       CoverUrl="@SeriesApi.ThumbnailUrl(item.Id)" />
+        }
+    </SectionRow>
+}
+
+@code {
+    private const int RowSize = 20;
+    private const string HomePath = "";
+    private const string HomeLabel = "INICIO";
+
+    private bool _loading = true;
+    private string? _error;
+    private List<DiarSpeicherMediaDto> _reading = [];
+    private List<DiarSpeicherMediaDto> _latest = [];
+    private List<DiarSpeicherSeriesDto> _series = [];
+    private HashSet<string>? _librarySeriesIds;
+    private CancellationTokenSource? _load;
+
+    private List<DiarSpeicherMediaDto> VisibleReading => _reading.FindAll(InLibrary);
+
+    private List<DiarSpeicherMediaDto> VisibleLatest => _latest.FindAll(InLibrary);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Filter.Changed += OnFilterChanged;
+        await LoadAsync();
+    }
+
+    public void Dispose()
+    {
+        Filter.Changed -= OnFilterChanged;
+        _load?.Cancel();
+        _load?.Dispose();
+    }
+
+    private bool InLibrary(DiarSpeicherMediaDto media) =>
+        _librarySeriesIds is null || (media.SeriesId is { } seriesId && _librarySeriesIds.Contains(seriesId));
+
+    private void OnFilterChanged() => _ = InvokeAsync(LoadAsync);
+
+    private async Task LoadAsync()
+    {
+        _load?.Cancel();
+        _load?.Dispose();
+        _load = new CancellationTokenSource();
+        var token = _load.Token;
+        var libraryId = Filter.LibraryId;
+        _loading = true;
+        _librarySeriesIds = null;
+        StateHasChanged();
+
+        var idsTask = LibrarySeriesIds.CollectAsync(SeriesApi, libraryId, token);
+        try
+        {
+            var reading = MediaApi.KeepReadingAsync();
+            var latest = MediaApi.LatestAsync(RowSize);
+            var series = SeriesApi.ListAsync(libraryId, 0, RowSize, token);
+            await Task.WhenAll(reading, latest, series);
+            _reading = await reading ?? [];
+            _latest = await latest;
+            _series = (await series)?.Data ?? [];
+            _error = null;
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (token.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _loading = false;
+        _librarySeriesIds = await idsTask;
+    }
+}

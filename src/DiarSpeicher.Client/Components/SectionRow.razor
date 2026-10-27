@@ -1,0 +1,45 @@
+<section class="section-row">
+    <div class="section-head">
+        <h2 class="section-title">@Title</h2>
+        @if (Count is { } count)
+        {
+            <span class="ds-pill-mono">@count.ToString("D2")</span>
+        }
+        <div class="section-rule"></div>
+        <div class="section-arrows">
+            <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small" aria-label="Desplazar a la izquierda"
+                           Class="section-arrow" OnClick="() => DomJs.ScrollHorizontally(_trackId, -ScrollStep)" />
+            <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" aria-label="Desplazar a la derecha"
+                           Class="section-arrow" OnClick="() => DomJs.ScrollHorizontally(_trackId, ScrollStep)" />
+        </div>
+        @if (!string.IsNullOrEmpty(MoreHref))
+        {
+            <MudButton Href="@MoreHref" Size="Size.Small" Class="section-more">VER TODO</MudButton>
+        }
+    </div>
+
+    @if (!string.IsNullOrEmpty(Empty))
+    {
+        <p class="section-empty">@Empty</p>
+    }
+    else
+    {
+        <div id="@_trackId" class="section-track">@ChildContent</div>
+    }
+</section>
+
+@code {
+    private const int ScrollStep = 480;
+
+    private readonly string _trackId = $"track-{Guid.NewGuid():N}";
+
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    [Parameter] public int? Count { get; set; }
+
+    [Parameter] public string? MoreHref { get; set; }
+
+    [Parameter] public string? Empty { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

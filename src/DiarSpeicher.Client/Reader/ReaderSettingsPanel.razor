@@ -1,0 +1,63 @@
+@using DiarSpeicher.Core.Domain.Enums
+
+<MudDrawer Open="Open" OpenChanged="OpenChanged" Anchor="Anchor.Right" Variant="DrawerVariant.Temporary" Width="320px"
+           Elevation="0" Class="reader-settings">
+    <HudFrame />
+    <div class="settings-body">
+        <div class="settings-head">
+            <span class="settings-title">AJUSTES</span>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="() => OpenChanged.InvokeAsync(false)" />
+        </div>
+
+        <span class="settings-section">Modo de lectura</span>
+        <MudToggleGroup T="ReaderMode" Value="Settings.Mode" ValueChanged="mode => Change(Settings with { Mode = mode })"
+                        FixedContent="true" Class="settings-group">
+            <MudToggleItem Value="ReaderMode.Paged" Text="SIMPLE" />
+            <MudToggleItem Value="ReaderMode.Double" Text="DOBLE" />
+            <MudToggleItem Value="ReaderMode.ContinuousVertical" Text="TIRA" />
+        </MudToggleGroup>
+
+        <span class="settings-section">Dirección</span>
+        <MudToggleGroup T="ReadingDirection" Value="Settings.Direction" ValueChanged="direction => Change(Settings with { Direction = direction })"
+                        FixedContent="true" Class="settings-group">
+            <MudToggleItem Value="ReadingDirection.LeftToRight" Text="IZQ → DER" />
+            <MudToggleItem Value="ReadingDirection.RightToLeft" Text="DER → IZQ" />
+        </MudToggleGroup>
+
+        <span class="settings-section">Ajuste de imagen</span>
+        <MudToggleGroup T="ImageFit" Value="Settings.Fit" ValueChanged="fit => Change(Settings with { Fit = fit })"
+                        FixedContent="true" Class="settings-group">
+            <MudToggleItem Value="ImageFit.Width" Text="ANCHO" />
+            <MudToggleItem Value="ImageFit.Height" Text="ALTO" />
+            <MudToggleItem Value="ImageFit.Original" Text="ORIGINAL" />
+        </MudToggleGroup>
+
+        <span class="settings-section">Fondo del lienzo</span>
+        <div class="settings-backgrounds">
+            @foreach (var color in ReaderSettings.Backgrounds)
+            {
+                <button type="button" aria-label="@($"Fondo {color}")" style="background-color: @color"
+                        class="@(Settings.Background == color ? "settings-swatch active" : "settings-swatch")"
+                        @onclick="() => Change(Settings with { Background = color })"></button>
+            }
+        </div>
+
+        <p class="settings-shortcuts">
+            ATAJOS<br />
+            ← → AVANZAR · ESPACIO SIGUIENTE<br />
+            F PANTALLA COMPLETA · ESC SALIR
+        </p>
+    </div>
+</MudDrawer>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    [Parameter, EditorRequired] public ReaderSettings Settings { get; set; } = ReaderSettings.Default;
+
+    [Parameter] public EventCallback<ReaderSettings> SettingsChanged { get; set; }
+
+    private Task Change(ReaderSettings next) => SettingsChanged.InvokeAsync(next);
+}

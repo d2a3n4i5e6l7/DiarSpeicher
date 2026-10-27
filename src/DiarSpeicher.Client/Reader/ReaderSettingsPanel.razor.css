@@ -1,0 +1,62 @@
+.settings-body {
+    padding: 20px;
+}
+
+.settings-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+.settings-title {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    color: #FFFFFF;
+}
+
+.settings-section {
+    display: block;
+    margin: 24px 0 8px;
+    font-family: var(--font-tactical);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--ds-red-light);
+}
+
+.settings-body ::deep .settings-group {
+    width: 100%;
+    font-family: var(--font-tactical);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 1px;
+}
+
+.settings-backgrounds {
+    display: flex;
+    gap: 8px;
+}
+
+.settings-swatch {
+    width: 44px;
+    height: 34px;
+    cursor: pointer;
+    border: 2px solid var(--ds-border);
+    clip-path: polygon(5px 0%, 100% 0%, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0% 100%, 0% 5px);
+}
+
+.settings-swatch.active {
+    border-color: var(--ds-red-glow);
+}
+
+.settings-shortcuts {
+    margin-top: 24px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 1.7;
+    color: var(--ds-subtle);
+}

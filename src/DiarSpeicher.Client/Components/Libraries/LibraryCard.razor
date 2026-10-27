@@ -1,0 +1,157 @@
+@using System.Globalization
+@using DiarSpeicher.Core.Domain.Catalog
+
+<div class="@CardClass">
+    <HudFrame />
+
+    @if (Busy && !Queued)
+    {
+        <div class="ds-scanline"></div>
+    }
+
+    @if (Queued)
+    {
+        <span class="card-flag">EN COLA</span>
+    }
+    else if (Active is not null)
+    {
+        <span class="card-flag scanning">@ScanProgressTracker.ScanLabel(Active)</span>
+    }
+    else if (Missing > 0)
+    {
+        <MudTooltip Text="@($"{Missing} entradas del índice ya no están en el disco")" RootClass="card-flag-icon">
+            <MudIcon Icon="@Icons.Material.Outlined.Info" Style="font-size: 18px; color: var(--ds-warn)" />
+        </MudTooltip>
+    }
+
+    <div class="card-body">
+        <div class="card-head">
+            <span class="card-badge"><MudIcon Icon="@Icons.Material.Filled.LibraryBooks" Style="font-size: 22px; color: var(--ds-red-glow)" /></span>
+            <a href="@($"libraries/{Library.Id}")" class="card-name">@Library.Name</a>
+        </div>
+
+        <div class="card-actions">
+            <MudTooltip Text="@(Missing > 0 ? $"{Missing} entradas sin carpeta: entra y pulsa REVISAR" : "Ver series y tomos")">
+                <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Href="@($"libraries/{Library.Id}")"
+                               Class="@(Missing > 0 ? "card-action warn ds-attention" : "card-action")" />
+            </MudTooltip>
+            <MudTooltip Text="@(Busy ? "Escaneo en curso..." : "Lanzar escaneo manual")">
+                <MudIconButton Icon="@Icons.Material.Filled.Sync" Size="Size.Small" Disabled="Busy" OnClick="Scan"
+                               Class="@(Busy ? "card-action spinning" : "card-action")" />
+            </MudTooltip>
+            <MudTooltip Text="Subir ficheros">
+                <MudIconButton Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" Class="card-action" OnClick="() => Upload.InvokeAsync(string.Empty)" />
+            </MudTooltip>
+            <MudTooltip Text="Editar configuración">
+                <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" Class="card-action" OnClick="Edit" />
+            </MudTooltip>
+            <MudTooltip Text="Eliminar del índice">
+                <MudIconButton Icon="@Icons.Material.Outlined.DeleteOutline" Size="Size.Small" Class="card-action danger" OnClick="Delete" />
+            </MudTooltip>
+        </div>
+
+        <div class="card-path-row">
+            <MudTooltip Text="@Library.Path" RootClass="card-path-tooltip">
+                <span class="card-path">
+                    <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Style="font-size: 12px; color: var(--ds-red-light)" />
+                    <span>@Library.Path</span>
+                </span>
+            </MudTooltip>
+            <MudTooltip Text="Ver las carpetas que contiene">
+                <MudIconButton Icon="@(_expanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small"
+                               OnClick="ToggleExpanded" />
+            </MudTooltip>
+        </div>
+
+        @if (_expanded)
+        {
+            <LibraryFolderList Path="@Library.Path" Upload="Upload" />
+        }
+
+        <div class="card-stats">
+            <div>
+                <span class="card-stat-label"><MudIcon Icon="@Icons.Material.Filled.CollectionsBookmark" Style="font-size: 13px" /> SERIES</span>
+                <span class="card-stat-value">@Library.SeriesCount</span>
+            </div>
+            <div class="card-stat-middle">
+                <span class="card-stat-label"><MudIcon Icon="@Icons.Material.Filled.AutoStories" Style="font-size: 13px" /> TOMOS</span>
+                <span class="card-stat-value accent">@Library.MediaCount</span>
+            </div>
+            <div>
+                <span class="card-stat-label">TIPO</span>
+                <span class="card-stat-type">@(Library.Config?.LibraryType ?? "MIXED")</span>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(Library.Description))
+        {
+            <p class="card-description">@Library.Description</p>
+        }
+
+        <div class="card-foot">
+            <span class="@($"card-status {StatusKind}")"><span class="card-status-dot"></span>@StatusText</span>
+            <span class="@(Busy ? "card-when busy" : "card-when")">@WhenContent</span>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public DiarSpeicherLibraryDto Library { get; set; } = null!;
+
+    [Parameter] public DiarSpeicherScanStatusDto? Active { get; set; }
+
+    [Parameter] public bool Requested { get; set; }
+
+    [Parameter] public EventCallback Scan { get; set; }
+
+    [Parameter] public EventCallback<string> Upload { get; set; }
+
+    [Parameter] public EventCallback Edit { get; set; }
+
+    [Parameter] public EventCallback Delete { get; set; }
+
+    private bool _expanded;
+
+    private bool Queued => Active?.Queued == true;
+
+    private bool Scanning => Active is not null && !Queued;
+
+    private bool Busy => Active is not null || Requested;
+
+    private int Missing => Library.MissingSeries + Library.MissingVolumes;
+
+    private string CardClass => Queued ? "library-card ds-bevel queued" : "library-card ds-bevel";
+
+    private string StatusKind => (Scanning, IsMissingStatus) switch
+    {
+        (true, _) => "scanning",
+        (_, true) => "missing",
+        _ => "ready",
+    };
+
+    private string StatusText => StatusKind.ToUpperInvariant();
+
+    private bool IsMissingStatus => string.Equals(Library.Status, "MISSING", StringComparison.OrdinalIgnoreCase);
+
+    private RenderFragment WhenContent => __builder =>
+    {
+        if (!Busy)
+        {
+            <text>@(Library.LastScannedAt is { } last ? last.ToLocalTime().ToString("dd/MM/yyyy, HH:mm", CultureInfo.InvariantCulture) : "NUNCA ESCANEADA")</text>
+        }
+        else if (Queued)
+        {
+            <text>en cola</text>
+        }
+        else if (Active?.EtaSeconds is { } eta)
+        {
+            <text>quedan ~@Formatting.FormatDurationSeconds(eta)</text>
+        }
+        else
+        {
+            <text>calculando ETA<span class="ds-dots"><span>.</span><span>.</span><span>.</span></span></text>
+        }
+    };
+
+    private void ToggleExpanded() => _expanded = !_expanded;
+}

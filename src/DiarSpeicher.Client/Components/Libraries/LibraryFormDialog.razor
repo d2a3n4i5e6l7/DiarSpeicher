@@ -1,0 +1,177 @@
+@using DiarSpeicher.Core.Domain.Catalog
+@inject LibrariesApi LibrariesApi
+
+<MudDialog Visible="Visible" VisibleChanged="VisibleChanged" Options="DialogOptions" Class="ds-dialog-library">
+    <TitleContent>@(Editing is null ? "// REGISTRAR NUEVA BIBLIOTECA DE ARCHIVO" : $"// EDITAR BIBLIOTECA: {Editing.Name}")</TitleContent>
+    <DialogContent>
+        <form id="library-form" @onsubmit="SubmitAsync" novalidate class="library-form">
+            <MudStack Spacing="3" Class="mt-2">
+                @if (_error is not null)
+                {
+                    <MudAlert Severity="Severity.Error" ShowCloseIcon="true" CloseIconClicked="() => _error = null">@_error</MudAlert>
+                }
+
+                <MudTextField T="string" @bind-Value="_name" Label="Nombre de la biblioteca" Variant="Variant.Outlined" Disabled="_saving"
+                              Placeholder="Ej. Manga Seinen, Cómics DC, Novelas Ligeras" />
+
+                <div class="library-path-row">
+                    <MudTextField T="string" @bind-Value="_path" Immediate="true" Label="Ruta en el sistema de ficheros" Variant="Variant.Outlined"
+                                  Disabled="_saving" HelperText="@PathHelper" Placeholder="/libraries/manga" Class="library-path" />
+                    <MudButton Variant="Variant.Outlined" Disabled="_saving" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="() => _pickerOpen = true" Class="library-browse">
+                        Examinar
+                    </MudButton>
+                </div>
+
+                <MudTextField T="string" @bind-Value="_description" Label="Descripción opcional" Variant="Variant.Outlined" Lines="2"
+                              Disabled="_saving" Placeholder="Metadatos o notas internas sobre el contenido de este almacén." />
+
+                <div class="library-config">
+                    <span class="library-config-title">Escáner y lector</span>
+                    <LibraryConfigForm Value="_config" Disabled="_saving" PatternChange="StateHasChanged" />
+                </div>
+            </MudStack>
+
+            <ScanPreview Path="@_previewPath" TypedPath="@_path.Trim()" Pattern="@_config.LibraryPattern" Run="() => _previewPath = _path.Trim()" />
+        </form>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Disabled="_saving" OnClick="CloseAsync" Class="ds-button-muted">CANCELAR</MudButton>
+        <MudSpacer />
+        <MudButton ButtonType="ButtonType.Submit" form="library-form" Disabled="_saving" Variant="Variant.Filled" Color="Color.Primary" Class="btn-tactical btn-tactical-hot">@SubmitLabel</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<FolderPickerDialog @bind-Visible="_pickerOpen" InitialPath="@_path.Trim()" Selected="OnFolderSelected" />
+
+@code {
+    private static readonly DialogOptions DialogOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true };
+
+    private string _name = string.Empty;
+    private string _path = string.Empty;
+    private string _description = string.Empty;
+    private DiarSpeicherLibraryConfigDto _config = new();
+    private string? _error;
+    private bool _saving;
+    private bool _pickerOpen;
+    private string _previewPath = string.Empty;
+    private bool _wasVisible;
+
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    [Parameter] public DiarSpeicherLibraryDto? Editing { get; set; }
+
+    [Parameter] public EventCallback<string> Saved { get; set; }
+
+    private string PathHelper => Editing is not null && _path.Trim() != Editing.Path
+        ? "Mover la biblioteca reapunta el registro; los ficheros no se tocan."
+        : "Dentro de una de las carpetas declaradas en el compose.";
+
+    private string SubmitLabel => (_saving, Editing is null) switch
+    {
+        (true, _) => "PROCESANDO...",
+        (false, false) => "GUARDAR CAMBIOS",
+        _ => "CREAR NODO",
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (Visible && !_wasVisible)
+        {
+            _name = Editing?.Name ?? string.Empty;
+            _path = Editing?.Path ?? string.Empty;
+            _description = Editing?.Description ?? string.Empty;
+            _config = CopyConfig(Editing?.Config);
+            _previewPath = string.Empty;
+            _error = null;
+        }
+
+        _wasVisible = Visible;
+    }
+
+    private static DiarSpeicherLibraryConfigDto CopyConfig(DiarSpeicherLibraryConfigDto? source) => source is null
+        ? new DiarSpeicherLibraryConfigDto()
+        : new DiarSpeicherLibraryConfigDto
+        {
+            LibraryType = source.LibraryType,
+            LibraryPattern = source.LibraryPattern,
+            DefaultReadingDir = source.DefaultReadingDir,
+            DefaultReadingMode = source.DefaultReadingMode,
+            DefaultLibraryViewMode = source.DefaultLibraryViewMode,
+            ConvertRarToZip = source.ConvertRarToZip,
+            HardDeleteConversions = source.HardDeleteConversions,
+            GenerateFileHashes = source.GenerateFileHashes,
+            GenerateKoreaderHashes = source.GenerateKoreaderHashes,
+            ProcessMetadata = source.ProcessMetadata,
+            Watch = source.Watch,
+            HideSeriesView = source.HideSeriesView,
+            ThumbnailWidth = source.ThumbnailWidth,
+            ThumbnailHeight = source.ThumbnailHeight,
+            IgnoreRules = source.IgnoreRules,
+        };
+
+    private void OnFolderSelected(string path)
+    {
+        _path = path;
+        _previewPath = path;
+        _pickerOpen = false;
+    }
+
+    private Task CloseAsync() => VisibleChanged.InvokeAsync(false);
+
+    private async Task SubmitAsync()
+    {
+        var name = _name.Trim();
+        var path = _path.Trim();
+        if (name.Length == 0 || path.Length == 0)
+        {
+            _error = "El nombre y la ruta de la biblioteca son obligatorios.";
+            return;
+        }
+
+        _saving = true;
+        _error = null;
+        try
+        {
+            var notice = await SaveAsync(name, path);
+            await Saved.InvokeAsync(notice);
+            await CloseAsync();
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task<string> SaveAsync(string name, string path)
+    {
+        var emoji = string.IsNullOrWhiteSpace(Editing?.Emoji) ? null : Editing.Emoji.Trim();
+        if (Editing is { } editing)
+        {
+            await LibrariesApi.UpdateAsync(editing.Id, new DiarSpeicherUpdateLibraryInput
+            {
+                Name = name,
+                Path = path == editing.Path ? null : path,
+                Description = _description.Trim(),
+                Emoji = emoji,
+                Config = _config,
+            });
+            return $"Biblioteca \"{_name}\" actualizada.";
+        }
+
+        await LibrariesApi.CreateAsync(new DiarSpeicherCreateLibraryInput
+        {
+            Name = name,
+            Path = path,
+            Description = _description.Trim(),
+            Emoji = emoji,
+            Config = _config,
+        });
+        return $"Biblioteca \"{_name}\" dada de alta correctamente.";
+    }
+}

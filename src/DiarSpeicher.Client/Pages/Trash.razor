@@ -1,0 +1,162 @@
+@page "/trash"
+@using DiarSpeicher.Core.Domain.Catalog
+@implements IDisposable
+@inject TrashApi TrashApi
+
+<div class="ds-readable">
+    <PageHeader Title="Restaurar" Subtitle="Lo borrado del disco se guarda una hora antes de irse de verdad. Pasado el plazo, no hay vuelta atrás." />
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" ShowCloseIcon="true" CloseIconClicked="() => _error = null" Class="mb-6">@_error</MudAlert>
+    }
+
+    @if (_entries is null)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_entries.Count == 0)
+    {
+        <div class="trash-card trash-empty"><HudFrame /><span>La papelera está vacía.</span></div>
+    }
+    else
+    {
+        @foreach (var entry in _entries)
+        {
+            <div class="trash-card" @key="entry.Id">
+                <HudFrame />
+                <MudIcon Icon="@(entry.IsDirectory ? Icons.Material.Filled.Folder : Icons.Material.Filled.InsertDriveFile)" Style="color: var(--ds-red-glow)" />
+                <div class="trash-body">
+                    <span class="trash-name">@entry.Name</span>
+                    <span class="trash-path">@entry.OriginalPath</span>
+                    <div class="trash-meta">
+                        <span>@entry.FileCount ficheros · @Formatting.FormatBytes(entry.Bytes)</span>
+                        <span class="@(entry.ExpiresInSeconds < UrgentSeconds ? "trash-expiry urgent" : "trash-expiry")">
+                            @(entry.ExpiresInSeconds > 0 ? $"se borra en {Formatting.FormatDurationSeconds(entry.ExpiresInSeconds)}" : "caducado")
+                        </span>
+                    </div>
+                </div>
+                <MudButton StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="@(_working == entry.Id)" OnClick="() => _confirm = entry" Class="ds-button-muted">
+                    Borrar ya
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Restore"
+                           Disabled="@(_working == entry.Id || entry.ExpiresInSeconds <= 0)" OnClick="() => RestoreAsync(entry)">
+                    Restaurar
+                </MudButton>
+            </div>
+        }
+    }
+</div>
+
+<MudDialog Visible="_confirm is not null" VisibleChanged="_ => _confirm = null" Options="ConfirmOptions">
+    <TitleContent>// Borrar definitivamente</TitleContent>
+    <DialogContent>
+        @if (_confirm is { } confirm)
+        {
+            <MudText Class="mb-4"><strong>@confirm.Name</strong> se borrará del disco ahora mismo.</MudText>
+            <MudAlert Severity="Severity.Error">
+                @confirm.FileCount @(confirm.FileCount == 1 ? "fichero" : "ficheros") · @Formatting.FormatBytes(confirm.Bytes). Esto no se puede deshacer.
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _confirm = null" Class="ds-button-muted">CANCELAR</MudButton>
+        @if (_confirm is { } confirm)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_working == confirm.Id)" OnClick="() => PurgeAsync(confirm)">BORRAR YA</MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const int UrgentSeconds = 300;
+    private static readonly TimeSpan Refresh = TimeSpan.FromSeconds(30);
+    private static readonly DialogOptions ConfirmOptions = new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
+
+    private List<TrashEntryDto>? _entries;
+    private string? _error;
+    private string? _working;
+    private TrashEntryDto? _confirm;
+    private readonly CancellationTokenSource _refresh = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _ = RefreshAsync(_refresh.Token);
+    }
+
+    public void Dispose()
+    {
+        _refresh.Cancel();
+        _refresh.Dispose();
+    }
+
+    private async Task RefreshAsync(CancellationToken token)
+    {
+        using var timer = new PeriodicTimer(Refresh);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadAsync();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _entries = await TrashApi.ListAsync() ?? [];
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+            _entries = [];
+        }
+    }
+
+    private async Task RestoreAsync(TrashEntryDto entry)
+    {
+        _working = entry.Id;
+        try
+        {
+            await TrashApi.RestoreAsync(entry.Id);
+            await LoadAsync();
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = null;
+        }
+    }
+
+    private async Task PurgeAsync(TrashEntryDto entry)
+    {
+        _working = entry.Id;
+        try
+        {
+            await TrashApi.PurgeAsync(entry.Id);
+            _confirm = null;
+            await LoadAsync();
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = null;
+        }
+    }
+}

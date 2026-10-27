@@ -1,0 +1,50 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using DiarSpeicher.Core.Domain.Catalog;
+using DiarSpeicher.Core.Domain.MangaBaka;
+using DiarSpeicher.Core.Domain.Models;
+
+namespace DiarSpeicher.Client.Api;
+
+[JsonSourceGenerationOptions(JsonSerializerDefaults.Web, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonSerializable(typeof(DiarSpeicherPageResponse<DiarSpeicherMediaDto>))]
+[JsonSerializable(typeof(DiarSpeicherPageResponse<DiarSpeicherSeriesDto>))]
+[JsonSerializable(typeof(List<DiarSpeicherMediaDto>))]
+[JsonSerializable(typeof(DiarSpeicherMediaDto))]
+[JsonSerializable(typeof(DiarSpeicherSeriesDto))]
+[JsonSerializable(typeof(List<DiarSpeicherLibraryDto>))]
+[JsonSerializable(typeof(DiarSpeicherLibraryDto))]
+[JsonSerializable(typeof(DiarSpeicherUpdateProgressInput))]
+[JsonSerializable(typeof(DiarSpeicherUpdateSeriesInput))]
+[JsonSerializable(typeof(DiarSpeicherSeriesThumbnailInput))]
+[JsonSerializable(typeof(DiarSpeicherCreateLibraryInput))]
+[JsonSerializable(typeof(DiarSpeicherUpdateLibraryInput))]
+[JsonSerializable(typeof(DiarSpeicherMissingReportDto))]
+[JsonSerializable(typeof(DiarSpeicherScanStatusDto))]
+[JsonSerializable(typeof(List<DiarSpeicherScanStatusDto>))]
+[JsonSerializable(typeof(DiarSpeicherUploadResponseDto))]
+[JsonSerializable(typeof(DiarSpeicherEpubTocDto))]
+[JsonSerializable(typeof(List<EpubDeviceProfile>))]
+[JsonSerializable(typeof(List<FolderRootDto>))]
+[JsonSerializable(typeof(FolderEntryDto))]
+[JsonSerializable(typeof(FolderListingDto))]
+[JsonSerializable(typeof(DiskUsageDto))]
+[JsonSerializable(typeof(ScanPreviewDto))]
+[JsonSerializable(typeof(DeletionPreviewDto))]
+[JsonSerializable(typeof(TrashEntryDto))]
+[JsonSerializable(typeof(List<TrashEntryDto>))]
+[JsonSerializable(typeof(MangaBakaStatusDto))]
+[JsonSerializable(typeof(List<MangaBakaCandidateDto>))]
+[JsonSerializable(typeof(MetadataImportInitRequest))]
+[JsonSerializable(typeof(MetadataImportCompleteRequest))]
+[JsonSerializable(typeof(MetadataImportInitResponse))]
+[JsonSerializable(typeof(MetadataChunkResponse))]
+[JsonSerializable(typeof(RemovedResult))]
+[JsonSerializable(typeof(MatchedResult))]
+[JsonSerializable(typeof(UpdatedResult))]
+[JsonSerializable(typeof(CountedUpdateResult))]
+[JsonSerializable(typeof(SystemClaimResponse))]
+[JsonSerializable(typeof(List<FolderHit>))]
+[JsonSerializable(typeof(FolderIndexStatus))]
+[JsonSerializable(typeof(CreateFolderInput))]
+internal sealed partial class CatalogJsonContext : JsonSerializerContext;

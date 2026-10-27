@@ -1,0 +1,169 @@
+@page "/libraries/{Id}"
+@using System.Globalization
+
+@if (_library is null && _error is null)
+{
+    <div class="lib-loading"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>
+}
+else if (_library is null)
+{
+    <div class="lib-error">
+        <MudAlert Severity="Severity.Error">@(_error ?? "La biblioteca no existe o no es accesible.")</MudAlert>
+        <MudButton Href="libraries" StartIcon="@Icons.Material.Filled.ArrowBack" Class="mt-4">VOLVER A BIBLIOTECAS</MudButton>
+    </div>
+}
+else
+{
+    var series = Series;
+    var volumes = Volumes;
+    var visibleSeries = VisibleSeries;
+    var visibleVolumes = VisibleVolumes;
+    var indexedCount = visibleVolumes.Count(volume => volume.Id.Length > 0);
+    IReadOnlyList<string> readingFiles = Scanning && Progress is not null ? Progress.ReadingFiles : [];
+
+    <MudButton Href="libraries" StartIcon="@Icons.Material.Filled.ArrowBack" Class="ds-button-muted mb-4">BIBLIOTECAS</MudButton>
+
+    <div class="lib-hero">
+        <HudFrame />
+        @if (Scanning && Progress is { } progress)
+        {
+            <div class="ds-scanline"></div>
+            <div class="lib-banner">
+                <div class="lib-banner-row">
+                    <span class="lib-banner-label">@ScanProgressTracker.ScanLabel(progress)</span>
+                    <span class="lib-banner-figures">
+                        @(progress.TotalSeries > 0 ? $"{progress.CompletedSeries} / {progress.TotalSeries} series" : "explorando el disco")
+                        @if (progress.EtaSeconds is { } eta)
+                        {
+                            <text> · quedan ~@Formatting.FormatDurationSeconds(eta)</text>
+                        }
+                        else if (!progress.Queued)
+                        {
+                            <text> · calculando ETA<span class="ds-dots"><span>.</span><span>.</span><span>.</span></span></text>
+                        }
+                    </span>
+                </div>
+                <MudProgressLinear Indeterminate="@(progress.TotalSeries <= 0)" Value="progress.Percentage" Color="Color.Primary" />
+            </div>
+        }
+
+        @if (!Scanning && MissingCount > 0)
+        {
+            <MudAlert Severity="Severity.Warning" Class="mt-4">
+                <div class="lib-missing">
+                    <span>@(_missing?.Series.Count ?? 0) series y @(_missing?.TotalVolumes ?? 0) tomos siguen en el índice pero ya no están en el disco.</span>
+                    <MudButton Size="Size.Small" Color="Color.Inherit" OnClick="OpenMissing">REVISAR</MudButton>
+                </div>
+            </MudAlert>
+        }
+
+        <div class="lib-head">
+            <div class="lib-identity">
+                <div class="lib-title-row">
+                    <span class="lib-badge"><MudIcon Icon="@Icons.Material.Filled.LibraryBooks" Style="font-size: 22px; color: var(--ds-red-glow)" /></span>
+                    <div class="lib-titles">
+                        <h1 class="lib-title">@_library.Name</h1>
+                        <span class="lib-path">@_library.Path</span>
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(_library.Description))
+                {
+                    <p class="lib-description">@_library.Description</p>
+                }
+                <div class="lib-chips">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Text="@(string.IsNullOrEmpty(_library.Status) ? "READY" : _library.Status)" />
+                    @if (!string.IsNullOrEmpty(_library.Config?.LibraryType))
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Text="@_library.Config.LibraryType.ToUpperInvariant()" />
+                    }
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             Text="@(_library.LastScannedAt is { } last ? $"ESCANEADA {Formatting.FormatDate(last)}" : "NUNCA ESCANEADA")" />
+                </div>
+            </div>
+            <div class="lib-actions">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" Disabled="Scanning" OnClick="RescanAsync"
+                           Class="@(Scanning ? "lib-spin" : null)">
+                    @(Scanning ? "INDEXANDO..." : "REESCANEAR")
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" Href="@($"libraries?edit={Id}")">EDITAR</MudButton>
+            </div>
+        </div>
+
+        <div class="lib-stats">
+            <div><span class="lib-stat-label">SERIES</span><span class="lib-stat-value">@series.Count</span></div>
+            <div><span class="lib-stat-label">TOMOS</span><span class="lib-stat-value">@volumes.Count</span></div>
+            <div><span class="lib-stat-label">PÁGINAS</span><span class="lib-stat-value">@volumes.Sum(volume => (long)volume.Pages).ToString("N0", CultureInfo.InvariantCulture)</span></div>
+            <div><span class="lib-stat-label">TAMAÑO TOTAL</span><span class="lib-stat-value">@Formatting.FormatBytes(volumes.Sum(volume => volume.Size))</span></div>
+        </div>
+    </div>
+
+    <MudTabs @bind-ActivePanelIndex="_tab" Class="lib-tabs">
+        <MudTabPanel Text="@($"SERIES ({visibleSeries.Count})")" />
+        <MudTabPanel Text="@($"TOMOS ({indexedCount})")" />
+    </MudTabs>
+
+    @if (_missing is not null)
+    {
+        <MissingEntriesDialog Visible="_missingOpen" Report="_missing" Working="_purging" Close="CloseMissing" Purge="PurgeAsync" />
+    }
+
+    @if (_tab == 0)
+    {
+        <CatalogToolbar @bind-Query="_query" @bind-Sort="_seriesSort" @bind-Direction="_seriesDirection" Options="CatalogSorting.SeriesSorts"
+                        Placeholder="Buscar serie por nombre..." Shown="visibleSeries.Count" Total="series.Count" />
+        <div class="ds-cover-grid">
+            @foreach (var item in Page(visibleSeries, _seriesPage))
+            {
+                <MediaCard @key="item.Id" Href="@OriginLink.Link($"series/{item.Id}", $"libraries/{Id}", _library.Name.ToUpperInvariant())"
+                           Title="@item.Name" Subtitle="@($"{item.MediaCount} TOMOS")" CoverUrl="@SeriesApi.ThumbnailUrl(item.Id)" Width="100%"
+                           Scanning="@(Scanning && item.Name == Progress?.CurrentSeries)" RetryKey="@CoverRetryKey" />
+            }
+            @foreach (var item in PendingSeries)
+            {
+                <div class="lib-pending" @key="item.Path">
+                    <div class="lib-pending-cover"><div class="ds-scanline"></div><MudIcon Icon="@Icons.Material.Filled.LibraryBooks" Style="font-size: 30px; color: var(--ds-border-red)" /></div>
+                    <span class="lib-pending-name">@item.Name</span>
+                    <span class="lib-pending-note">@item.VolumeCount TOMOS · EN COLA</span>
+                </div>
+            }
+        </div>
+        @if (PageCount(visibleSeries.Count) > 1)
+        {
+            <div class="lib-pagination"><MudPagination Count="PageCount(visibleSeries.Count)" @bind-Selected="_seriesPage" Color="Color.Primary" /></div>
+        }
+    }
+    else
+    {
+        <CatalogToolbar @bind-Query="_query" @bind-Sort="_mediaSort" @bind-Direction="_mediaDirection" Options="CatalogSorting.MediaSorts"
+                        Placeholder="Buscar tomo por nombre..." Shown="indexedCount" Total="volumes.Count" />
+        <div class="ds-cover-grid">
+            @foreach (var item in Page(visibleVolumes, _mediaPage))
+            {
+                var active = readingFiles.Contains(item.Path);
+                if (item.Id.Length == 0)
+                {
+                    <div class="@(active ? "lib-hole active" : "lib-hole")" @key="item.Path">
+                        <div class="lib-hole-cover">
+                            @if (active)
+                            {
+                                <div class="ds-scanline"></div>
+                            }
+                            <MudIcon Icon="@Icons.Material.Filled.LibraryBooks" Style="font-size: 26px" />
+                        </div>
+                        <span class="lib-hole-name">@item.Name</span>
+                    </div>
+                }
+                else
+                {
+                    <MediaCard @key="item.Id" Href="@OriginLink.Link($"media/{item.Id}", $"libraries/{Id}", _library.Name.ToUpperInvariant())"
+                               Title="@MediaHelpers.MediaTitle(item)" Subtitle="@MediaHelpers.MediaSubtitle(item)"
+                               CoverUrl="@MediaApi.ThumbnailUrl(item.Id)" Progress="MediaHelpers.ReadProgress(item)" Width="100%" Scanning="active" RetryKey="@CoverRetryKey" />
+                }
+            }
+        </div>
+        @if (PageCount(visibleVolumes.Count) > 1)
+        {
+            <div class="lib-pagination"><MudPagination Count="PageCount(visibleVolumes.Count)" @bind-Selected="_mediaPage" Color="Color.Primary" /></div>
+        }
+    }
+}

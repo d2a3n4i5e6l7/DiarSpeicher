@@ -1,0 +1,243 @@
+.lib-loading {
+    display: flex;
+    justify-content: center;
+    padding: 80px 0;
+}
+
+.lib-error {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.lib-hero {
+    position: relative;
+    margin: 16px 0 24px;
+    padding: 16px;
+    background-image: var(--ds-gradient-card);
+    border: 1px solid var(--ds-border);
+}
+
+.lib-banner {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--ds-border-soft);
+}
+
+.lib-banner-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.lib-banner-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-tactical);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 1px;
+    color: var(--ds-red-glow);
+}
+
+.lib-banner-figures {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ds-muted);
+}
+
+.lib-missing {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.lib-head {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 16px;
+}
+
+.lib-identity {
+    min-width: 0;
+}
+
+.lib-title-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.lib-badge {
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(145deg, var(--ds-red-deep) 0%, var(--ds-bg-deep) 100%);
+    border: 1px solid var(--ds-border-red);
+}
+
+.lib-titles {
+    min-width: 0;
+}
+
+.lib-title {
+    margin: 0;
+    font-family: var(--font-tactical);
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--ds-text-strong);
+    line-height: 1.1;
+}
+
+.lib-path {
+    display: block;
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ds-muted);
+}
+
+.lib-description {
+    max-width: 700px;
+    margin: 12px 0 0;
+    font-family: var(--font-body);
+    font-size: 13px;
+    color: var(--ds-text-2);
+}
+
+.lib-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.lib-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 12px;
+}
+
+.lib-actions ::deep .lib-spin .mud-button-icon-start {
+    animation: ds-spin 1.2s linear infinite;
+}
+
+.lib-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--ds-border);
+}
+
+.lib-stat-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ds-subtle);
+}
+
+.lib-stat-value {
+    font-family: var(--font-tactical);
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--ds-text-strong);
+}
+
+.lib-pending,
+.lib-hole {
+    opacity: 0.55;
+}
+
+.lib-hole {
+    opacity: 0.45;
+}
+
+.lib-hole.active {
+    opacity: 0.9;
+}
+
+.lib-pending-cover,
+.lib-hole-cover {
+    position: relative;
+    aspect-ratio: 2 / 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-image: var(--ds-gradient-card);
+    border: 1px dashed var(--ds-border);
+    color: var(--ds-border);
+}
+
+.lib-hole.active .lib-hole-cover {
+    border-color: var(--ds-border-red);
+    color: var(--ds-border-red);
+}
+
+.lib-pending-name,
+.lib-hole-name {
+    display: block;
+    margin-top: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lib-pending-name {
+    font-family: var(--font-tactical);
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--ds-muted);
+}
+
+.lib-pending-note,
+.lib-hole-name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ds-subtle);
+}
+
+.lib-hole.active .lib-hole-name {
+    color: var(--ds-red-glow);
+}
+
+.lib-pagination {
+    display: flex;
+    justify-content: center;
+    margin-top: 32px;
+}
+
+@media (min-width: 600px) {
+    .lib-hero {
+        padding: 24px;
+    }
+
+    .lib-title {
+        font-size: 30px;
+    }
+
+    .lib-stats {
+        flex-direction: row;
+        gap: 24px;
+    }
+}
+
+@media (min-width: 960px) {
+    .lib-head {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
+}

@@ -1,0 +1,209 @@
+@using DiarSpeicher.Core.Domain.Models
+@page "/users"
+
+<PageHeader Title="Gestión de Usuarios" Subtitle="Administra las cuentas, su edad, lo que pueden hacer y cómo se conectan.">
+    <Actions>
+        <MudButton StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadDataAsync" Disabled="_loading" Class="ds-button-ghost">
+            ACTUALIZAR
+        </MudButton>
+        <MudButton StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate" Variant="Variant.Filled" Color="Color.Primary" Class="btn-tactical btn-tactical-hot">
+            NUEVO USUARIO
+        </MudButton>
+    </Actions>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" ShowCloseIcon="true" CloseIconClicked="ClearError" Class="mb-6">@_error</MudAlert>
+}
+
+@if (_success is not null)
+{
+    <MudAlert Severity="Severity.Success" ShowCloseIcon="true" CloseIconClicked="ClearSuccess" Class="mb-6">@_success</MudAlert>
+}
+
+<div class="users-card ds-bevel">
+    <HudFrame />
+    @if (_loading)
+    {
+        <div class="users-empty">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Medium" />
+            <span class="users-syncing">SINCRONIZANDO REGISTRO DE CUENTAS...</span>
+        </div>
+    }
+    else if (_users.Count == 0)
+    {
+        <div class="users-empty">
+            <MudIcon Icon="@Icons.Material.Filled.VpnKey" Class="users-empty-icon" />
+            <span class="users-empty-title">Registro de cuentas vacío</span>
+            <span class="users-empty-text">Ningún operador tiene acceso a este nodo todavía.</span>
+        </div>
+    }
+    else
+    {
+        <MudSimpleTable Hover="true" Elevation="0">
+            <thead>
+                <tr>
+                    <th class="users-col-id">ID</th>
+                    <th>Operador</th>
+                    <th>Rol</th>
+                    <th>Edad</th>
+                    <th>Accesos</th>
+                    <th>Estado</th>
+                    <th class="users-col-actions">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var user in _users)
+                {
+                    <tr @key="user.Id">
+                        <td><span class="ds-pill-mono">@user.Id.ToString("D3")</span></td>
+                        <td><span class="users-name">@user.Username</span></td>
+                        <td>
+                            <MudChip T="string" Text="@((user.Role ?? "sin rol").ToUpperInvariant())" Size="Size.Small"
+                                     Variant="Variant.Outlined" Color="@(user.IsAdmin ? Color.Primary : Color.Default)" />
+                            @if (user.IsAdmin)
+                            {
+                                <MudChip T="string" Text="ADMIN" Size="Size.Small" Color="Color.Primary" />
+                            }
+                        </td>
+                        <td>
+                            <span class="@(user.AgeRestriction is null ? "users-age" : "users-age users-age-set")">@AgeLabel(user)</span>
+                        </td>
+                        <td>
+                            @if (PermissionService.HasPermission(user.Permissions, Permissions.FileUpload))
+                            {
+                                <MudChip T="string" Text="SUBIR" Size="Size.Small" Variant="Variant.Outlined" />
+                            }
+                            @if (PermissionService.HasPermission(user.Permissions, Permissions.CreateFolder))
+                            {
+                                <MudChip T="string" Text="CARPETAS" Size="Size.Small" Variant="Variant.Outlined" />
+                            }
+                            @if (PermissionService.HasProtocol(user.AllowedProtocols, PermissionService.ProtocolApiKey))
+                            {
+                                <MudChip T="string" Text="CLAVE API" Size="Size.Small" Variant="Variant.Outlined" />
+                            }
+                            @if (PermissionService.HasProtocol(user.AllowedProtocols, PermissionService.ProtocolBasic))
+                            {
+                                <MudChip T="string" Text="OPDS BASIC" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" />
+                            }
+                        </td>
+                        <td>
+                            <MudChip T="string" Text="@(user.IsEnabled ? "ACTIVO" : "INACTIVO")" Size="Size.Small"
+                                     Color="@(user.IsEnabled ? Color.Success : Color.Default)"
+                                     Variant="@(user.IsEnabled ? Variant.Filled : Variant.Outlined)" />
+                        </td>
+                        <td class="users-col-actions">
+                            <MudTooltip Text="Cambiar Contraseña">
+                                <MudIconButton Icon="@Icons.Material.Filled.VpnKey" Size="Size.Small" OnClick="() => OpenPassword(user)" />
+                            </MudTooltip>
+                            <MudTooltip Text="Editar permisos y acceso">
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => OpenEditAsync(user)" />
+                            </MudTooltip>
+                            <MudTooltip Text="Eliminar Usuario">
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                               Disabled="@(!CanDelete(user))" OnClick="() => OpenDelete(user)" />
+                            </MudTooltip>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+</div>
+
+<MudDialog @bind-Visible="_createOpen" Options="SmallDialog">
+    <TitleContent>Alta de nuevo operador</TitleContent>
+    <DialogContent>
+        <form id="create-user-form" @onsubmit="CreateUserAsync">
+            <MudStack Spacing="3" Class="mt-2">
+                <MudTextField T="string" @bind-Value="_createForm.Username" Label="Nombre de Usuario" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField T="string" @bind-Value="_createForm.Password" Label="Contraseña" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudSelect T="string" @bind-Value="_createForm.Role" Label="Rol Asignado" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var name in RoleOptions(_createForm.Role))
+                    {
+                        <MudSelectItem T="string" Value="@name">@name</MudSelectItem>
+                    }
+                </MudSelect>
+                <UserAccessFields Form="_createForm" Protocols="_protocols" />
+            </MudStack>
+        </form>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseCreate" Disabled="_saving">Cancelar</MudButton>
+        <MudButton ButtonType="ButtonType.Submit" form="create-user-form" Variant="Variant.Filled" Color="Color.Primary" Disabled="_saving">
+            @(_saving ? "Creando..." : "Crear Usuario")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_editOpen" Options="LargeDialog">
+    <TitleContent>Editar operador: @_editingUser?.Username</TitleContent>
+    <DialogContent>
+        <MudTabs @bind-ActivePanelIndex="_editTab" Class="mb-2">
+            <MudTabPanel Text="Protocolos y Permisos" />
+            <MudTabPanel Text="Perfiles EPUB / Dispositivos" />
+        </MudTabs>
+        <form id="edit-user-form" @onsubmit="UpdateUserAsync">
+            @if (_editTab == 0)
+            {
+                <MudStack Spacing="3" Class="mt-2">
+                    <MudSelect T="string" @bind-Value="_editForm.Role" Label="Rol Asignado" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var name in RoleOptions(_editForm.Role))
+                        {
+                            <MudSelectItem T="string" Value="@name">@name</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudSwitch T="bool" @bind-Value="_editForm.IsEnabled" Label="Cuenta Habilitada" Color="Color.Primary" />
+                    <UserAccessFields Form="_editForm" Protocols="_protocols" />
+                </MudStack>
+            }
+            else if (_loadingProfiles)
+            {
+                <div class="users-empty"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>
+            }
+            else
+            {
+                <EpubProfilesTab @bind-Profiles="_epubProfiles" />
+            }
+        </form>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseEdit" Disabled="_saving">Cancelar</MudButton>
+        <MudButton ButtonType="ButtonType.Submit" form="edit-user-form" Variant="Variant.Filled" Color="Color.Primary" Disabled="_saving">
+            @(_saving ? "Guardando..." : "Guardar Cambios")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_passwordOpen" Options="ExtraSmallDialog">
+    <TitleContent>Rotar credencial: @_passwordUser?.Username</TitleContent>
+    <DialogContent>
+        <form id="password-user-form" @onsubmit="ChangePasswordAsync">
+            <MudTextField T="string" @bind-Value="_newPassword" Label="Nueva Contraseña" InputType="InputType.Password"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+        </form>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="ClosePassword" Disabled="_saving">Cancelar</MudButton>
+        <MudButton ButtonType="ButtonType.Submit" form="password-user-form" Variant="Variant.Filled" Color="Color.Warning" Disabled="_saving">
+            @(_saving ? "Actualizando..." : "Actualizar")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_deleteOpen" Options="ExtraSmallDialog" TitleClass="ds-dialog-danger">
+    <TitleContent><span class="users-danger-title">Confirmar baja de operador</span></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2">
+            ¿Estás seguro de que deseas eliminar permanentemente al usuario <strong>@_deleteUser?.Username</strong>?
+            Esta acción no se puede deshacer.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseDelete" Disabled="_saving">Cancelar</MudButton>
+        <MudButton OnClick="DeleteUserAsync" Variant="Variant.Filled" Color="Color.Error" Disabled="_saving">
+            @(_saving ? "Eliminando..." : "Eliminar")
+        </MudButton>
+    </DialogActions>
+</MudDialog>

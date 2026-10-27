@@ -28,8 +28,6 @@ public sealed partial class DiarSpeicherService : IDiarSpeicherService
 
     private readonly IReadingProgress _progress;
 
-    private static readonly string[] CoverExtensions = [".jpg", ".jpeg", ".png", ".webp"];
-
     public DiarSpeicherService(
         ISqliteConnectionFactory connectionFactory,
         ICompositeBookProcessor bookProcessor,

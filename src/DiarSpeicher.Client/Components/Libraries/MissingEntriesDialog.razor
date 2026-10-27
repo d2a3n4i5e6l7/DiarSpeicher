@@ -1,0 +1,62 @@
+@using DiarSpeicher.Core.Domain.Catalog
+
+<MudDialog Visible="Visible" VisibleChanged="_ => Close.InvokeAsync()" Options="DialogOptions">
+    <TitleContent>// Entradas sin carpeta</TitleContent>
+    <DialogContent>
+        <MudText Class="mb-4">
+            El escaneo encontró @Report.Series.Count series y @Report.TotalVolumes tomos que siguen en el índice pero ya no están en
+            el disco. ¿Los quito?
+        </MudText>
+
+        <div class="missing-list">
+            @foreach (var serie in Report.Series)
+            {
+                <div class="missing-item" @key="serie.Id">
+                    <MudIcon Icon="@Icons.Material.Filled.FolderOff" Style="font-size: 15px; color: var(--ds-red-light)" />
+                    <div class="missing-text">
+                        <span class="missing-name">@serie.Name</span>
+                        <span class="missing-path">@serie.Path</span>
+                    </div>
+                    <span class="missing-count">@serie.VolumeCount</span>
+                </div>
+            }
+            @if (Report.OrphanVolumes > 0)
+            {
+                <div class="missing-item">
+                    <MudIcon Icon="@Icons.Material.Filled.FolderOff" Style="font-size: 15px; color: var(--ds-subtle)" />
+                    <span class="missing-orphans">@Report.OrphanVolumes tomos sueltos, en series que sí siguen en disco</span>
+                </div>
+            }
+        </div>
+
+        <MudAlert Severity="Severity.Info" Class="mb-2">No se borra nada del disco: esos ficheros ya no existen. Solo se limpia el índice.</MudAlert>
+
+        @if (Report.TotalReadingSessions > 0)
+        {
+            <MudAlert Severity="Severity.Warning">
+                Se perderá el progreso de lectura de @Report.TotalReadingSessions @(Report.TotalReadingSessions == 1 ? "tomo" : "tomos").
+                Si los ficheros vuelven al disco, se reindexarán como nuevos y empezarán desde la página 1.
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close" Class="ds-button-muted">DEJARLOS</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="Working" OnClick="Purge">
+            @(Working ? "LIMPIANDO..." : "QUITAR DEL ÍNDICE")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions DialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+
+    [Parameter, EditorRequired] public DiarSpeicherMissingReportDto Report { get; set; } = null!;
+
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public bool Working { get; set; }
+
+    [Parameter] public EventCallback Close { get; set; }
+
+    [Parameter] public EventCallback Purge { get; set; }
+}

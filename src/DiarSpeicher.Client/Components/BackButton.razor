@@ -1,0 +1,43 @@
+@inject NavigationManager Navigation
+
+<MudButton StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="GoBack" Class="@Class">@Text</MudButton>
+
+@code {
+    private string? _from;
+    private string? _label;
+
+    [Parameter, EditorRequired] public string FallbackHref { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public string FallbackLabel { get; set; } = string.Empty;
+
+    [Parameter] public string? LabelFormat { get; set; }
+
+    [Parameter] public string? Class { get; set; }
+
+    private string Text => LabelFormat is null || _label is null
+        ? _label ?? FallbackLabel
+        : string.Format(System.Globalization.CultureInfo.InvariantCulture, LabelFormat, _label);
+
+    protected override void OnParametersSet()
+    {
+        var query = new Uri(Navigation.Uri).Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
+        _from = Value(query, "from");
+        _label = Value(query, "label");
+    }
+
+    private static string? Value(string[] query, string key) =>
+        query.Select(pair => pair.Split('=', 2))
+            .Where(parts => parts.Length == 2 && parts[0] == key)
+            .Select(parts => Uri.UnescapeDataString(parts[1]))
+            .FirstOrDefault();
+
+    private void GoBack()
+    {
+        if (_from is not null && DomJs.HistoryBack())
+        {
+            return;
+        }
+
+        Navigation.NavigateTo(_from ?? FallbackHref);
+    }
+}

@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 #
-# Checks both halves of the repository without writing to any file:
+# Checks the repository without writing to any file:
 #
 #   backend   dotnet format --verify-no-changes  +  build with warnings as errors
-#   frontend  eslint
 #
 # Exits non-zero if anything fails. To fix, use format.sh.
 
@@ -22,9 +21,6 @@ dotnet format DiarSpeicher.slnx --verify-no-changes || fail "dotnet format (corr
 
 log "Backend: analizadores"
 dotnet build DiarSpeicher.slnx --no-incremental -warnaserror || fail "dotnet build"
-
-log "Frontend: eslint"
-pnpm -C frontEnd exec eslint . || fail "eslint (corrige con ./format.sh)"
 
 if [ "$STATUS" -eq 0 ]; then
     printf '\n\033[1;32m==> Todo limpio\033[0m\n'

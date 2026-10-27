@@ -1,0 +1,116 @@
+@page "/series"
+@using DiarSpeicher.Core.Domain.Catalog
+@implements IDisposable
+@inject SeriesApi SeriesApi
+@inject LibraryFilterState Filter
+
+<PageHeader Title="Series" Subtitle="@($"{_total} series indexadas en el sector seleccionado.")" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-6">@_error</MudAlert>
+}
+
+@if (_loading)
+{
+    <div class="grid-state"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>
+}
+else if (_series.Count == 0)
+{
+    <div class="grid-state">
+        <MudIcon Icon="@Icons.Material.Filled.CollectionsBookmark" Style="font-size: 44px; color: var(--ds-border-red)" />
+        <span class="grid-empty-title">Sin series indexadas</span>
+        <span class="grid-empty-text">Escanea una biblioteca para que el motor pueble este sector.</span>
+    </div>
+}
+else
+{
+    <div class="ds-cover-grid">
+        @foreach (var item in _series)
+        {
+            <MediaCard @key="item.Id" Href="@OriginLink.Link($"series/{item.Id}", SeriesPath, SeriesLabel)"
+                       Title="@item.Name" Subtitle="@($"{item.MediaCount} TOMOS")"
+                       CoverUrl="@SeriesApi.ThumbnailUrl(item.Id)" Width="100%" />
+        }
+    </div>
+}
+
+@if (_totalPages > 1)
+{
+    <div class="grid-pagination">
+        <MudPagination Count="_totalPages" Selected="_page + 1" SelectedChanged="ChangePageAsync" Color="Color.Primary" />
+    </div>
+}
+
+@code {
+    private const string SeriesPath = "series";
+    private const string SeriesLabel = "SERIES";
+
+    private bool _loading = true;
+    private string? _error;
+    private int _page;
+    private int _totalPages = 1;
+    private long _total;
+    private List<DiarSpeicherSeriesDto> _series = [];
+    private CancellationTokenSource? _load;
+
+    protected override void OnInitialized() => Filter.Changed += OnFilterChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        Filter.Changed -= OnFilterChanged;
+        _load?.Cancel();
+        _load?.Dispose();
+    }
+
+    private void OnFilterChanged() => _ = InvokeAsync(() =>
+    {
+        _page = 0;
+        return LoadAsync();
+    });
+
+    private Task ChangePageAsync(int selected)
+    {
+        _page = selected - 1;
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _load?.Cancel();
+        _load?.Dispose();
+        _load = new CancellationTokenSource();
+        var token = _load.Token;
+        _loading = true;
+        try
+        {
+            var result = await SeriesApi.ListAsync(Filter.LibraryId, _page, CoverGrid.PageSize(), token);
+            _series = result?.Data ?? [];
+            _totalPages = Math.Max(1, result?.TotalPages ?? 1);
+            _total = result?.Total ?? 0;
+            _error = null;
+        }
+        catch (ApiException exception)
+        {
+            _series = [];
+            _error = exception.Message;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        _loading = false;
+    }
+}

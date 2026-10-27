@@ -1,0 +1,130 @@
+@using DiarSpeicher.Core.Domain.Catalog
+@inject SeriesApi SeriesApi
+@inject MediaApi MediaApi
+
+<MudDialog Visible="Visible" VisibleChanged="VisibleChanged" Options="DialogOptions">
+    <TitleContent>Portada de la serie</TitleContent>
+    <DialogContent>
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+        }
+
+        <MudTabs @bind-ActivePanelIndex="_tab" Class="mb-4">
+            <MudTabPanel Text="Desde un tomo" />
+            <MudTabPanel Text="Portada personalizada" />
+        </MudTabs>
+
+        @if (_tab == 0)
+        {
+            @VolumesContent
+        }
+        else
+        {
+            <label class="cover-drop">
+                <InputFile OnChange="SubmitFileAsync" accept="@string.Join(',', CoverFormats.Extensions)" disabled="@_busy" class="cover-input" />
+                <MudIcon Icon="@Icons.Material.Filled.UploadFile" Style="font-size: 40px; color: var(--ds-red-glow)" />
+                <span class="cover-drop-title">Elige una imagen de tu equipo</span>
+                <span class="cover-drop-formats">@string.Join(" · ", CoverFormats.Extensions).ToUpperInvariant()</span>
+            </label>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton StartIcon="@Icons.Material.Filled.RestartAlt" Disabled="_busy" OnClick="ClearAsync" Class="ds-button-muted">VOLVER A LA AUTOMÁTICA</MudButton>
+        <MudSpacer />
+        <MudButton OnClick="CloseAsync" Disabled="_busy" Class="ds-button-muted">CERRAR</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions DialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+    private const int VolumePageSize = 100;
+
+    private List<DiarSpeicherMediaDto>? _volumes;
+    private int _tab;
+    private bool _busy;
+    private string? _error;
+    private bool _wasVisible;
+
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    [Parameter, EditorRequired] public string SeriesId { get; set; } = string.Empty;
+
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private RenderFragment VolumesContent => _volumes switch
+    {
+        null => @<div class="cover-state"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>,
+        { Count: 0 } => @<p class="cover-empty">Esta serie no tiene tomos indexados de los que sacar una portada.</p>,
+        _ => @<div class="ds-cover-grid">
+                @foreach (var volume in _volumes)
+                {
+                    <button type="button" class="cover-choice" disabled="@_busy" @key="volume.Id" @onclick="() => SetFromVolumeAsync(volume.Id)">
+                        <img src="@MediaApi.ThumbnailUrl(volume.Id)" alt="@MediaHelpers.MediaTitle(volume)" loading="lazy" />
+                        <span>@MediaHelpers.MediaTitle(volume)</span>
+                    </button>
+                }
+            </div>,
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var opened = Visible && !_wasVisible;
+        _wasVisible = Visible;
+        if (!opened)
+        {
+            return;
+        }
+
+        _volumes = null;
+        _error = null;
+        try
+        {
+            _volumes = (await SeriesApi.MediaAsync(SeriesId, 0, VolumePageSize))?.Data ?? [];
+        }
+        catch (ApiException)
+        {
+            _volumes = [];
+        }
+    }
+
+    private Task CloseAsync() => VisibleChanged.InvokeAsync(false);
+
+    private Task SetFromVolumeAsync(string mediaId) => RunAsync(() => SeriesApi.SetCoverFromMediaAsync(SeriesId, mediaId));
+
+    private Task ClearAsync() => RunAsync(() => SeriesApi.ClearCoverAsync(SeriesId));
+
+    private Task SubmitFileAsync(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (!CoverFormats.Extensions.Contains(Path.GetExtension(file.Name).ToLowerInvariant()))
+        {
+            _error = $"\"{file.Name}\" no vale. Se aceptan {string.Join(", ", CoverFormats.Extensions)}.";
+            return Task.CompletedTask;
+        }
+
+        return RunAsync(() => SeriesApi.UploadCoverAsync(SeriesId, file));
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+            await Changed.InvokeAsync();
+            await CloseAsync();
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

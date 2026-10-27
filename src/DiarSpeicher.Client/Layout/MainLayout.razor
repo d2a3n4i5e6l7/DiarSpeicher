@@ -1,0 +1,93 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject SessionState Session
+@inject GatewayOptions Gateway
+@inject NavigationManager Navigation
+
+<MudLayout>
+    <MudAppBar Elevation="0" Class="ds-appbar">
+        <MudHidden Breakpoint="Breakpoint.MdAndUp">
+            <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="OpenDrawer" />
+        </MudHidden>
+
+        <div class="appbar-title">
+            <span class="appbar-title-text">@NavItems.TitleFor(_relativePath)</span>
+            <span class="appbar-node">DS-NODE-01</span>
+        </div>
+
+        <LibrarySelector />
+
+        @if (Session.User is { } user)
+        {
+            <span class="@(user.IsAdmin ? "appbar-user appbar-user-admin" : "appbar-user")">@UserBadge(user)</span>
+        }
+
+        <MudTooltip Text="Cerrar sesión de nodo">
+            <MudIconButton Icon="@Icons.Material.Filled.Logout" Size="Size.Small" Class="appbar-action" OnClick="Session.LogoutAsync" />
+        </MudTooltip>
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" Width="250px"
+               Elevation="0" Class="ds-drawer">
+        <div class="drawer-brand">
+            <DiarSpeicherLogo Size="32" ShowSubtitle="true" Subtitle="ARCHIVE PROTOCOL" />
+        </div>
+
+        <nav class="drawer-nav">
+            @foreach (var group in NavItems.Groups)
+            {
+                <div class="drawer-group-title">@group.Title</div>
+                @foreach (var item in group.Items)
+                {
+                    <a href="@item.Path" class="@(item.IsActive(_relativePath) ? "drawer-link active" : "drawer-link")">
+                        <MudIcon Icon="@item.Icon" Size="Size.Small" />
+                        <span>@item.Label</span>
+                    </a>
+                }
+            }
+        </nav>
+
+        <div class="drawer-footer">
+            <div class="drawer-status"><span class="drawer-status-dot"></span>NODE: ONLINE</div>
+            <div class="drawer-gateway">GW: <code>@Gateway.UrlAccess</code></div>
+        </div>
+    </MudDrawer>
+
+    <MudMainContent Class="ds-main">
+        <div class="ds-noise"></div>
+        <div class="ds-main-scroll">
+            @Body
+        </div>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+    private string _relativePath = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        _relativePath = RelativePath(Navigation.Uri);
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+
+    private static string UserBadge(SessionUser user) => $"{(user.IsAdmin ? "SYSADMIN" : "READER")} // {user.Username}";
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        _relativePath = RelativePath(e.Location);
+        StateHasChanged();
+    }
+
+    private string RelativePath(string uri)
+    {
+        var relative = Navigation.ToBaseRelativePath(uri);
+        var cut = relative.IndexOfAny(['?', '#']);
+        return cut < 0 ? relative : relative[..cut];
+    }
+
+    private void OpenDrawer() => _drawerOpen = true;
+
+}

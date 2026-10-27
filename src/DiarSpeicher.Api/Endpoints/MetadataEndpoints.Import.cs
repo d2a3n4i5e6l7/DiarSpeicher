@@ -1,3 +1,4 @@
+using DiarSpeicher.Core.Domain.MangaBaka;
 using DiarSpeicher.Infrastructure.Metadata;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
@@ -63,7 +64,7 @@ public static partial class MetadataEndpoints
         var raw = disposition.FileNameStar.HasValue ? disposition.FileNameStar.Value : disposition.FileName.Value;
         var name = Path.GetFileName(raw ?? string.Empty);
 
-        if (!IsAcceptedDumpExtension(name))
+        if (!DumpFormats.IsAccepted(name))
         {
             return Results.BadRequest(new ApiError("Solo se aceptan volcados .zst, .tar.gz o .tgz."));
         }

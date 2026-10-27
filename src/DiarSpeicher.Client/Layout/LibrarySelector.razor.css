@@ -1,0 +1,54 @@
+.selector-button {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    max-width: 220px;
+    margin-right: 12px;
+    padding: 4px 10px;
+    cursor: pointer;
+    background: var(--ds-bg-sunken);
+    border: 1px solid var(--ds-border);
+    color: var(--ds-text-2);
+    font-family: var(--font-tactical);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    clip-path: polygon(6px 0%, 100% 0%, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0% 100%, 0% 6px);
+}
+
+.selector-button.active {
+    border-color: var(--ds-red);
+    color: var(--ds-red-glow);
+}
+
+.selector-button:hover {
+    border-color: var(--ds-red-glow);
+    color: var(--ds-text-strong);
+}
+
+.selector-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.selector-item-name {
+    display: block;
+    font-family: var(--font-tactical);
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.selector-item-counts {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ds-subtle);
+}
+
+@media (min-width: 600px) {
+    .selector-button {
+        display: inline-flex;
+    }
+}

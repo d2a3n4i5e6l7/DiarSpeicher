@@ -1,0 +1,268 @@
+.library-card {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: transform 0.25s ease, filter 0.25s ease, opacity 0.25s ease;
+}
+
+.library-card:hover {
+    transform: translateY(-2px);
+}
+
+.library-card.queued {
+    filter: grayscale(1);
+    opacity: 0.55;
+}
+
+.card-flag {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 3;
+    max-width: 70%;
+    padding: 0 6px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: var(--ds-subtle);
+    border: 1px solid var(--ds-border);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.card-flag.scanning {
+    color: var(--ds-red-glow);
+    border-color: var(--ds-red-dark);
+    background-color: var(--ds-bg-sunken);
+}
+
+.library-card ::deep .card-flag-icon {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 3;
+}
+
+.card-body {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px;
+}
+
+.card-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.card-badge {
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(145deg, var(--ds-red-deep) 0%, var(--ds-bg-deep) 100%);
+    border: 1px solid var(--ds-border-red);
+    border-radius: 3px;
+}
+
+.card-name {
+    flex-grow: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-tactical);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    text-decoration: none;
+    color: var(--ds-text-strong);
+    transition: color 0.2s ease;
+}
+
+.card-name:hover {
+    color: var(--ds-red-glow);
+}
+
+.card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.card-actions ::deep .card-action {
+    color: var(--ds-text-2);
+    border: 1px solid var(--ds-border);
+    border-radius: 2px;
+}
+
+.card-actions ::deep .card-action:hover {
+    color: var(--ds-red-glow);
+    border-color: var(--ds-red);
+    background-color: rgba(var(--ds-red-rgb), 0.1);
+}
+
+.card-actions ::deep .card-action.warn {
+    color: var(--ds-warn);
+}
+
+.card-actions ::deep .card-action.spinning .mud-icon-root {
+    color: var(--ds-warn);
+    animation: ds-spin 1.2s linear infinite;
+}
+
+.card-path-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.card-path-row ::deep .card-path-tooltip {
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.card-path {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    padding: 2px 6px;
+    background-color: var(--ds-bg-deep);
+    border: 1px solid var(--ds-bg-surface-hi);
+    border-radius: 2px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ds-muted);
+}
+
+.card-path span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.card-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    padding: 10px;
+    text-align: center;
+    background-color: var(--ds-bg-sunken);
+    border: 1px solid var(--ds-bg-surface-hi);
+    border-radius: 3px;
+}
+
+.card-stat-middle {
+    border-left: 1px solid var(--ds-border-soft);
+    border-right: 1px solid var(--ds-border-soft);
+}
+
+.card-stat-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    font-family: var(--font-tactical);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--ds-subtle);
+}
+
+.card-stat-value {
+    display: block;
+    margin-top: 2px;
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--ds-text-strong);
+}
+
+.card-stat-value.accent {
+    color: var(--ds-red-light);
+}
+
+.card-stat-type {
+    display: block;
+    margin-top: 2px;
+    font-family: var(--font-tactical);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--ds-platinum);
+}
+
+.card-description {
+    flex-grow: 1;
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--ds-muted);
+}
+
+.card-foot {
+    margin-top: auto;
+    padding-top: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid var(--ds-metal-3);
+}
+
+.card-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border-radius: 2px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    --status: var(--ds-ok);
+    color: var(--status);
+    border: 1px solid var(--ds-ok-dark);
+    background-color: rgba(var(--ds-ok-rgb), 0.1);
+}
+
+.card-status.scanning {
+    --status: var(--ds-red-glow);
+    border-color: var(--ds-red-dark);
+    background-color: rgba(var(--ds-red-rgb), 0.15);
+}
+
+.card-status.missing {
+    --status: var(--ds-warn);
+    border-color: var(--ds-warn-dark);
+    background-color: rgba(var(--ds-warn-rgb), 0.15);
+}
+
+.card-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--status);
+    box-shadow: 0 0 6px var(--status);
+}
+
+.card-status.scanning .card-status-dot {
+    animation: ds-pulse 1.5s infinite;
+}
+
+.card-when {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ds-subtle);
+}
+
+.card-when.busy {
+    color: var(--ds-warn);
+}

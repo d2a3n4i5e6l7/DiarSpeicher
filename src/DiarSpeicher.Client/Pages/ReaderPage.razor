@@ -1,0 +1,138 @@
+@page "/read/{MediaId}"
+@layout ReaderLayout
+
+@if (_media is null && _error is null)
+{
+    <div class="reader-state"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>
+}
+else if (_media is null)
+{
+    <div class="reader-state">
+        <span class="reader-error">@(_error ?? "TOMO NO DISPONIBLE")</span>
+        <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="Exit" />
+    </div>
+}
+else if (IsEpub)
+{
+    <EpubReader Media="_media" Exit="Exit" />
+}
+else
+{
+    <div id="@CanvasId" @ref="_canvas" tabindex="0" class="reader-canvas"
+         style="background-color: @_settings.Background; overflow: @CanvasOverflow; cursor: @(_uiVisible ? "default" : "none")"
+         @onkeydown="OnKeyDown" @onmousemove="WakeUi" @ontouchstart="OnTouchStart" @ontouchend="OnTouchEnd">
+
+        @if (Strip)
+        {
+            <div id="@StripId" class="reader-strip">
+                @for (var n = 1; n <= TotalPages; n++)
+                {
+                    var pageNumber = n;
+                    <div @key="pageNumber" data-page="@pageNumber" class="reader-strip-slot" style="aspect-ratio: @Ratio(pageNumber)">
+                        @if (Math.Abs(pageNumber - _page) <= StripWindow)
+                        {
+                            @PageFrame(pageNumber)
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else if (_settings.Mode == ReaderMode.Double)
+        {
+            <div class="@(_settings.RightToLeft ? "reader-spread rtl" : "reader-spread")">
+                @PageFrame(_page)
+                @PageFrame(_page + 1)
+            </div>
+        }
+        else
+        {
+            <div class="reader-single">@PageFrame(_page)</div>
+        }
+
+        @if (!Strip)
+        {
+            <div class="reader-zone left" @onclick="() => Turn(forwardOnLtr: false)"></div>
+            <div class="reader-zone right" @onclick="() => Turn(forwardOnLtr: true)"></div>
+        }
+
+        <div class="@(_uiVisible ? "reader-top visible" : "reader-top")">
+            <MudTooltip Text="Salir del lector">
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Class="reader-icon" OnClick="Exit" />
+            </MudTooltip>
+            <span class="reader-title">@MediaHelpers.MediaTitle(_media)</span>
+            <span class="ds-pill-mono">@_page.ToString("D3") / @TotalPages.ToString("D3")</span>
+            <MudTooltip Text="@(_fullscreen ? "Salir de pantalla completa" : "Pantalla completa")">
+                <MudIconButton Icon="@(_fullscreen ? Icons.Material.Filled.FullscreenExit : Icons.Material.Filled.Fullscreen)"
+                               Size="Size.Small" Class="reader-icon" OnClick="ToggleFullscreen" />
+            </MudTooltip>
+            <MudTooltip Text="Ajustes del lector">
+                <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small" Class="reader-icon" OnClick="OpenPanel" />
+            </MudTooltip>
+        </div>
+
+        <div class="@(_uiVisible ? "reader-bottom visible" : "reader-bottom")">
+            <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Class="reader-icon" OnClick="() => Turn(forwardOnLtr: false)"
+                           Disabled="@(_settings.RightToLeft ? _page >= TotalPages : _page <= 1)" />
+            <div class="reader-slider">
+                @if (_sliderValue != _page)
+                {
+                    <div class="reader-preview" style="left: @PreviewLeft">
+                        <img src="@MediaApi.PageUrl(_media.Id, _previewValue)" alt="" style="aspect-ratio: @Ratio(_previewValue)" />
+                    </div>
+                }
+                <input type="range" min="1" max="@Math.Max(1, TotalPages)" value="@MirrorPage(_sliderValue)"
+                       @oninput="OnSliderInput" @onchange="OnSliderCommit" />
+            </div>
+            <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Class="reader-icon" OnClick="() => Turn(forwardOnLtr: true)"
+                           Disabled="@(_settings.RightToLeft ? _page <= 1 : _page >= TotalPages)" />
+        </div>
+
+        @foreach (var target in PreloadPages())
+        {
+            <img @key="target" hidden alt="" src="@MediaApi.PageUrl(_media.Id, target)" />
+        }
+
+        <ReaderSettingsPanel @bind-Open="_panelOpen" Settings="_settings" SettingsChanged="UpdateSettings" />
+    </div>
+}
+
+@code {
+    private string PreviewLeft
+    {
+        get
+        {
+            var share = (MirrorPage(_sliderValue) - 1) / (double)Math.Max(1, TotalPages - 1);
+            return $"{(share * 100).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}%";
+        }
+    }
+
+    private string Ratio(int pageNumber) => RatioOf(pageNumber).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+
+    private RenderFragment PageFrame(int pageNumber) => __builder =>
+    {
+        if (_media is not null && pageNumber >= 1 && pageNumber <= TotalPages)
+        {
+            var frameStyle = _settings.Fit == ImageFit.Original ? string.Empty : $"aspect-ratio: {Ratio(pageNumber)}";
+            <div class="@FrameClass" style="@frameStyle">
+                <img id="@PageImageId(pageNumber)" src="@MediaApi.PageUrl(_media.Id, pageNumber)" alt="@($"Página {pageNumber}")"
+                     loading="@(Strip ? "lazy" : "eager")" class="@ImageClass" @onload="() => RememberRatio(pageNumber)" />
+            </div>
+        }
+    };
+
+    private string FrameClass => (Strip, _settings.Fit, _settings.Mode) switch
+    {
+        (true, _, _) => "reader-frame fit-strip",
+        (_, ImageFit.Width, ReaderMode.Double) => "reader-frame fit-width-half",
+        (_, ImageFit.Width, _) => "reader-frame fit-width",
+        (_, ImageFit.Original, _) => "reader-frame fit-original",
+        _ => "reader-frame fit-height",
+    };
+
+    private string ImageClass => (Strip, _settings.Fit) switch
+    {
+        (true, _) or (_, ImageFit.Width) => "reader-image fill-width",
+        (_, ImageFit.Original) => "reader-image natural",
+        _ => "reader-image fill-height",
+    };
+}

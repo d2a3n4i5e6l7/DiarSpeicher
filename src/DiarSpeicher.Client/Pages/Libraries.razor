@@ -1,0 +1,97 @@
+@page "/libraries"
+
+<PageHeader Title="Bibliotecas de Archivo" Subtitle="Carpetas que el motor DiarSpeicher indexa y sirve a los visores de manga y literatura.">
+    <Actions>
+        <MudButton StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading" OnClick="() => LoadAsync(silent: false)" Class="ds-button-ghost">ACTUALIZAR</MudButton>
+        <MudButton StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate" Variant="Variant.Filled" Color="Color.Primary" Class="btn-tactical btn-tactical-hot">NUEVA BIBLIOTECA</MudButton>
+    </Actions>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" ShowCloseIcon="true" CloseIconClicked="ClearError" Class="mb-6">@_error</MudAlert>
+}
+
+@if (_notice is not null)
+{
+    <MudAlert Severity="Severity.Success" ShowCloseIcon="true" CloseIconClicked="ClearNotice" Class="mb-6 ds-alert-notice">@_notice</MudAlert>
+}
+
+@if (!_loading && _libraries.Count > 0)
+{
+    <CatalogToolbar @bind-Query="_query" @bind-Sort="_sort" @bind-Direction="_direction" Options="CatalogSorting.LibrarySorts"
+                    Placeholder="Buscar por nombre, ruta o descripción..." Shown="Visible.Count" Total="_libraries.Count" />
+}
+
+@if (_loading)
+{
+    <div class="libraries-loading"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>
+}
+else if (_libraries.Count == 0)
+{
+    <div class="libraries-empty">
+        <HudFrame />
+        <span class="libraries-empty-badge"><MudIcon Icon="@Icons.Material.Filled.LibraryBooks" Style="font-size: 32px; color: var(--ds-red-glow)" /></span>
+        <h2 class="libraries-empty-title">NO HAY BIBLIOTECAS REGISTRADAS</h2>
+        <p class="libraries-empty-text">
+            Registra un nodo de biblioteca apuntando a la ruta local o compartida donde almacenas tus tomos de manga y novelas gráficas.
+        </p>
+        <MudButton StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate" Variant="Variant.Filled" Color="Color.Primary" Class="btn-tactical btn-tactical-hot">NUEVA BIBLIOTECA</MudButton>
+    </div>
+}
+else
+{
+    <div class="ds-panel-grid">
+        @foreach (var library in Visible)
+        {
+            <LibraryCard @key="library.Id" Library="library" Active="ActiveFor(library)" Requested="_requestedScans.Contains(library.Id)"
+                         Scan="() => ScanAsync(library)" Upload="subpath => OpenUpload(library, subpath)"
+                         Edit="() => OpenEdit(library)" Delete="() => OpenDelete(library)" />
+        }
+    </div>
+}
+
+<LibraryFormDialog @bind-Visible="_formOpen" Editing="_editing" Saved="OnSavedAsync" />
+
+<MudDialog @bind-Visible="_deleteOpen" Options="DeleteOptions" TitleClass="ds-dialog-danger">
+    <TitleContent><span class="libraries-danger-title">CONFIRMAR ELIMINACIÓN DE ÍNDICE</span></TitleContent>
+    <DialogContent>
+        <MudText Class="mb-4">¿Estás seguro de que deseas eliminar la biblioteca <strong>@_pendingDelete?.Name</strong>?</MudText>
+        @if (!_deleteFiles)
+        {
+            <div class="libraries-safe">
+                <strong>Aviso de seguridad:</strong> Los archivos originales de manga y libros alojados en el disco nunca serán eliminados
+                ni modificados. Solo se purgará el índice de metadatos en la base de datos de DiarSpeicher.
+            </div>
+        }
+        <MudSwitch T="bool" @bind-Value="_deleteFiles" Disabled="_saving" Color="Color.Primary" Class="mt-4" Label="ELIMINAR TAMBIÉN EL DIRECTORIO DEL DISCO" />
+        @if (_deleteFiles && _pendingDelete is not null)
+        {
+            <DeleteScopeNotice Path="@_pendingDelete.Path" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Disabled="_saving" OnClick="CloseDelete" Class="ds-button-muted">CANCELAR</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_saving" OnClick="DeleteAsync">
+            @(_saving ? "ELIMINANDO..." : "ELIMINAR DEL ÍNDICE")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog Visible="_uploadOpen" VisibleChanged="open => { if (!open) { _ = CloseUploadAsync(); } }" Options="UploadOptions">
+    <TitleContent>
+        @if (_uploadTarget is { } target)
+        {
+            @($"// Subir a {target.Library.Name}{(target.Subpath.Length > 0 ? $" / {target.Subpath}" : string.Empty)}")
+        }
+    </TitleContent>
+    <DialogContent>
+        @if (_uploadTarget is { } target)
+        {
+            <UploadPanel LibraryId="@target.Library.Id" LibraryPath="@target.Library.Path" InitialSubpath="@target.Subpath" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseUploadAsync">Cerrar</MudButton>
+    </DialogActions>
+</MudDialog>

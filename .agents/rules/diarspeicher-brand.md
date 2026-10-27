@@ -63,13 +63,13 @@ Reglas que no se negocian:
 - Isotipo oficial: «D» blindada con cruz de hierro carmesí central.
 
 ## 4. Dónde vive esto en el código
-- Valores de los dos modos: `frontEnd/src/theme/tokens.ts` (`DARK` y `DAY`).
-- Biseles, clases HUD y overrides de MUI: `frontEnd/src/theme/index.ts`
+- Valores de los dos modos: `src/DiarSpeicher.Client/wwwroot/css/iron-blood.css` (`DARK` y `DAY`).
+- Biseles, clases HUD y overrides de MUI: `src/DiarSpeicher.Client/wwwroot/css/iron-blood.css`
   (exporta `DS`, y `buildTheme(mode)` publica los tokens del modo en `:root`).
 - **`DS.*` son referencias a variables CSS, no colores literales.** Por eso una
   página escrita con `DS` cambia de modo sin tocarla. No pasarlos por `alpha()`
   ni meterlos dentro de un `rgb()`: para eso están `--ds-red-rgb` y compañía.
 - En SVG hay que escribir `style={{ fill: "var(--ds-red)" }}`, no `fill="var(...)"`:
   como atributo de presentación no todos los navegadores lo resuelven.
-- Marco HUD: `frontEnd/src/components/HudFrame.tsx`.
-- Cabecera de página: `frontEnd/src/components/PageHeader.tsx`.
+- Marco HUD: `src/DiarSpeicher.Client/Components/HudFrame.razor`.
+- Cabecera de página: `src/DiarSpeicher.Client/Components/PageHeader.razor`.

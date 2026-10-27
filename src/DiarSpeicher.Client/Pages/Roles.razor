@@ -1,0 +1,263 @@
+@page "/roles"
+@implements IDisposable
+@inject RolesApi RolesApi
+
+<PageHeader Title="Gestión de Roles" Subtitle="Configura los niveles de acceso y permisos para los usuarios del sistema.">
+    <Actions>
+        <MudButton StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading" OnClick="LoadAsync" Class="ds-button-ghost">ACTUALIZAR</MudButton>
+        <MudButton StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate" Variant="Variant.Filled" Color="Color.Primary" Class="btn-tactical btn-tactical-hot">NUEVO ROL</MudButton>
+    </Actions>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" ShowCloseIcon="true" CloseIconClicked="() => _error = null" Class="mb-6">@_error</MudAlert>
+}
+
+@if (_success is not null)
+{
+    <MudAlert Severity="Severity.Success" ShowCloseIcon="true" CloseIconClicked="() => _success = null" Class="mb-6">@_success</MudAlert>
+}
+
+<div class="roles-card ds-bevel">
+    <HudFrame />
+    @if (_loading)
+    {
+        <div class="roles-state">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            <span class="roles-syncing">CONSULTANDO MATRIZ DE PERMISOS...</span>
+        </div>
+    }
+    else if (_roles.Count == 0)
+    {
+        <div class="roles-state">
+            <MudIcon Icon="@Icons.Material.Filled.Security" Style="font-size: 40px; color: var(--ds-border-red)" />
+            <span class="roles-empty-title">Matriz de permisos vacía</span>
+            <span class="roles-empty-text">Este nodo todavía no tiene ningún rol registrado.</span>
+        </div>
+    }
+    else
+    {
+        <MudSimpleTable Hover="true">
+            <thead>
+                <tr><th class="roles-col-id">ID</th><th>Designación</th><th>Descripción</th><th>Nivel</th><th>Efectivos</th><th class="roles-col-actions">Acciones</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var role in _roles)
+                {
+                    <tr @key="role.Id">
+                        <td><span class="ds-pill-mono">@role.Id.ToString("D3")</span></td>
+                        <td><span class="roles-name">@role.Name</span></td>
+                        <td><span class="roles-description">@(string.IsNullOrEmpty(role.Description) ? "—" : role.Description)</span></td>
+                        <td>
+                            @if (role.IsAdmin)
+                            {
+                                <MudChip T="string" Icon="@Icons.Material.Filled.Security" Text="ADMINISTRADOR" Size="Size.Small" Color="Color.Primary" />
+                            }
+                            else
+                            {
+                                <MudChip T="string" Text="ESTÁNDAR" Size="Size.Small" Variant="Variant.Outlined" />
+                            }
+                        </td>
+                        <td><MudChip T="string" Text="@($"{role.UserCount:D2} USUARIOS")" Size="Size.Small" Variant="Variant.Outlined" /></td>
+                        <td class="roles-col-actions">
+                            <MudTooltip Text="Editar Rol">
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => OpenEdit(role)" />
+                            </MudTooltip>
+                            <MudTooltip Text="Eliminar Rol">
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" Disabled="role.IsAdmin" OnClick="() => OpenDelete(role)" />
+                            </MudTooltip>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+</div>
+
+<MudDialog @bind-Visible="_formOpen" Options="FormOptions">
+    <TitleContent>@(_editing is null ? "Alta de nuevo rol" : $"Editar rol: {_editing.Name}")</TitleContent>
+    <DialogContent>
+        <form id="role-form" @onsubmit="SaveAsync">
+            <MudStack Spacing="3" Class="mt-2">
+                <MudTextField T="string" @bind-Value="_name" Label="Nombre del Rol" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField T="string" @bind-Value="_description" Label="Descripción" Variant="Variant.Outlined" Lines="2" />
+                <MudSwitch T="bool" @bind-Value="_isAdmin" Label="Privilegios de Administrador" Color="Color.Primary" />
+            </MudStack>
+        </form>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Disabled="_saving" OnClick="() => _formOpen = false">Cancelar</MudButton>
+        <MudButton ButtonType="ButtonType.Submit" form="role-form" Variant="Variant.Filled" Color="Color.Primary" Disabled="_saving">
+            @SaveLabel
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_deleteOpen" Options="DeleteOptions" TitleClass="ds-dialog-danger">
+    <TitleContent><span class="roles-danger-title">Confirmar baja de rol</span></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2">
+            ¿Estás seguro de que deseas eliminar permanentemente el rol <strong>@_deleteRole?.Name</strong>? Esta acción no se puede deshacer.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Disabled="_saving" OnClick="() => _deleteOpen = false">Cancelar</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error" Disabled="_saving" OnClick="DeleteAsync">@(_saving ? "Eliminando..." : "Eliminar")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly TimeSpan SuccessVisible = TimeSpan.FromSeconds(6);
+    private static readonly DialogOptions FormOptions = new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
+    private static readonly DialogOptions DeleteOptions = new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
+
+    private IReadOnlyList<RoleItem> _roles = [];
+    private bool _loading = true;
+    private string? _error;
+    private string? _success;
+    private bool _formOpen;
+    private RoleItem? _editing;
+    private string _name = string.Empty;
+    private string _description = string.Empty;
+    private bool _isAdmin;
+    private bool _saving;
+    private bool _deleteOpen;
+    private RoleItem? _deleteRole;
+    private CancellationTokenSource? _successTimer;
+
+    private string SaveLabel => (_saving, _editing is null) switch
+    {
+        (true, true) => "Creando...",
+        (true, false) => "Guardando...",
+        (false, true) => "Crear Rol",
+        _ => "Guardar Cambios",
+    };
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    public void Dispose()
+    {
+        _successTimer?.Cancel();
+        _successTimer?.Dispose();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _roles = await RolesApi.ListAsync();
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OpenCreate()
+    {
+        (_editing, _name, _description, _isAdmin) = (null, string.Empty, string.Empty, false);
+        _formOpen = true;
+    }
+
+    private void OpenEdit(RoleItem role)
+    {
+        (_editing, _name, _description, _isAdmin) = (role, role.Name, role.Description ?? string.Empty, role.IsAdmin);
+        _formOpen = true;
+    }
+
+    private void OpenDelete(RoleItem role)
+    {
+        _deleteRole = role;
+        _deleteOpen = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        var name = _name.Trim();
+        if (name.Length == 0)
+        {
+            _error = _editing is null ? "El nombre del rol es obligatorio." : null;
+            return;
+        }
+
+        _saving = true;
+        _error = null;
+        try
+        {
+            var description = _description.Trim().Length > 0 ? _description.Trim() : null;
+            if (_editing is { } editing)
+            {
+                await RolesApi.UpdateAsync(editing.Id, name, description, _isAdmin);
+                ShowSuccess($"Rol \"{_name}\" actualizado con éxito.");
+            }
+            else
+            {
+                await RolesApi.CreateAsync(name, description, _isAdmin);
+                ShowSuccess($"Rol \"{_name}\" creado con éxito.");
+            }
+
+            _formOpen = false;
+            await LoadAsync();
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_deleteRole is not { } role)
+        {
+            return;
+        }
+
+        _saving = true;
+        _error = null;
+        try
+        {
+            await RolesApi.DeleteAsync(role.Id);
+            ShowSuccess($"Rol \"{role.Name}\" eliminado.");
+            _deleteOpen = false;
+            _deleteRole = null;
+            await LoadAsync();
+        }
+        catch (ApiException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void ShowSuccess(string message)
+    {
+        _success = message;
+        _successTimer?.Cancel();
+        _successTimer?.Dispose();
+        _successTimer = new CancellationTokenSource();
+        var token = _successTimer.Token;
+        _ = Task.Delay(SuccessVisible, token).ContinueWith(
+            _ => InvokeAsync(() =>
+            {
+                _success = null;
+                StateHasChanged();
+            }),
+            token,
+            TaskContinuationOptions.OnlyOnRanToCompletion,
+            TaskScheduler.Default);
+    }
+}

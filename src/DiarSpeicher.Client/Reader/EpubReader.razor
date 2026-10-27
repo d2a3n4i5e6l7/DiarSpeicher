@@ -1,0 +1,88 @@
+<div id="@RootId" @ref="_root" tabindex="0" class="epub-root" style="background-color: @_theme.Background"
+     @onmousemove="WakeUi" @onclick="WakeUi" @onkeydown="OnKeyDown">
+
+    <div class="@(_uiVisible ? "epub-top visible" : "epub-top")">
+        <MudTooltip Text="Salir del lector">
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Class="epub-icon" OnClick="Exit" />
+        </MudTooltip>
+        <MudTooltip Text="Capítulos (TOC)">
+            <MudIconButton Icon="@Icons.Material.Filled.FormatListBulleted" Size="Size.Small" Class="epub-icon" OnClick="OpenToc" />
+        </MudTooltip>
+        <span class="epub-title">@MediaHelpers.MediaTitle(Media)</span>
+        <span class="ds-pill-mono">@_progress %</span>
+        <MudTooltip Text="Ajustes de texto">
+            <MudIconButton Icon="@Icons.Material.Filled.FormatSize" Size="Size.Small" Class="epub-icon" OnClick="ToggleSettings" />
+        </MudTooltip>
+        <MudTooltip Text="@(_fullscreen ? "Salir de pantalla completa" : "Pantalla completa")">
+            <MudIconButton Icon="@(_fullscreen ? Icons.Material.Filled.FullscreenExit : Icons.Material.Filled.Fullscreen)"
+                           Size="Size.Small" Class="epub-icon" OnClick="ToggleFullscreen" />
+        </MudTooltip>
+    </div>
+
+    @if (_settingsOpen)
+    {
+        <div class="epub-settings" @onclick:stopPropagation="true">
+            <span class="epub-settings-label">TAMAÑO DE FUENTE</span>
+            <div class="epub-font-row">
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => ChangeFontSize(-FontStep)">A-</MudButton>
+                <span class="epub-font-value">@_fontSize%</span>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => ChangeFontSize(FontStep)">A+</MudButton>
+            </div>
+            <span class="epub-settings-label">TEMA DE LECTURA</span>
+            <div class="epub-theme-row">
+                @foreach (var theme in Themes)
+                {
+                    <MudButton Size="Size.Small" Variant="@(theme == _theme ? Variant.Filled : Variant.Outlined)" Color="Color.Primary"
+                               Class="epub-theme-button" OnClick="() => SelectTheme(theme)">@theme.Label</MudButton>
+                }
+            </div>
+        </div>
+    }
+
+    <div class="epub-stage">
+        @if (_loading)
+        {
+            <div class="epub-overlay" style="background-color: @_theme.Background">
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Large" />
+                <span class="epub-status">@_status</span>
+            </div>
+        }
+
+        @if (_error is not null)
+        {
+            <div class="epub-overlay" style="background-color: @_theme.Background">
+                <span class="epub-error">@_error</span>
+                <MudButton Variant="Variant.Outlined" OnClick="Exit" Class="epub-exit">SALIR</MudButton>
+            </div>
+        }
+
+        <div id="@ViewerId" class="epub-viewer"></div>
+
+        <div class="epub-zone left" @onclick="GoPrev" @onclick:stopPropagation="true"></div>
+        <div class="epub-zone right" @onclick="GoNext" @onclick:stopPropagation="true"></div>
+    </div>
+
+    <div class="@(_uiVisible ? "epub-bottom visible" : "epub-bottom")">
+        <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Class="epub-icon" OnClick="GoPrev" />
+        <span class="epub-file">@Media.Name</span>
+        <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Class="epub-icon" OnClick="GoNext" />
+    </div>
+
+    <MudDrawer @bind-Open="_tocOpen" Anchor="Anchor.Left" Variant="DrawerVariant.Temporary" Width="320px" Elevation="0" Class="epub-toc">
+        <div class="epub-toc-head">
+            <span class="epub-toc-title">// ÍNDICE DE CAPÍTULOS</span>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="() => _tocOpen = false" />
+        </div>
+        @if (_toc.Count == 0)
+        {
+            <p class="epub-toc-empty">No hay índice disponible para este libro.</p>
+        }
+        else
+        {
+            @foreach (var item in _toc)
+            {
+                <button type="button" class="epub-toc-item" @onclick="() => NavigateToChapter(item.Href)">@item.Label</button>
+            }
+        }
+    </MudDrawer>
+</div>

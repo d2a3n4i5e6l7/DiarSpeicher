@@ -1,0 +1,100 @@
+@using DiarSpeicher.Core.Domain.Catalog
+@inject FilesystemApi Filesystem
+
+<div class="preview">
+    <span class="preview-title">Así quedaría</span>
+    <span class="preview-note">Ensayo sobre el disco. No se guarda nada hasta que pulses crear.</span>
+
+    @if (Path.Length == 0 || Stale)
+    {
+        <div class="preview-idle">
+            <span class="preview-mono">
+                @(TypedPath.Length > 0
+                    ? "La ruta cambió. Recorrer el disco cuesta, así que se hace cuando lo pidas."
+                    : "Elige una ruta con Examinar, o escríbela y pulsa aquí.")
+            </span>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="TypedPath.Length == 0" StartIcon="@Icons.Material.Filled.Refresh" OnClick="Run">
+                Calcular
+            </MudButton>
+        </div>
+    }
+    else if (_loadedKey != Key)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_error is not null)
+    {
+        <span class="preview-mono preview-error">@_error</span>
+    }
+    else if (_data is not null)
+    {
+        <div class="preview-chips">
+            <MudChip T="string" Size="Size.Small" Text="@($"{_data.Series.Count} series")" />
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Text="@($"{_data.TotalVolumes} tomos")" />
+        </div>
+        @if (_data.Series.Count == 0)
+        {
+            <span class="preview-mono">Ninguna serie. No hay ficheros reconocibles ahí dentro.</span>
+        }
+        <div class="preview-list">
+            @foreach (var serie in _data.Series)
+            {
+                <div class="preview-item" @key="serie.Path">
+                    <MudIcon Icon="@Icons.Material.Filled.CollectionsBookmark" Style="font-size: 15px; color: var(--ds-red-light)" />
+                    <div class="preview-item-text">
+                        <span class="preview-item-name">@serie.Name</span>
+                        @if (serie.IsRoot)
+                        {
+                            <span class="preview-mono preview-root">tomos sueltos en la raíz</span>
+                        }
+                    </div>
+                    <span class="preview-count">@serie.VolumeCount</span>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private string? _loadedKey;
+    private ScanPreviewDto? _data;
+    private string? _error;
+
+    [Parameter, EditorRequired] public string Path { get; set; } = string.Empty;
+
+    [Parameter] public string TypedPath { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public string Pattern { get; set; } = string.Empty;
+
+    [Parameter] public EventCallback Run { get; set; }
+
+    private string Key => $"{Path}#{Pattern}";
+
+    private bool Stale => TypedPath.Length > 0 && TypedPath != Path;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Path.Length == 0 || _loadedKey == Key)
+        {
+            return;
+        }
+
+        var requested = Key;
+        _loadedKey = null;
+        try
+        {
+            _data = await Filesystem.PreviewAsync(Path, Pattern);
+            _error = null;
+        }
+        catch (ApiException exception)
+        {
+            _data = null;
+            _error = exception.Message;
+        }
+
+        if (requested == Key)
+        {
+            _loadedKey = requested;
+        }
+    }
+}

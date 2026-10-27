@@ -1,3 +1,4 @@
+using DiarSpeicher.Core.Domain.MangaBaka;
 using DiarSpeicher.Core.Domain.Models;
 using DiarSpeicher.Infrastructure.Metadata;
 using Microsoft.AspNetCore.Http.Features;
@@ -23,7 +24,7 @@ public static partial class MetadataEndpoints
         }
 
         var fileName = Path.GetFileName(request.FileName ?? string.Empty);
-        if (!IsAcceptedDumpExtension(fileName))
+        if (!DumpFormats.IsAccepted(fileName))
         {
             return Results.BadRequest(new ApiError("Solo se aceptan volcados .zst, .tar.gz o .tgz."));
         }
@@ -125,11 +126,6 @@ public static partial class MetadataEndpoints
 
         return ToResult(outcome, ingest);
     }
-
-    private static bool IsAcceptedDumpExtension(string name) =>
-        name.EndsWith(".zst", StringComparison.OrdinalIgnoreCase)
-        || name.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase)
-        || name.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// An ingest failure is not a conflict: answering 409 "one already running" sends the user

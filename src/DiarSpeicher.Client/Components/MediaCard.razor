@@ -1,0 +1,99 @@
+<a href="@Href" class="media-card" style="width: @Width">
+    <div class="media-cover">
+        <div class="media-cover-face">
+            @if (_failed)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.BrokenImage" Style="font-size: 32px; color: var(--ds-border-red)" />
+            }
+            else
+            {
+                <img src="@ImageSource" alt="" loading="lazy" @onerror="MarkFailed" />
+            }
+        </div>
+
+        @if (Scanning)
+        {
+            <div class="ds-scanline"></div>
+        }
+
+        <div class="hud-corner-tl"></div>
+        <div class="hud-corner-br"></div>
+
+        @if (!string.IsNullOrEmpty(Badge))
+        {
+            <span class="ds-pill-mono media-badge">@Badge</span>
+        }
+
+        @if (Percent > 0)
+        {
+            <div class="media-progress">
+                <div class="@ProgressClass" style="width: @(Percent)%"></div>
+            </div>
+        }
+    </div>
+
+    @if (!string.IsNullOrEmpty(Title))
+    {
+        <span class="media-title">@Title</span>
+    }
+
+    @if (!string.IsNullOrEmpty(Subtitle))
+    {
+        <span class="media-subtitle">@Subtitle</span>
+    }
+</a>
+
+@code {
+    private const int Complete = 100;
+
+    private bool _failed;
+    private string? _previousCoverUrl;
+    private string? _previousRetryKey;
+    private int _retries;
+
+    [Parameter, EditorRequired] public string Href { get; set; } = string.Empty;
+
+    [Parameter] public string? Title { get; set; }
+
+    [Parameter] public string? Subtitle { get; set; }
+
+    [Parameter, EditorRequired] public string CoverUrl { get; set; } = string.Empty;
+
+    [Parameter] public int? Progress { get; set; }
+
+    [Parameter] public string? Badge { get; set; }
+
+    [Parameter] public string Width { get; set; } = "160px";
+
+    [Parameter] public bool Scanning { get; set; }
+
+    [Parameter] public string? RetryKey { get; set; }
+
+    private int Percent => Math.Clamp(Progress ?? 0, 0, Complete);
+
+    private string ProgressClass => Percent >= Complete ? "media-progress-bar done" : "media-progress-bar";
+
+    private string ImageSource => _retries == 0 ? CoverUrl : $"{CoverUrl}{(CoverUrl.Contains('?') ? '&' : '?')}r={_retries}";
+
+    protected override void OnParametersSet()
+    {
+        if (_previousCoverUrl != CoverUrl)
+        {
+            _previousCoverUrl = CoverUrl;
+            _failed = false;
+            _retries = 0;
+        }
+
+        if (_previousRetryKey != RetryKey)
+        {
+            _previousRetryKey = RetryKey;
+            if (_failed)
+            {
+                _failed = false;
+                _retries++;
+            }
+        }
+    }
+
+    private void MarkFailed() => _failed = true;
+}

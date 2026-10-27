@@ -1,0 +1,58 @@
+@using DiarSpeicher.Core.Domain.Catalog
+@implements IDisposable
+@inject LibrariesApi Libraries
+@inject LibraryFilterState Filter
+
+<MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="library-selector">
+    <ActivatorContent>
+        <MudTooltip Text="Filtrar por biblioteca">
+            <button type="button" class="@(Filter.LibraryId is null ? "selector-button" : "selector-button active")" @onclick="args => context.ToggleAsync(args)">
+                <MudIcon Icon="@Icons.Material.Filled.Storage" Style="font-size: 16px" />
+                <span class="selector-label">@Label</span>
+                <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Style="font-size: 16px" />
+            </button>
+        </MudTooltip>
+    </ActivatorContent>
+    <ChildContent>
+        <MudMenuItem OnClick="() => Filter.Set(null)">
+            <span class="selector-item-name">@AllLabel</span>
+        </MudMenuItem>
+        @foreach (var library in _libraries)
+        {
+            <MudMenuItem @key="library.Id" OnClick="() => Filter.Set(library.Id)">
+                <span class="selector-item-name">@library.Name.ToUpperInvariant()</span>
+                <span class="selector-item-counts">@library.SeriesCount SERIES · @library.MediaCount TOMOS</span>
+            </MudMenuItem>
+        }
+    </ChildContent>
+</MudMenu>
+
+@code {
+    private const string AllLabel = "TODAS";
+
+    private List<DiarSpeicherLibraryDto> _libraries = [];
+
+    private string Label =>
+        _libraries.Find(library => library.Id == Filter.LibraryId)?.Name.ToUpperInvariant() ?? AllLabel;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Filter.Changed += OnFilterChanged;
+        try
+        {
+            _libraries = await Libraries.ListAsync() ?? [];
+        }
+        catch (ApiException)
+        {
+        }
+
+        if (Filter.LibraryId is { } saved && _libraries.Count > 0 && !_libraries.Exists(library => library.Id == saved))
+        {
+            Filter.Set(null);
+        }
+    }
+
+    public void Dispose() => Filter.Changed -= OnFilterChanged;
+
+    private void OnFilterChanged() => _ = InvokeAsync(StateHasChanged);
+}

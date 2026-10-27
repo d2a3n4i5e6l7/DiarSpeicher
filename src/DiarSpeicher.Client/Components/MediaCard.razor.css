@@ -1,0 +1,96 @@
+.media-card {
+    display: block;
+    flex-shrink: 0;
+    text-decoration: none;
+}
+
+.media-cover {
+    position: relative;
+    aspect-ratio: 2 / 3;
+    width: 100%;
+    background-color: var(--ds-metal-lo);
+    background-image: var(--ds-bevel-metal);
+    clip-path: polygon(12px 0%, 100% 0%, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0% 100%, 0% 12px);
+    transition: background-image 0.25s ease, box-shadow 0.25s ease;
+}
+
+.media-card:hover .media-cover {
+    background-image: var(--ds-bevel-metal-hot);
+    box-shadow: 0 10px 30px rgba(var(--ds-red-rgb), var(--ds-glow-a));
+}
+
+.media-cover-face {
+    position: absolute;
+    inset: 1px;
+    clip-path: polygon(11px 0%, 100% 0%, 100% calc(100% - 11px), calc(100% - 11px) 100%, 0% 100%, 0% 11px);
+    background-color: var(--ds-bg-sunken);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.media-cover-face img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.media-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+}
+
+.media-progress {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    z-index: 2;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.media-progress-bar {
+    height: 100%;
+    background-color: var(--ds-red-glow);
+}
+
+.media-progress-bar.done {
+    background-color: var(--ds-ok);
+}
+
+.media-title {
+    display: -webkit-box;
+    margin-top: 8px;
+    font-family: var(--font-tactical);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--ds-platinum);
+    transition: color 0.2s ease;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.25;
+}
+
+.media-card:hover .media-title {
+    color: var(--ds-red-light);
+}
+
+.media-subtitle {
+    display: block;
+    margin-top: 2px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    color: var(--ds-subtle);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

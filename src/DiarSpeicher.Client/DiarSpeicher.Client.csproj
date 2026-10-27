@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <RunAOTCompilation>true</RunAOTCompilation>
+    <WasmStripILAfterAOT>true</WasmStripILAfterAOT>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" />
+    <PackageReference Include="MudBlazor" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DiarSpeicher.Contracts\DiarSpeicher.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\DiarSpeicher.Core\Filesystem\SortKey.cs;..\DiarSpeicher.Core\Filesystem\ScanProgress.cs" Link="Shared\%(Filename)%(Extension)" />
+    <Compile Include="..\DiarSpeicher.Core\Filesystem\PathUtils.cs;..\DiarSpeicher.Core\Filesystem\ContentType.cs" Link="Shared\%(Filename)%(Extension)" />
+    <Compile Include="..\DiarSpeicher.Core\Domain\Models\Permissions.cs;..\DiarSpeicher.Core\Domain\Models\AuthUser.cs" Link="Shared\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

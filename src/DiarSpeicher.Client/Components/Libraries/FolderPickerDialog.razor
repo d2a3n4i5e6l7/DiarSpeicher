@@ -1,0 +1,127 @@
+<MudDialog Visible="Visible" VisibleChanged="VisibleChanged" Options="PickerOptions">
+    <TitleContent>// Elegir carpeta</TitleContent>
+    <DialogContent>
+        <div class="picker-roots">
+            @foreach (var root in _roots)
+            {
+                <MudTooltip Text="@(root.Mounted ? root.Path : $"{root.Path} · no montado")">
+                    <MudChip T="string" Text="@root.Name" Size="Size.Small" Disabled="!root.Mounted"
+                             Variant="@(Current.StartsWith(root.Path, StringComparison.Ordinal) ? Variant.Filled : Variant.Outlined)"
+                             OnClick="() => BrowseAsync(root.Path)" />
+                </MudTooltip>
+            }
+        </div>
+
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+        }
+
+        <div class="picker-row">
+            <MudTextField T="string" Value="_query" ValueChanged="OnQueryChanged" Immediate="true" Placeholder="Buscar carpeta por nombre..."
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+            <MudTooltip Text="Reconstruir el índice de nombres">
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Variant="Variant.Outlined" Disabled="_indexing" OnClick="RebuildIndexAsync" />
+            </MudTooltip>
+        </div>
+
+        <div class="picker-path">
+            <MudTooltip Text="@(_listing?.Parent is null ? "Ya estas en la carpeta raíz" : "Subir un nivel")">
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Variant="Variant.Outlined"
+                               Disabled="@(_listing?.Parent is null || _loading)" OnClick="() => BrowseAsync(_listing?.Parent)" />
+            </MudTooltip>
+            <span class="picker-current">@(Current.Length > 0 ? Current : "—")</span>
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.CreateNewFolder" Disabled="@(Current.Length == 0 || _loading)" OnClick="OpenNewFolder" Class="ds-button-ghost picker-new">NUEVA CARPETA</MudButton>
+        </div>
+
+        <div class="picker-list">
+            @if (_hits is not null)
+            {
+                @foreach (var hit in _hits)
+                {
+                    <div class="picker-item" @key="hit.Path">
+                        <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" Style="color: var(--ds-red-glow)" />
+                        <div class="picker-item-text">
+                            <span class="picker-item-name">@hit.Name</span>
+                            <span class="picker-item-parent">@hit.Parent</span>
+                        </div>
+                        <MudButton Size="Size.Small" OnClick="() => OpenHitAsync(hit)">Abrir</MudButton>
+                        <MudButton Size="Size.Small" Disabled="IsRoot(hit.Path)" OnClick="() => ChooseAsync(hit.Path)">Usar</MudButton>
+                    </div>
+                }
+                @if (_hits.Count == 0)
+                {
+                    <div class="picker-state">Sin coincidencias. Si es una carpeta nueva, reconstruye el índice.</div>
+                }
+            }
+            else if (_loading)
+            {
+                <div class="picker-state"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>
+            }
+            else if (_listing is { Entries.Count: 0 })
+            {
+                <div class="picker-state">
+                    <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Style="font-size: 38px; color: var(--ds-border-red)" />
+                    <span>Esta carpeta no tiene subcarpetas.</span>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="OpenNewFolder" Class="picker-create">
+                        CREAR CARPETA AQUÍ
+                    </MudButton>
+                </div>
+            }
+            else if (_listing is not null)
+            {
+                @foreach (var entry in _listing.Entries)
+                {
+                    <div class="@(entry.Readable ? "picker-item" : "picker-item locked")" @key="entry.Path" @ondblclick="() => ChooseAsync(entry.Path)">
+                        <button type="button" class="picker-enter" disabled="@(!entry.Readable)" @onclick="() => BrowseAsync(entry.Path)">
+                            <MudIcon Icon="@(entry.Readable ? Icons.Material.Filled.Folder : Icons.Material.Filled.Lock)" Size="Size.Small"
+                                     Style="@(entry.Readable ? "color: var(--ds-red-glow)" : "color: var(--ds-subtle)")" />
+                            <span class="picker-item-name">@entry.Name</span>
+                            @if (entry.FileCount > 0)
+                            {
+                                <span class="picker-item-files">@entry.FileCount fich.</span>
+                            }
+                        </button>
+                        <MudButton Size="Size.Small" Disabled="!entry.Readable" OnClick="() => ChooseAsync(entry.Path)">Usar</MudButton>
+                    </div>
+                }
+            }
+        </div>
+
+        @if (_listing?.Truncated == true)
+        {
+            <span class="picker-truncated">Hay más carpetas de las que caben en la lista. Entra en una para acotar.</span>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseAsync" Class="ds-button-muted">Cancelar</MudButton>
+        @if (CurrentIsRoot)
+        {
+            <span class="picker-root-note">Una raíz no puede ser una biblioteca. Entra o crea una carpeta dentro.</span>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(Current.Length == 0 || _loading || CurrentIsRoot)"
+                   OnClick="() => ChooseAsync(Current)">Usar esta carpeta</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_newFolderOpen" Options="NewFolderOptions">
+    <TitleContent>// Nueva carpeta</TitleContent>
+    <DialogContent>
+        <form id="new-folder-form" @onsubmit="CreateFolderAsync">
+            <span class="picker-location">Ubicación: @Current</span>
+            @if (_folderCreateError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-4">@_folderCreateError</MudAlert>
+            }
+            <MudTextField T="string" @bind-Value="_newFolderName" Immediate="true" AutoFocus="true" Label="Nombre de la carpeta"
+                          Placeholder="ej. Manga, Novelas, Comics" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_creatingFolder" />
+        </form>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Disabled="_creatingFolder" OnClick="() => _newFolderOpen = false" Class="ds-button-muted">Cancelar</MudButton>
+        <MudButton ButtonType="ButtonType.Submit" form="new-folder-form" Variant="Variant.Filled" Color="Color.Primary"
+                   Disabled="@(_newFolderName.Trim().Length == 0 || _creatingFolder)">
+            @(_creatingFolder ? "Creando..." : "Crear")
+        </MudButton>
+    </DialogActions>
+</MudDialog>

@@ -1,0 +1,13 @@
+@if (!string.IsNullOrEmpty(Value))
+{
+    <div class="detail-row">
+        <span class="detail-row-label">@Label</span>
+        <span class="detail-row-value">@Value</span>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    [Parameter] public string? Value { get; set; }
+}

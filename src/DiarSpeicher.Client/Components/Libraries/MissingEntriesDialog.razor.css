@@ -1,0 +1,52 @@
+.missing-list {
+    max-height: 240px;
+    overflow-y: auto;
+    margin-bottom: 16px;
+    border: 1px solid var(--ds-border);
+}
+
+.missing-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--ds-border-soft);
+}
+
+.missing-text {
+    flex-grow: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.missing-name,
+.missing-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.missing-name {
+    font-family: var(--font-tactical);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--ds-platinum);
+}
+
+.missing-path {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ds-subtle);
+}
+
+.missing-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ds-muted);
+}
+
+.missing-orphans {
+    font-size: 12px;
+    color: var(--ds-muted);
+}
